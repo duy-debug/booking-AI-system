@@ -2,4 +2,13 @@
 name = "booking-ai-system-be"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "sqlalchemy",
+    "alembic",
+    "psycopg2-binary",
+    "supabase",
+    "openai",
+    "python-dotenv",
+]
