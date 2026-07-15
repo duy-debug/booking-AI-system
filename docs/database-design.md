@@ -20,6 +20,17 @@ erDiagram
 
     COURSES ||--o{ RESERVATION_COURSES : "used in"
 
+    CUSTOMER_RESTRICTIONS ||--|| "NG list"
+
+    CUSTOMER_RESTRICTIONS {
+        uuid restriction_id PK
+        varchar phone
+        varchar reason
+        boolean is_active
+        timestamp created_at
+        timestamp updated_at
+    }
+
     SHOPS {
         uuid shop_id PK
         varchar shop_code UK
@@ -143,6 +154,7 @@ Database này được thiết kế để quản lý toàn bộ luồng đặt l
 * Therapist không được bị gán trùng giờ.
 * Số điện thoại thuộc NG list thì không cho tạo booking.
 * Slot không lưu thành bảng riêng vì slot là kết quả tính toán từ shop, ngày, dịch vụ, duration, therapist shift, reservation hiện có và POS.
+* `CustomerRestriction` là NG list — chứa số điện thoại bị cấm tạo booking.
 
 # Note
 
