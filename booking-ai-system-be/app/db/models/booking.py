@@ -26,6 +26,9 @@ class Booking(TimestampMixin, Base):
     pos_booking_code: Mapped[str | None] = mapped_column(
         String(50), unique=True, index=True  # Mã booking bên POS (có sau khi POS xác nhận)
     )
+    pos_sync_status: Mapped[str] = mapped_column(
+        String(20), default="pending", nullable=False  # pending, synced, failed, cancelled
+    )
     booking_date: Mapped[date] = mapped_column(Date, nullable=False)  # Ngày đặt
     start_time: Mapped[time] = mapped_column(Time, nullable=False)  # Giờ bắt đầu
     end_time: Mapped[time] = mapped_column(Time, nullable=False)  # Giờ kết thúc

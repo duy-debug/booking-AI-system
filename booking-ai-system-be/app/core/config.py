@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = "admin123"  # Đổi trong .env
 
+    # POS Integration
+    POS_MODE: str = "mock"  # "mock" | "real" — mock dùng cho dev, real khi có POS API
+    POS_BASE_URL: str | None = None  # URL gốc của POS API (VD: https://pos.example.com/api)
+    POS_API_KEY: str | None = None  # API key để gọi POS
+
     # CORS — cho phép FE local dev
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 

@@ -119,6 +119,7 @@ class BookingResponse(BaseModel):
 
     booking_id: UUID
     pos_booking_code: str | None = None
+    pos_sync_status: str = "pending"
     shop_id: UUID
     customer_id: UUID
     booking_date: date
@@ -144,6 +145,7 @@ class BookingListItem(BaseModel):
 
     booking_id: UUID
     pos_booking_code: str | None = None
+    pos_sync_status: str = "pending"
     shop_id: UUID
     booking_date: date
     start_time: time

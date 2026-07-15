@@ -1,5 +1,5 @@
 # Public — Available Slots & Available Therapists
-# Slot là computed resource: tính từ shift - reservation đã có
+# Slot là computed resource: tính từ shift - reservation - POS availability
 
 from datetime import date, datetime, time, timedelta
 
@@ -19,6 +19,7 @@ from app.db.models.reservation import Reservation
 from app.db.models.shop import Shop
 from app.db.models.therapist import Therapist
 from app.db.models.therapist_shift import TherapistShift
+from app.integrations.pos import get_pos_client
 
 router = APIRouter(prefix="/api/shops/{shop_id}", tags=["public-slots"])
 
@@ -226,6 +227,24 @@ def list_available_slots(
                 ).model_dump(mode="json")
             )
             cursor += step
+
+    # ===== POS Integration: kiểm tra availability từ POS =====
+    # Lấy danh sách slot từ POS và đánh dấu conflict
+    if slots:
+        pos = get_pos_client()
+        pos_slots = pos.get_available_slots(
+            pos_shop_code=shop.pos_shop_code,
+            booking_date=bdate,
+            total_duration_minutes=total_duration,
+            number_of_people=number_of_people,
+        )
+        if pos_slots:
+            # Tạo set các start_time mà POS xác nhận available
+            pos_available_starts = {s.start_time.isoformat() for s in pos_slots if s.available}
+            for slot in slots:
+                if slot["start_time"] not in pos_available_starts:
+                    slot["available"] = False
+                    slot["reason"] = "SLOT_NOT_AVAILABLE_IN_POS"
 
     return {
         "data": slots,
