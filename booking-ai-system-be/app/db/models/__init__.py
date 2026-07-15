@@ -7,6 +7,7 @@ from app.db.models.booking import Booking
 from app.db.models.reservation import Reservation
 from app.db.models.reservation_course import ReservationCourse
 from app.db.models.customer_restriction import CustomerRestriction
+from app.db.models.knowledge_chunk import KnowledgeChunk
 
 __all__ = [
     "Shop",
@@ -18,4 +19,5 @@ __all__ = [
     "Reservation",
     "ReservationCourse",
     "CustomerRestriction",
+    "KnowledgeChunk",
 ]

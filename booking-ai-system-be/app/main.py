@@ -18,6 +18,7 @@ from app.api.public.bookings import router as public_bookings_router
 from app.api.public.therapist_schedule import router as therapist_schedule_router
 from app.api.admin.bookings import router as admin_bookings_router
 from app.api.public.auth import router as auth_router
+from app.rag.router import router as rag_router
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -91,6 +92,9 @@ app.include_router(public_bookings_router)
 app.include_router(therapist_schedule_router)
 app.include_router(admin_bookings_router)
 app.include_router(auth_router)
+
+# RAG — chat / knowledge base
+app.include_router(rag_router)
 
 
 @app.get("/")
