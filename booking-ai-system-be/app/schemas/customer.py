@@ -8,8 +8,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 
+# Response chi tiết khách hàng
 class CustomerResponse(BaseModel):
-    """Response chi tiết khách hàng"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -22,8 +22,8 @@ class CustomerResponse(BaseModel):
     last_synced_at: datetime | None = None
 
 
+# Customer dạng rút gọn — dùng trong nesting
 class CustomerBrief(BaseModel):
-    """Customer dạng rút gọn — dùng trong nesting"""
 
     model_config = ConfigDict(from_attributes=True)
 

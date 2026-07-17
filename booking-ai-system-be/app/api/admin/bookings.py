@@ -1,23 +1,20 @@
-# Admin — Booking monitoring (danh sách + detail — nhiều field hơn public)
-
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, parse_uuid
 from app.core.auth import get_current_admin
 from app.core.exceptions import AppError
-from app.db.models.booking import Booking
-from app.db.models.customer import Customer
-from app.db.models.reservation import Reservation
-from app.db.models.reservation_course import ReservationCourse
-from app.db.models.shop import Shop
+from app.repositories.booking_repository import BookingRepository
+from app.repositories.shop_repository import ShopRepository
+from app.repositories.customer_repository import CustomerRepository
+from app.repositories.reservation_repository import ReservationRepository
 
 router = APIRouter(prefix="/api/admin/bookings", tags=["admin-bookings"], dependencies=[Depends(get_current_admin)])
 
 
+# Danh sách booking (admin) — lọc theo shop, ngày, trạng thái, số điện thoại, mã POS
 @router.get("")
 def list_admin_bookings(
     shop_id: str | None = Query(None),
@@ -29,27 +26,18 @@ def list_admin_bookings(
     cursor: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    # Danh sách booking cho admin — kèm customer info
-    stmt = select(Booking).options(joinedload(Booking.customer))
+    suid = parse_uuid(shop_id, "shop") if shop_id else None
+    bd = date.fromisoformat(booking_date) if booking_date else None
 
-    if shop_id:
-        suid = parse_uuid(shop_id, "shop")
-        stmt = stmt.where(Booking.shop_id == suid)
-    if booking_date:
-        try:
-            bd = date.fromisoformat(booking_date)
-            stmt = stmt.where(Booking.booking_date == bd)
-        except ValueError:
-            raise AppError(400, code="INVALID_QUERY_PARAMETER", detail="booking_date khong dung format YYYY-MM-DD")
-    if status:
-        stmt = stmt.where(Booking.status == status)
-    if phone:
-        stmt = stmt.join(Customer).where(Customer.phone == phone)
-    if pos_booking_code:
-        stmt = stmt.where(Booking.pos_booking_code == pos_booking_code)
-
-    stmt = stmt.order_by(Booking.created_at.desc()).limit(limit + 1)
-    bookings = db.scalars(stmt).unique().all()
+    booking_repo = BookingRepository(db)
+    bookings = booking_repo.find_admin_all(
+        shop_id=suid,
+        booking_date=bd,
+        status=status or None,
+        phone=phone or None,
+        pos_booking_code=pos_booking_code or None,
+        limit=limit + 1,
+    )
 
     has_more = len(bookings) > limit
     if has_more:
@@ -82,31 +70,27 @@ def list_admin_bookings(
     }
 
 
+# Chi tiết booking (admin) — kèm thông tin khách hàng, shop, reservation, course
 @router.get("/{booking_id}")
 def get_admin_booking(booking_id: str, db: Session = Depends(get_db)):
-    # Chi tiết booking cho admin — kèm shop, customer, reservations, course snapshots
     uid = parse_uuid(booking_id, "booking")
-    booking = db.get(Booking, uid)
+    booking_repo = BookingRepository(db)
+    booking = booking_repo.find_by_id(uid)
     if not booking:
         raise AppError(404, code="BOOKING_NOT_FOUND", detail="Khong tim thay booking")
 
-    # Shop
-    shop = db.get(Shop, booking.shop_id)
-    # Customer
-    customer = db.get(Customer, booking.customer_id)
-    # Reservations + courses
-    reservations = db.scalars(
-        select(Reservation)
-        .where(Reservation.booking_id == uid)
-        .order_by(Reservation.person_index)
-    ).all()
+    shop_repo = ShopRepository(db)
+    shop = shop_repo.find_by_id(booking.shop_id)
+
+    customer_repo = CustomerRepository(db)
+    customer = customer_repo.find_by_id(booking.customer_id)
+
+    reservation_repo = ReservationRepository(db)
+    reservations = reservation_repo.find_by_booking(uid)
 
     res_list = []
     for res in reservations:
-        courses = db.scalars(
-            select(ReservationCourse)
-            .where(ReservationCourse.reservation_id == res.reservation_id)
-        ).all()
+        courses = reservation_repo.find_courses_by_reservation(res.reservation_id)
         res_list.append({
             "reservation_id": str(res.reservation_id),
             "person_index": res.person_index,

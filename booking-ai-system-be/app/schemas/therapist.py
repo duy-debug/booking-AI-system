@@ -8,8 +8,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
+# Tạo therapist mới — request body
 class TherapistCreate(BaseModel):
-    """Tạo therapist mới — request body"""
 
     pos_therapist_code: str
     name: str
@@ -17,16 +17,16 @@ class TherapistCreate(BaseModel):
     is_active: bool = True
 
 
+# Cập nhật therapist — tất cả field đều optional (PATCH)
 class TherapistUpdate(BaseModel):
-    """Cập nhật therapist — tất cả field đều optional (PATCH)"""
 
     name: str | None = None
     gender: str | None = Field(None, pattern=r"^(male|female)$")
     is_active: bool | None = None
 
 
+# Response chi tiết therapist
 class TherapistResponse(BaseModel):
-    """Response chi tiết therapist"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -40,8 +40,8 @@ class TherapistResponse(BaseModel):
     updated_at: datetime
 
 
+# Therapist dạng rút gọn — dùng trong nesting
 class TherapistBrief(BaseModel):
-    """Therapist dạng rút gọn — dùng trong nesting"""
 
     model_config = ConfigDict(from_attributes=True)
 

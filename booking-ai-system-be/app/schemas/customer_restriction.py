@@ -8,23 +8,23 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 
+# Tạo restriction mới — request body
 class RestrictionCreate(BaseModel):
-    """Tạo restriction mới — request body"""
 
     phone: str
     reason: str | None = None
     is_active: bool = True
 
 
+# Cập nhật restriction — tất cả field đều optional (PATCH)
 class RestrictionUpdate(BaseModel):
-    """Cập nhật restriction — tất cả field đều optional (PATCH)"""
 
     reason: str | None = None
     is_active: bool | None = None
 
 
+# Response chi tiết restriction
 class RestrictionResponse(BaseModel):
-    """Response chi tiết restriction"""
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -1,73 +1,50 @@
-# Admin CRUD — Shops (cửa hàng massage)
-
 from fastapi import APIRouter, Depends, Query
 from app.core.exceptions import AppError
 from app.core.auth import get_current_admin
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, parse_uuid
-from app.api.schemas.shop import ShopCreate, ShopResponse, ShopUpdate
-from app.db.models.shop import Shop
+from app.schemas.shop import ShopCreate, AdminShopResponse, ShopUpdate
+from app.services.shop_service import ShopService
 
 router = APIRouter(prefix="/api/admin/shops", tags=["admin-shops"], dependencies=[Depends(get_current_admin)])
 
 
+# Danh sách shop — lọc theo trạng thái hoạt động
 @router.get("")
 def list_shops(
     is_active: bool | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    # Danh sách shop — filter theo is_active
-    stmt = select(Shop)
-    if is_active is not None:
-        stmt = stmt.where(Shop.is_active == is_active)
-    shops = db.scalars(stmt.order_by(Shop.shop_code)).all()
+    service = ShopService(db)
+    shops = service.list(is_active=is_active)
     return {
-        "data": [ShopResponse.model_validate(s).model_dump(mode="json") for s in shops],
+        "data": [AdminShopResponse.model_validate(s).model_dump(mode="json") for s in shops],
         "meta": {"total": len(shops)},
     }
 
 
+# Tạo shop mới — shop_code và pos_shop_code phải duy nhất
 @router.post("", status_code=201)
 def create_shop(body: ShopCreate, db: Session = Depends(get_db)):
-    # Tạo shop mới
-    # Check trùng shop_code
-    exist = db.scalar(select(Shop).where(Shop.shop_code == body.shop_code))
-    if exist:
-        raise AppError(409, code="SHOP_CODE_ALREADY_EXISTS", detail="shop_code đã tồn tại")
-    # Check trùng pos_shop_code
-    exist = db.scalar(select(Shop).where(Shop.pos_shop_code == body.pos_shop_code))
-    if exist:
-        raise AppError(409, code="POS_SHOP_CODE_ALREADY_EXISTS", detail="pos_shop_code đã tồn tại")
-
-    shop = Shop(**body.model_dump())
-    db.add(shop)
-    db.commit()
-    db.refresh(shop)
-    return {"data": ShopResponse.model_validate(shop).model_dump(mode="json")}
+    service = ShopService(db)
+    shop = service.create(body)
+    return {"data": AdminShopResponse.model_validate(shop).model_dump(mode="json")}
 
 
+# Chi tiết shop theo ID
 @router.get("/{shop_id}")
 def get_shop(shop_id: str, db: Session = Depends(get_db)):
-    # Chi tiết shop
     uid = parse_uuid(shop_id, "shop")
-    shop = db.get(Shop, uid)
-    if not shop:
-        raise AppError(404, code="SHOP_NOT_FOUND", detail="Không tìm thấy shop")
-    return {"data": ShopResponse.model_validate(shop).model_dump(mode="json")}
+    service = ShopService(db)
+    shop = service.get(uid)
+    return {"data": AdminShopResponse.model_validate(shop).model_dump(mode="json")}
 
 
+# Cập nhật shop — chỉ gửi các field cần thay đổi
 @router.patch("/{shop_id}")
 def update_shop(shop_id: str, body: ShopUpdate, db: Session = Depends(get_db)):
-    # Cập nhật shop (partial update)
     uid = parse_uuid(shop_id, "shop")
-    shop = db.get(Shop, uid)
-    if not shop:
-        raise AppError(404, code="SHOP_NOT_FOUND", detail="Không tìm thấy shop")
-
-    for field, value in body.model_dump(exclude_unset=True).items():
-        setattr(shop, field, value)
-    db.commit()
-    db.refresh(shop)
-    return {"data": ShopResponse.model_validate(shop).model_dump(mode="json")}
+    service = ShopService(db)
+    shop = service.update(uid, body)
+    return {"data": AdminShopResponse.model_validate(shop).model_dump(mode="json")}

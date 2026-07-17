@@ -7,8 +7,8 @@ from .common import (
     ValidationErrorDetail,
 )
 
-from .shop import ShopCreate, ShopUpdate, ShopResponse, ShopBrief
-from .course import CourseCreate, CourseUpdate, CourseResponse
+from .shop import ShopCreate, ShopUpdate, AdminShopResponse, PublicShopResponse, ShopBrief
+from .course import CourseCreate, CourseUpdate, AdminCourseResponse, PublicCourseResponse
 from .therapist import TherapistCreate, TherapistUpdate, TherapistResponse, TherapistBrief
 from .therapist_shift import ShiftCreate, ShiftUpdate, ShiftResponse
 from .customer import CustomerResponse, CustomerBrief
@@ -23,8 +23,10 @@ from .booking import (
     BookingPatchInput,
     BookingEligibilityCheckInput,
     BookingEligibilityCheckResponse,
-    BookingResponse,
-    BookingListItem,
+    AdminBookingResponse,
+    AdminBookingListItem,
+    PublicBookingResponse,
+    PublicBookingListItem,
     ReservationResponse,
     ReservationCourseResponse,
 )
@@ -42,11 +44,13 @@ __all__ = [
     "ValidationErrorDetail",
     "ShopCreate",
     "ShopUpdate",
-    "ShopResponse",
+    "AdminShopResponse",
+    "PublicShopResponse",
     "ShopBrief",
     "CourseCreate",
     "CourseUpdate",
-    "CourseResponse",
+    "AdminCourseResponse",
+    "PublicCourseResponse",
     "TherapistCreate",
     "TherapistUpdate",
     "TherapistResponse",
@@ -69,8 +73,10 @@ __all__ = [
     "BookingPatchInput",
     "BookingEligibilityCheckInput",
     "BookingEligibilityCheckResponse",
-    "BookingResponse",
-    "BookingListItem",
+    "AdminBookingResponse",
+    "AdminBookingListItem",
+    "PublicBookingResponse",
+    "PublicBookingListItem",
     "ReservationResponse",
     "ReservationCourseResponse",
     "AvailableSlotQuery",

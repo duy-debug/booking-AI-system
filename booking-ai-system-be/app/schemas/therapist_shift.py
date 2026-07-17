@@ -8,8 +8,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 
+# Tạo ca làm việc mới — request body
 class ShiftCreate(BaseModel):
-    """Tạo ca làm việc mới — request body"""
 
     shop_id: UUID
     therapist_id: UUID
@@ -19,16 +19,16 @@ class ShiftCreate(BaseModel):
     is_active: bool = True
 
 
+# Cập nhật ca làm việc — tất cả field đều optional (PATCH)
 class ShiftUpdate(BaseModel):
-    """Cập nhật ca làm việc — tất cả field đều optional (PATCH)"""
 
     start_time: time | None = None
     end_time: time | None = None
     is_active: bool | None = None
 
 
+# Response chi tiết ca làm việc
 class ShiftResponse(BaseModel):
-    """Response chi tiết ca làm việc"""
 
     model_config = ConfigDict(from_attributes=True)
 

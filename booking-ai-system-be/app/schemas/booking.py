@@ -1,4 +1,4 @@
-# Schema cho Booking — đặt lịch massage (bao gồm Reservation + ReservationCourse lồng bên trong)
+# Schema cho Booking — request/response models
 
 from __future__ import annotations
 
@@ -8,35 +8,27 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
-# ────────────── Input (request) schemas ──────────────
-
-
+# Course trong booking — gồm course_id và vai trò (main/addon)
 class BookingCourseInput(BaseModel):
-    """Course được chọn trong booking — request body"""
-
     course_id: UUID
     course_role: str = Field(..., pattern=r"^(main|addon)$")
 
 
+# Yêu cầu therapist — none, specific (theo ID) hoặc gender (theo giới tính)
 class TherapistRequestInput(BaseModel):
-    """Yêu cầu therapist — request body"""
-
     type: str = Field(..., pattern=r"^(none|specific|gender)$")
     therapist_id: UUID | None = None
     gender: str | None = Field(None, pattern=r"^(male|female)$")
 
 
+# Thông tin khách hàng khi tạo booking
 class CustomerInput(BaseModel):
-    """Thông tin khách hàng gửi lên — request body"""
-
     phone: str
     name: str | None = None
 
 
+# Tạo booking mới — request body
 class BookingCreate(BaseModel):
-    """Tạo booking mới — request body (POST /api/bookings)"""
-
     shop_id: UUID
     booking_date: date
     start_time: time
@@ -47,27 +39,22 @@ class BookingCreate(BaseModel):
     confirmed_by_customer: bool = True
 
 
+# Cập nhật booking — các field có thể thay đổi
 class BookingUpdate(BaseModel):
-    """Cập nhật booking — request body (PATCH /api/bookings/{id})"""
-
     booking_date: date | None = None
     start_time: time | None = None
     courses: list[BookingCourseInput] | None = None
     therapist_request: TherapistRequestInput | None = None
 
 
+# Huỷ booking — request body
 class BookingCancelInput(BaseModel):
-    """Hủy booking — request body"""
-
     status: str = Field(..., pattern=r"^cancelled$")
     cancel_reason: str | None = None
 
 
+# Patch booking — tất cả field đều optional
 class BookingPatchInput(BaseModel):
-    """Cập nhật hoặc hủy booking — dùng chung cho PATCH /api/bookings/{id}
-    - Nếu gửi status=cancelled → hủy booking
-    - Nếu gửi các field khác → cập nhật booking"""
-
     status: str | None = None
     cancel_reason: str | None = None
     booking_date: date | None = None
@@ -76,19 +63,14 @@ class BookingPatchInput(BaseModel):
     therapist_request: TherapistRequestInput | None = None
 
 
+# Kiểm tra điều kiện đặt lịch — request body
 class BookingEligibilityCheckInput(BaseModel):
-    """Kiểm tra eligibility — request body (POST /api/booking-eligibility-checks)"""
-
     phone: str
     shop_id: UUID
 
 
-# ────────────── Output (response) schemas ──────────────
-
-
+# Response course trong reservation — snapshot giá trị tại thời điểm đặt
 class ReservationCourseResponse(BaseModel):
-    """Course snapshot trong reservation — response"""
-
     model_config = ConfigDict(from_attributes=True)
 
     course_id: UUID
@@ -98,9 +80,8 @@ class ReservationCourseResponse(BaseModel):
     price_snapshot: Decimal
 
 
+# Response chi tiết reservation — thông tin therapist, giờ, danh sách course
 class ReservationResponse(BaseModel):
-    """Reservation (một người trong booking) — response"""
-
     model_config = ConfigDict(from_attributes=True)
 
     reservation_id: UUID
@@ -112,9 +93,8 @@ class ReservationResponse(BaseModel):
     courses: list[ReservationCourseResponse] = []
 
 
-class BookingResponse(BaseModel):
-    """Response chi tiết booking — dùng cho GET /api/bookings/{id}"""
-
+# Response chi tiết booking (admin) — gồm tất cả field kể cả POS, reservation
+class AdminBookingResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     booking_id: UUID
@@ -138,9 +118,8 @@ class BookingResponse(BaseModel):
     reservations: list[ReservationResponse] = []
 
 
-class BookingListItem(BaseModel):
-    """Booking dạng danh sách — response cho GET /api/bookings"""
-
+# Response danh sách booking (admin) — dạng rút gọn, không có reservation
+class AdminBookingListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     booking_id: UUID
@@ -155,11 +134,47 @@ class BookingListItem(BaseModel):
     status: str
 
 
-class BookingEligibilityCheckResponse(BaseModel):
-    """Kết quả kiểm tra eligibility"""
+# Response chi tiết booking (public) — không có POS field
+class PublicBookingResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
+    booking_id: UUID
+    shop_id: UUID
+    customer_id: UUID
+    booking_date: date
+    start_time: time
+    end_time: time
+    number_of_people: int
+    total_duration_minutes: int
+    status: str
+    therapist_request_type: str
+    requested_therapist_id: UUID | None = None
+    requested_gender: str | None = None
+    cancel_reason: str | None = None
+    cancelled_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    reservations: list[ReservationResponse] = []
+
+
+# Response danh sách booking (public) — dạng rút gọn
+class PublicBookingListItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    booking_id: UUID
+    shop_id: UUID
+    booking_date: date
+    start_time: time
+    end_time: time
+    number_of_people: int
+    total_duration_minutes: int
+    status: str
+
+
+# Response kiểm tra điều kiện đặt lịch
+class BookingEligibilityCheckResponse(BaseModel):
     check_id: UUID
     phone: str
     eligible: bool
-    customer: dict | None = None  # CustomerBrief-like dict
-    restriction: dict | None = None  # RestrictionResponse-like dict
+    customer: dict | None = None
+    restriction: dict | None = None
