@@ -11,7 +11,7 @@ Hệ thống gồm 3 thành phần: **Frontend** (Next.js), **Backend** (FastAPI
 │   Frontend (FE)      │   Backend (BE)         │   Chatbot (AI)       │
 │   Next.js 16 + React │   FastAPI + Python 3.12│   FastAPI + Python   │
 │   TypeScript         │   PostgreSQL / Supabase │   3.12               │
-│   Tailwind CSS v4    │   + Alembic + pgvector │   + Qdrant + Groq   │
+│   Tailwind CSS v4    │   + Alembic           │   + Qdrant + Groq   │
 │   Port 3000          │   Port 8000            │   Port 8001          │
 ├──────────────────────┴────────────────────────┴──────────────────────┤
 │   Docker: Backend container (root Dockerfile)                        │
@@ -57,32 +57,45 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 
 ## Backend — `booking-ai-system-be/`
 
-**Công nghệ:** FastAPI + Python 3.12 + Supabase (PostgreSQL) + Alembic + Groq
+**Công nghệ:** FastAPI + Python 3.12 + Supabase (PostgreSQL) + Alembic + PyJWT
 
-### Cấu trúc thư mục
+### Cấu trúc thư mục (layered)
 
 ```
 app/
-├── api/           # REST API endpoints (admin + public)
-│   ├── admin/     # Shops, courses, therapists, shifts, bookings, restrictions
-│   └── public/    # Shops, slots, eligibility, bookings, auth, therapist schedule
-├── core/          # Config, auth, dependencies, Supabase client
-├── db/            # SQLAlchemy models, migrations (Alembic)
-├── integrations/  # Third-party integrations (POS removed)
-├── modules/       # Business logic modules
-└── rag/           # Legacy RAG (pgvector) — knowledge base search
-    ├── chain.py
-    ├── embeddings.py
-    ├── ingestion.py
-    ├── prompts.py
-    ├── router.py
-    └── vector_store.py
+├── main.py         # FastAPI entrypoint — routers, CORS, RFC 9457 exception handlers
+├── api/           # REST API endpoints (routers — lớp mỏng, không thao tác DB)
+│   ├── admin/     # /api/admin/* — Shops, courses, therapists, shifts, bookings, restrictions
+│   ├── public/    # /api/* — Shops, slots, eligibility, bookings, auth, therapist schedule
+│   └── deps.py    # get_db(), parse_uuid()
+├── services/       # Business logic — SỞ HỮU transaction (commit/rollback/refresh)
+├── repositories/   # Data-access mỏng — chỉ query + add/flush, KHÔNG commit
+├── schemas/        # Pydantic request/response models
+├── core/          # Config, auth (JWT), exceptions (RFC 9457), Supabase client
+├── db/            # SQLAlchemy models, session, base
+│   └── models/    # Shop, Course, Therapist, TherapistShift, Customer,
+│                   # Booking, Reservation, ReservationCourse, CustomerRestriction
+└── scripts/       # Seed dữ liệu mẫu (seed_data.py)
 ```
+
+### Nguyên tắc phân lớp (layering)
+
+1. **Routers (`api/`)** — mỏng: parse request → gọi Service → trả response.
+   Không `session.add` / `commit` / `refresh` trực tiếp.
+2. **Services (`services/`)** — sở hữu transaction:
+   `try → repo.save → session.commit() → session.refresh() → except → session.rollback() → raise`.
+   Chứa toàn bộ business validation (mã duy nhất, overlap ca làm việc, NG list…).
+3. **Repositories (`repositories/`)** — chỉ truy vấn và `add`/`flush`; không `commit`/`rollback`.
+4. **Admin vs Public** — `/api/admin/*` yêu cầu JWT; `/api/*` công khai.
 
 - **REST API:** Quản lý shops, courses, therapists, shifts, bookings, customer restrictions, auth
 - **Database:** PostgreSQL qua SQLAlchemy, migration bằng Alembic
-- **RAG (legacy):** Dùng pgvector trên PostgreSQL, sentence-transformers embedding, Groq LLM
-- **POS:** Đã xóa hoàn toàn (RealPOSClient, router, tests)
+- **RAG:** Đã **tách hoàn toàn** khỏi backend. Vector search (Qdrant + Groq) nằm trong
+  service độc lập `booking-ai-chatbot/` (xem mục Chatbot). Backend không còn thư mục
+  `app/rag/` hay `app/modules/`.
+- **POS:** Đã xóa hoàn toàn (RealPOSClient, router, tests).
+- **Legacy schema leftover:** Bảng `kb_chunks` + model `KnowledgeChunk` là phần dư của RAG cũ,
+  chưa được dùng ở bất kỳ code path nào và sẽ được xoá trong đợt dọn dẹp schema tiếp theo.
 
 ### Biến môi trường
 
@@ -91,9 +104,6 @@ DATABASE_URL=postgresql://<user>:<password>@<host>:5432/postgres
 SUPABASE_URL=https://<project>.supabase.co
 SUPABASE_SERVICE_KEY=<service_role_key>
 SUPABASE_ANON_KEY=<anon_key>
-GROQ_API_KEY=gsk-...
-GROQ_MODEL=mixtral-8x7b-32768
-GROQ_BASE_URL=https://api.groq.com/openai/v1
 JWT_SECRET=...
 JWT_ALGORITHM=HS256
 JWT_EXPIRE_MINUTES=1440
@@ -180,10 +190,12 @@ ADMIN_API_KEY=change-me-in-production
 - **Migration:** Alembic
 - **Client BE:** SQLAlchemy + `supabase-py` (service key)
 - **Client FE:** `@supabase/supabase-js` (anon key, RLS)
-- **Auth:** Supabase Auth (email/password, OAuth, magic link)
-- **Vector:** pgvector extension cho RAG legacy trên BE
+- **Auth:** Supabase Auth (email/password, OAuth, magic link) + JWT nội bộ cho Admin API
+- **Vector:** pgvector extension — chỉ còn trong `kb_chunks` (legacy RAG, sẽ xoá).
+  RAG thực tế giờ chạy trên **Qdrant** bên phía Chatbot, không phải PostgreSQL.
 
-Các bảng chính: `bookings`, `shops`, `courses`, `therapists`, `therapist_shifts`, `customer_restrictions`, `kb_chunks`
+Các bảng chính: `bookings`, `shops`, `courses`, `therapists`, `therapist_shifts`,
+`customer_restrictions`, `reservations`, `reservation_courses`
 
 ### Qdrant — Chatbot sử dụng
 
@@ -231,7 +243,10 @@ docker compose up -d
 
 ## Trạng thái hiện tại
 
-- **Frontend:** Scaffolding ban đầu, chưa có code nghiệp vụ
-- **Backend:** Hoàn chỉnh API booking + RAG legacy (pgvector), POS đã xóa
+- **Frontend:** Giao diện đặt lịch, tra cứu/huỷ booking, admin dashboard (shop/course/therapist/shift/restriction)
+- **Backend:** Hoàn chỉnh API booking với kiến trúc phân lớp (api → services → repositories → db).
+  Services sở hữu transaction; RAG và POS đã xóa khỏi backend.
 - **Chatbot:** Hoàn chỉnh RAG pipeline (Qdrant + Groq) + intent routing + tools
-- **Tests:** Chatbot có 44 tests (integrations, RAG, tools, main)
+- **Tests:**
+  - Backend: **174 tests** (6 modules: services, admin_services, repositories, booking_flow, admin_flow, contract_public_fields)
+  - Chatbot: 44 tests (integrations, RAG, tools, main)

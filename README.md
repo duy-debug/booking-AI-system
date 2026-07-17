@@ -27,14 +27,18 @@ Booking AI System là nền tảng đa dịch vụ dùng để quản lý cửa 
 
 Hệ thống bao gồm:
 
-- **FastAPI Booking Backend** — nơi chứa toàn bộ business rules và dữ liệu nghiệp vụ cốt lõi;
+- **FastAPI Booking Backend** — nơi chứa toàn bộ business rules và dữ liệu nghiệp vụ cốt lõi, được tổ chức theo kiến trúc phân lớp (api → services → repositories → db);
 - **Next.js Frontend** — giao diện dành cho khách hàng và quản trị viên;
 - **AI Chatbot Service** độc lập sử dụng Qdrant và Groq;
 - **Supabase PostgreSQL** — nơi lưu trữ dữ liệu giao dịch và booking.
 
 Chatbot không truy cập trực tiếp vào các bảng booking. Những dữ liệu theo thời gian thực như shop, course, slot khả dụng và trạng thái booking đều được lấy thông qua Booking Backend API.
 
-> **Trạng thái dự án:** Đang phát triển. Core Backend và kiến trúc Chatbot đang được hoàn thiện; giao diện vẫn đang phát triển.
+> **RAG đã được tách khỏi backend.** Tìm kiếm ngữ nghĩa (Qdrant + Groq) giờ nằm trong
+> service Chatbot độc lập. Backend chỉ còn tầng dữ liệu giao dịch (PostgreSQL).
+
+> **Trạng thái dự án:** Backend đã hoàn chỉnh (API booking + kiến trúc phân lớp, RAG/POS đã xóa).
+> Chatbot hoàn thiện pipeline RAG + intent routing. Giao diện web đang phát triển.
 
 ---
 
