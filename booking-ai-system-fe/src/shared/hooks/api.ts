@@ -7,7 +7,7 @@ import {
   type UseQueryOptions,
   type UseQueryResult,
 } from "@tanstack/react-query";
-import { apiClient, type ApiListResponse } from "@/shared/api/client";
+import { apiClient } from "@/shared/api/client";
 
 // Wrapper quanh TanStack Query để gọi apiClient. Component trình bày KHÔNG
 // gọi API trực tiếp — chỉ dùng các hook này (nguyên tắc 4, 8).
@@ -35,8 +35,7 @@ export function useApiListQuery<TRaw, TOut = TRaw>(
   return useQuery<TOut[], Error>({
     queryKey: key as unknown[],
     queryFn: async () => {
-      const res = await apiClient.get<ApiListResponse<TRaw>>(path, { query });
-      const data = res.data;
+      const data = await apiClient.get<TRaw[]>(path, { query });
       return mapFn ? data.map(mapFn) : (data as unknown as TOut[]);
     },
     ...options,
