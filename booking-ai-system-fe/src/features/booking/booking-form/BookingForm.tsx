@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from "react";
 import { FormProvider, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ApiError } from "@/shared/types/api-error";
@@ -13,6 +13,7 @@ import { type EligibilityResult } from "./booking-form.queries";
 import { BookingLiveChecks } from "./BookingLiveChecks";
 import {
   bookingFormSchema,
+  bookingUpdateFormSchema,
   toCreatePayload,
   toUpdatePayload,
   type BookingFormInitial,
@@ -20,11 +21,10 @@ import {
 } from "./booking-form.schema";
 import { BUSINESS_HOURS } from "@/shared/config/shop";
 import {
-  BookingInfoRow,
-  CustomerArea,
-  CourseMatrix,
-  TherapistRow,
-  BookingSummaryBar,
+  BookingBasicInfoRow,
+  BookingCustomerRow,
+  BookingCourseMatrix,
+  BookingTherapistRow,
 } from "./booking-form-sections";
 
 const TIME_OPTIONS: { value: string; label: string }[] = (() => {
@@ -48,6 +48,15 @@ export interface AvailabilityState {
 
 export interface BookingFormHandle {
   reset: () => void;
+  checkAvailability: () => void;
+}
+
+export interface BookingFormSummary {
+  bookingDate: string;
+  startTime: string;
+  numberOfPeople: number;
+  durationMinutes: number;
+  totalPrice: number;
 }
 
 interface BookingFormProps {
@@ -57,6 +66,8 @@ interface BookingFormProps {
   onAvailability?: (a: AvailabilityState | null) => void;
   onAvailabilityLoading?: (loading: boolean) => void;
   onFormError?: (err: string | null) => void;
+  onSubmittingChange?: (submitting: boolean) => void;
+  onSummaryChange?: (summary: BookingFormSummary) => void;
 }
 
 export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(function BookingForm({
@@ -66,11 +77,13 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
   onAvailability,
   onAvailabilityLoading,
   onFormError,
+  onSubmittingChange,
+  onSummaryChange,
 }: BookingFormProps, ref) {
   const isEdit = initial.mode === "edit";
 
   const form = useForm<BookingFormValues>({
-    resolver: zodResolver(bookingFormSchema),
+    resolver: zodResolver(isEdit ? bookingUpdateFormSchema : bookingFormSchema),
     defaultValues: {
       shopId: initial.shopId,
       bookingDate: initial.bookingDate,
@@ -98,6 +111,25 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [availabilityRefreshToken, setAvailabilityRefreshToken] = useState(0);
+
+  const bookingDate = form.watch("bookingDate");
+  const startTime = form.watch("startTime");
+  const numberOfPeople = form.watch("numberOfPeople");
+  const mainCourseId = form.watch("mainCourseId");
+  const addonCourseIds = form.watch("addonCourseIds");
+  const summary = useMemo<BookingFormSummary>(() => {
+    const selectedCourses = courses.filter(
+      (course) => course.id === mainCourseId || addonCourseIds.includes(course.id),
+    );
+    return {
+      bookingDate,
+      startTime,
+      numberOfPeople,
+      durationMinutes: selectedCourses.reduce((total, course) => total + course.durationMinutes, 0),
+      totalPrice: selectedCourses.reduce((total, course) => total + course.price, 0),
+    };
+  }, [addonCourseIds, bookingDate, courses, mainCourseId, numberOfPeople, startTime]);
 
   useImperativeHandle(ref, () => ({
     reset: () => {
@@ -107,6 +139,7 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
       setAvailabilityLoading(false);
       setFormError(null);
     },
+    checkAvailability: () => setAvailabilityRefreshToken((token) => token + 1),
   }), [form]);
 
   const isDirty = form.formState.isDirty;
@@ -118,6 +151,8 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
   useEffect(() => { onAvailability?.(availability); }, [availability, onAvailability]);
   useEffect(() => { onAvailabilityLoading?.(availabilityLoading); }, [availabilityLoading, onAvailabilityLoading]);
   useEffect(() => { onFormError?.(formError); }, [formError, onFormError]);
+  useEffect(() => { onSubmittingChange?.(submitting); }, [onSubmittingChange, submitting]);
+  useEffect(() => { onSummaryChange?.(summary); }, [onSummaryChange, summary]);
 
   const applyApiErrors = (err: unknown) => {
     if (err instanceof ApiError) {
@@ -161,54 +196,48 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
 
   return (
     <FormProvider {...form}>
-      <form id="booking-form" onSubmit={onSubmit} className="space-y-3">
-        <BookingLiveChecks
-          form={form}
-          shopId={initial.shopId}
-          submitting={submitting}
-          onEligibility={setEligibility}
-          onAvailability={setAvailability}
-          onAvailabilityLoading={setAvailabilityLoading}
-        />
-
-        {formError && (
-          <div className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700">
-            {formError}
-          </div>
+      <form id="booking-form" onSubmit={onSubmit} className="mx-auto w-full max-w-[1800px] space-y-0">
+        {!isEdit && (
+          <BookingLiveChecks
+            form={form}
+            shopId={initial.shopId}
+            submitting={submitting}
+            onEligibility={setEligibility}
+            onAvailability={setAvailability}
+            onAvailabilityLoading={setAvailabilityLoading}
+            refreshToken={availabilityRefreshToken}
+          />
         )}
 
         {/* Hàng 1: Ngày, giờ, số người */}
-        <BookingInfoRow
+        <BookingBasicInfoRow
           timeOptions={TIME_OPTIONS}
           bookingCode={isEdit ? initial.bookingId : undefined}
         />
 
-        {/* Hàng 2: Khách hàng */}
-        <CustomerArea
-          eligibility={eligibility}
-          eligibilityLoading={eligibilityMut.isPending}
-          onCheck={() => {
-            const ph = form.getValues("customerPhone");
-            if (ph)
-              eligibilityMut
-                .mutateAsync({ phone: ph, shop_id: initial.shopId })
-                .then(setEligibility)
-                .catch(() => setEligibility(null));
-          }}
-        />
+        {!isEdit && (
+          <>
+            {/* Hàng 2: Khách hàng */}
+            <BookingCustomerRow
+              eligibility={eligibility}
+              eligibilityLoading={eligibilityMut.isPending}
+              onCheck={() => {
+                const ph = form.getValues("customerPhone");
+                if (ph)
+                  eligibilityMut
+                    .mutateAsync({ phone: ph, shop_id: initial.shopId })
+                    .then(setEligibility)
+                    .catch(() => setEligibility(null));
+              }}
+            />
 
-        {/* Hàng 3: Course matrix */}
-        <CourseMatrix courses={courses} />
+            {/* Hàng 3: Course matrix */}
+            <BookingCourseMatrix courses={courses} />
 
-        {/* Hàng 4: Therapist */}
-        <TherapistRow therapists={therapists} />
-
-        {/* Summary bar hiển thị trong form để footer gọi */}
-        <BookingSummaryBar
-          courses={courses}
-          availability={availability}
-          availabilityLoading={availabilityLoading}
-        />
+            {/* Hàng 4: Therapist */}
+            <BookingTherapistRow therapists={therapists} />
+          </>
+        )}
       </form>
     </FormProvider>
   );

@@ -2,6 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  CalendarDays,
+  CheckCircle2,
+  Clock3,
+  LoaderCircle,
+  SearchCheck,
+  UsersRound,
+  X,
+} from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
 import { ApiError } from "@/shared/types/api-error";
@@ -10,7 +19,11 @@ import { useAdminBookingDetail, useCancelBooking } from "@/features/booking/use-
 import { absoluteMinutesToHHMM } from "../schedule.utils";
 import type { BookingViewModel } from "../schedule.types";
 import type { Selection } from "../SelectionLayer";
-import { BookingForm, type BookingFormHandle } from "./BookingForm";
+import {
+  BookingForm,
+  type BookingFormHandle,
+  type BookingFormSummary,
+} from "./BookingForm";
 import type { BookingFormInitial } from "./booking-form.schema";
 import { resolveCloseIntent, resolveEscapeIntent } from "./booking-close-flow";
 
@@ -57,6 +70,17 @@ function BookingModalInner({
   const [formError, setFormError] = useState<string | null>(null);
   const [availability, setAvailability] = useState<{ available: boolean; message?: string } | null>(null);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
+  const [formSubmitting, setFormSubmitting] = useState(false);
+  const [summary, setSummary] = useState<BookingFormSummary>({
+    bookingDate: state.bookingDate,
+    startTime:
+      state.kind === "create"
+        ? absoluteMinutesToHHMM(state.selection.startMinutes)
+        : absoluteMinutesToHHMM(state.booking.startMinutes),
+    numberOfPeople: 1,
+    durationMinutes: 0,
+    totalPrice: 0,
+  });
   const formRef = useRef<BookingFormHandle>(null);
 
   // Clear footer state when modal opens fresh
@@ -175,7 +199,7 @@ function BookingModalInner({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-1 sm:p-2">
       {/* Overlay */}
       <div className="absolute inset-0 bg-black/40" onClick={requestClose} />
 
@@ -184,34 +208,45 @@ function BookingModalInner({
         role="dialog"
         aria-modal="true"
         aria-labelledby="booking-modal-title"
-        className="relative flex flex-col bg-white shadow-xl outline-none
-          w-[96vw] max-w-[1400px] h-[92vh] max-h-[900px] rounded-lg border border-zinc-200"
+        className="relative flex h-[94vh] w-[98vw] flex-col overflow-hidden rounded border border-zinc-300 bg-white shadow-lg outline-none max-sm:h-[100dvh] max-sm:w-screen max-sm:rounded-none"
       >
         {/* ═══ Header ═══ */}
-        <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-2.5 shrink-0">
-          <div className="flex items-center gap-4">
+        <div className="flex min-h-12 shrink-0 items-center justify-between gap-3 border-b border-zinc-300 bg-white px-3 py-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5">
             <h2 id="booking-modal-title" className="text-sm font-bold text-zinc-900">
               {isEdit ? "Chỉnh sửa booking" : "Tạo booking mới"}
             </h2>
-            <span className="text-[11px] text-zinc-400 bg-zinc-50 px-2 py-0.5 rounded border border-zinc-200">
-              {state.shopId.slice(0, 8)}...
+            <span className="inline-flex items-center gap-1.5 text-xs text-zinc-600">
+              <CalendarDays className="h-3.5 w-3.5 text-zinc-400" aria-hidden="true" />
+              {summary.bookingDate}
             </span>
-            <span className="text-[11px] text-zinc-500">
-              {state.bookingDate}
+            <span className="inline-flex items-center gap-1.5 text-xs text-zinc-600">
+              <Clock3 className="h-3.5 w-3.5 text-zinc-400" aria-hidden="true" />
+              {summary.startTime}
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-xs text-zinc-600">
+              <UsersRound className="h-3.5 w-3.5 text-zinc-400" aria-hidden="true" />
+              {summary.numberOfPeople} người
             </span>
             {isEdit && (
-              <span className="text-[11px] font-medium text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+              <span className="rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">
                 #{state.booking.bookingId.slice(0, 8)}
               </span>
             )}
           </div>
-          <button type="button" onClick={requestClose} className="h-7 w-7 flex items-center justify-center rounded hover:bg-zinc-100 text-zinc-500" aria-label="Đóng">
-            ✕
+          <button
+            type="button"
+            onClick={requestClose}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
+            aria-label="Đóng"
+            title="Đóng"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
 
         {/* ═══ Scrollable body ═══ */}
-        <div className="flex-1 overflow-y-auto px-4 py-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2 sm:p-3">
           {isEdit && detailQuery.isLoading && (
             <p className="text-xs text-zinc-400 mb-3">Đang tải chi tiết booking...</p>
           )}
@@ -226,41 +261,71 @@ function BookingModalInner({
             onAvailability={setAvailability}
             onAvailabilityLoading={setAvailabilityLoading}
             onFormError={setFormError}
+            onSubmittingChange={setFormSubmitting}
+            onSummaryChange={setSummary}
           />
         </div>
 
         {/* ═══ Footer ═══ */}
-        <div className="flex items-center justify-between border-t border-zinc-200 px-4 py-2.5 shrink-0 bg-zinc-50">
+        <div className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 border-t border-zinc-300 bg-zinc-50 px-3 py-2">
           {/* Left: errors + summary + availability */}
-          <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
             {formError && (
-              <span className="text-[11px] text-red-600 font-medium truncate">{formError}</span>
+              <span className="max-w-[420px] truncate font-medium text-red-600">{formError}</span>
             )}
-            <span className="text-zinc-300">|</span>
-            {availabilityLoading ? (
-              <span className="text-[11px] text-zinc-400 italic">Đang kiểm tra...</span>
+            {isEdit ? (
+              <span className="text-zinc-500">Chỉ cập nhật ngày và giờ</span>
+            ) : availabilityLoading ? (
+              <span className="inline-flex items-center gap-1.5 text-zinc-500">
+                <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                Đang kiểm tra
+              </span>
             ) : availability ? (
               availability.available ? (
-                <span className="text-[11px] font-medium text-emerald-600">✔ Khả dụng</span>
+                <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700">
+                  <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  Khả dụng
+                </span>
               ) : (
-                <span className="text-[11px] font-medium text-red-600">✖ {availability.message ?? "Trùng lịch"}</span>
+                <span className="font-medium text-red-600">Không khả dụng · {availability.message ?? "Trùng lịch"}</span>
               )
             ) : (
-              <span className="text-[11px] text-zinc-400 italic">Chưa kiểm tra</span>
+              <span className="text-zinc-500">Chưa kiểm tra</span>
             )}
+            <span className="text-zinc-300">|</span>
+            <span className="font-medium text-zinc-700">
+              {summary.durationMinutes > 0 ? `${summary.durationMinutes} phút` : "Chưa chọn course"}
+            </span>
+            {summary.durationMinutes > 0 && (
+              <span className="font-semibold text-blue-700">{summary.totalPrice.toLocaleString("vi-VN")}₫</span>
+            )}
+            <span className="text-zinc-500">{summary.numberOfPeople} booking</span>
           </div>
 
           {/* Right: actions */}
           <div className="flex items-center gap-2">
-            <Button type="button" variant="ghost" onClick={requestClose} disabled={cancelling} className="h-8 text-xs px-3">
+            <Button type="button" variant="ghost" onClick={requestClose} disabled={cancelling || formSubmitting} className="h-8 px-3 text-xs">
               Đóng
             </Button>
+            {!isEdit && (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => formRef.current?.checkAvailability()}
+                disabled={cancelling || formSubmitting}
+                loading={availabilityLoading}
+                className="h-8 gap-1.5 px-3 text-xs"
+              >
+                <SearchCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                Kiểm tra
+              </Button>
+            )}
             {isEdit && (
-              <Button type="button" variant="danger" disabled={cancelling} onClick={() => setShowCancelConfirm(true)} className="h-8 text-xs px-3">
+              <Button type="button" variant="danger" disabled={cancelling || formSubmitting} onClick={() => setShowCancelConfirm(true)} className="h-8 px-3 text-xs">
                 Huỷ
               </Button>
             )}
-            <Button type="submit" form="booking-form" disabled={cancelling} className="h-8 text-xs px-4">
+            <Button type="submit" form="booking-form" disabled={cancelling} loading={formSubmitting} className="h-8 px-4 text-xs">
               {isEdit ? "Cập nhật" : "Tạo booking"}
             </Button>
           </div>

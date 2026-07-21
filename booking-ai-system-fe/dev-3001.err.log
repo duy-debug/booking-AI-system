@@ -1,0 +1,8 @@
+⨯ Another next dev server is already running.
+
+- Local:        http://localhost:3000
+- PID:          5648
+- Dir:          D:\abc\booking-ai-system\booking-ai-system-fe
+- Log:          .next\dev\logs\next-development.log
+
+Run taskkill /PID 5648 /F to stop it.

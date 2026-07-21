@@ -72,6 +72,24 @@ export const bookingFormSchema = z
     }
   });
 
+// Edit API chỉ nhận ngày và giờ. Các field còn lại vẫn tồn tại trong form state
+// nhưng không được bắt buộc hoặc gửi lên khi chỉnh sửa.
+export const bookingUpdateFormSchema = z.object({
+  shopId: z.string().min(1, "Chọn shop"),
+  bookingDate: z.string().min(1, "Chọn ngày"),
+  startTime: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Giờ không hợp lệ (HH:MM)"),
+  numberOfPeople: z.number().int().min(1).max(3),
+  customerPhone: z.string(),
+  customerName: z.string().optional(),
+  mainCourseId: z.string(),
+  addonCourseIds: z.array(z.string()),
+  therapistRequestType: z.enum(THERAPIST_REQUEST_TYPES),
+  requestedTherapistId: z.string().optional(),
+  requestedGender: z.enum(GENDERS).optional(),
+});
+
 export type BookingFormValues = z.infer<typeof bookingFormSchema>;
 
 export interface BookingFormInitial {

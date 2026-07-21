@@ -1,29 +1,53 @@
 "use client";
 
+import { Search, UserCheck, UserPlus } from "lucide-react";
 import { useFormContext, useWatch } from "react-hook-form";
-import type { BookingFormValues } from "./booking-form.schema";
 import type { CourseUiModel } from "@/features/course/course.types";
 import type { TherapistUiModel } from "@/features/therapist/therapist.types";
-import type { EligibilityResult } from "./booking-form.queries";
 import { GENDERS, THERAPIST_REQUEST_TYPES } from "@/shared/types/common";
+import type { BookingFormValues } from "./booking-form.schema";
+import type { EligibilityResult } from "./booking-form.queries";
+import {
+  courseCategoryStyles,
+  groupCourseVariants,
+  type CourseVariantGroup,
+} from "./course-matrix";
 
-// ─── Compact helpers ────────────────────────────────────────────────────
-const labelCls = "text-[11px] font-semibold text-zinc-500 mb-0.5";
-const chipBase =
-  "h-7 px-2.5 text-xs rounded border font-medium transition-colors cursor-pointer select-none";
+const inputClass =
+  "h-8 rounded border border-zinc-300 bg-white px-2 text-xs text-zinc-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500";
+const fieldLabelClass = "mb-1 block text-[11px] font-medium text-zinc-600";
+const chipClass =
+  "h-7 rounded border px-2.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1";
 
-// ─── Errors ─────────────────────────────────────────────────────────────
-function FieldError({ name }: { name: keyof BookingFormValues }) {
-  const { formState: { errors } } = useFormContext<BookingFormValues>();
-  const err = errors[name];
-  if (!err) return null;
-  return <span className="text-[11px] text-red-600 ml-1">{err.message as string}</span>;
+function WorkspaceRow({
+  label,
+  children,
+  className = "",
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={`grid grid-cols-1 border-x border-t border-zinc-200 md:grid-cols-[132px_minmax(0,1fr)] ${className}`}>
+      <div className="flex min-h-11 items-center border-b border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-700 md:border-b-0 md:border-r">
+        {label}
+      </div>
+      <div className="min-w-0 px-3 py-2">{children}</div>
+    </section>
+  );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 1. BookingInfoRow — ngày, giờ, số người, mã booking (nếu edit)
-// ═══════════════════════════════════════════════════════════════════════════
-export function BookingInfoRow({
+function FieldError({ name }: { name: keyof BookingFormValues }) {
+  const {
+    formState: { errors },
+  } = useFormContext<BookingFormValues>();
+  const error = errors[name];
+  if (!error) return null;
+  return <span className="mt-1 block text-[11px] text-red-600">{error.message as string}</span>;
+}
+
+export function BookingBasicInfoRow({
   timeOptions,
   bookingCode,
 }: {
@@ -31,43 +55,49 @@ export function BookingInfoRow({
   bookingCode?: string;
 }) {
   const { register } = useFormContext<BookingFormValues>();
+
   return (
-    <div className="flex flex-wrap items-end gap-3 border-b border-zinc-200 pb-2.5">
-      <div>
-        <label className={labelCls}>Ngày</label>
-        <input type="date" className="h-8 rounded border border-zinc-300 px-2 text-xs" {...register("bookingDate")} />
-        <FieldError name="bookingDate" />
-      </div>
-      <div>
-        <label className={labelCls}>Giờ</label>
-        <select className="h-8 rounded border border-zinc-300 px-2 text-xs" {...register("startTime")}>
-          {timeOptions.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
-        <FieldError name="startTime" />
-      </div>
-      <div>
-        <label className={labelCls}>Số người</label>
-        <input type="number" min={1} max={3} className="h-8 w-16 rounded border border-zinc-300 px-2 text-xs" {...register("numberOfPeople", { valueAsNumber: true })} />
-        <FieldError name="numberOfPeople" />
-      </div>
-      {bookingCode && (
+    <WorkspaceRow label="Thông tin booking">
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
         <div>
-          <label className={labelCls}>Mã booking</label>
-          <div className="h-8 flex items-center text-xs font-medium text-zinc-700 bg-zinc-50 px-2 rounded border border-zinc-200">
-            {bookingCode}
+          <label className={fieldLabelClass}>Ngày</label>
+          <input type="date" className={`${inputClass} w-[150px]`} {...register("bookingDate")} />
+          <FieldError name="bookingDate" />
+        </div>
+        <div>
+          <label className={fieldLabelClass}>Giờ bắt đầu</label>
+          <select className={`${inputClass} w-[100px]`} {...register("startTime")}>
+            {timeOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <FieldError name="startTime" />
+        </div>
+        <div>
+          <label className={fieldLabelClass}>Số người</label>
+          <input
+            type="number"
+            min={1}
+            max={3}
+            className={`${inputClass} w-16`}
+            {...register("numberOfPeople", { valueAsNumber: true })}
+          />
+          <FieldError name="numberOfPeople" />
+        </div>
+        <div className="min-w-[190px] flex-1 max-w-[320px]">
+          <label className={fieldLabelClass}>Mã booking</label>
+          <div className="flex h-8 items-center rounded border border-zinc-200 bg-zinc-50 px-2 text-xs text-zinc-600">
+            {bookingCode ? `#${bookingCode}` : "Tự động sau khi tạo"}
           </div>
         </div>
-      )}
-    </div>
+      </div>
+    </WorkspaceRow>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 2. CustomerArea — phone + search, name, eligibility result
-// ═══════════════════════════════════════════════════════════════════════════
-export function CustomerArea({
+export function BookingCustomerRow({
   eligibility,
   eligibilityLoading,
   onCheck,
@@ -78,229 +108,255 @@ export function CustomerArea({
 }) {
   const { register } = useFormContext<BookingFormValues>();
   const phone = useWatch({ name: "customerPhone" });
-  const cust = eligibility?.customer;
+  const customer = eligibility?.customer;
 
   return (
-    <div className="border-b border-zinc-200 pb-2.5">
-      <div className="flex flex-wrap items-end gap-3">
+    <WorkspaceRow label="Khách hàng">
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
         <div>
-          <label className={labelCls}>Số điện thoại</label>
-          <div className="flex items-center gap-2">
-            <input className="h-8 w-[140px] rounded border border-zinc-300 px-2 text-xs" placeholder="0912..." {...register("customerPhone")} />
-            <button type="button" onClick={onCheck} disabled={!phone || eligibilityLoading} className="h-8 px-2.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40" aria-label="Tra cứu">
-              {eligibilityLoading ? <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> : "Tra cứu"}
+          <label className={fieldLabelClass}>Số điện thoại</label>
+          <div className="flex items-center gap-1.5">
+            <input
+              className={`${inputClass} w-[170px]`}
+              inputMode="tel"
+              placeholder="0912 345 678"
+              {...register("customerPhone")}
+            />
+            <button
+              type="button"
+              onClick={onCheck}
+              disabled={!phone || eligibilityLoading}
+              className="inline-flex h-8 items-center gap-1.5 rounded bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Search className="h-3.5 w-3.5" aria-hidden="true" />
+              {eligibilityLoading ? "Đang tra" : "Tra cứu"}
             </button>
           </div>
           <FieldError name="customerPhone" />
         </div>
-        <div>
-          <label className={labelCls}>Tên khách</label>
-          <input className="h-8 w-[160px] rounded border border-zinc-300 px-2 text-xs" placeholder="Họ tên" {...register("customerName")} />
+        <div className="min-w-[220px] flex-1 max-w-[360px]">
+          <label className={fieldLabelClass}>Tên khách</label>
+          <input className={`${inputClass} w-full`} placeholder="Họ và tên" {...register("customerName")} />
+        </div>
+        <div className="min-w-[260px] flex-1">
+          <label className={fieldLabelClass}>Kết quả tra cứu</label>
+          <div className="flex min-h-8 flex-wrap items-center gap-2 rounded border border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] text-zinc-600">
+            {!eligibility && <span className="text-zinc-400">Chưa tra cứu khách hàng</span>}
+            {eligibility && customer && (
+              <>
+                <UserCheck className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
+                <strong className="text-zinc-800">{customer.name ?? "Khách hiện có"}</strong>
+                <span>{customer.is_member ? "Thành viên" : "Khách thường"}</span>
+                {customer.member_rank && <span>Hạng {customer.member_rank}</span>}
+                <span>{customer.visit_count} lần ghé</span>
+              </>
+            )}
+            {eligibility && !customer && eligibility.eligible && (
+              <>
+                <UserPlus className="h-3.5 w-3.5 text-blue-600" aria-hidden="true" />
+                <span>Khách mới, hồ sơ sẽ được tạo cùng booking</span>
+              </>
+            )}
+            {eligibility && !eligibility.eligible && (
+              <strong className="text-red-600">Số điện thoại không đủ điều kiện đặt lịch</strong>
+            )}
+          </div>
         </div>
       </div>
-      {eligibility && (
-        <div className="flex items-center gap-2 mt-1.5 text-[11px] text-zinc-500">
-          {cust ? (
-            <>
-              <span className="font-medium text-zinc-700">{cust.name ?? "(chưa tên)"}</span>
-              <span className="text-zinc-300">|</span>
-              <span className={cust.is_member ? "text-blue-600 font-medium" : ""}>{cust.is_member ? "Thành viên" : "Guest"}</span>
-              <span className="text-zinc-300">|</span>
-              <span>Lần thứ {cust.visit_count}</span>
-              {cust.is_member && cust.member_rank && (
-                <>
-                  <span className="text-zinc-300">|</span>
-                  <span className="text-amber-600 font-medium">{cust.member_rank}</span>
-                </>
-              )}
-            </>
-          ) : (
-            <span className="text-amber-600">Khách mới — sẽ tạo khi lưu</span>
-          )}
-          {!eligibility.eligible && <span className="ml-2 font-medium text-red-600">⛔ SĐT bị cấm (NG list)</span>}
-        </div>
-      )}
-    </div>
+    </WorkspaceRow>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 3. CourseMatrix — courses grouped by type, each with duration buttons
-// ═══════════════════════════════════════════════════════════════════════════
-export function CourseMatrix({ courses }: { courses: CourseUiModel[] }) {
-  const { setValue, watch } = useFormContext<BookingFormValues>();
-  const mainCourseId = watch("mainCourseId");
-  const addonCourseIds = watch("addonCourseIds");
+function CourseGroupRows({
+  groups,
+  selectedIds,
+  onToggle,
+  emptyLabel,
+}: {
+  groups: CourseVariantGroup[];
+  selectedIds: string[];
+  onToggle: (course: CourseUiModel, selected: boolean) => void;
+  emptyLabel: string;
+}) {
+  if (groups.length === 0) {
+    return <div className="px-3 py-4 text-xs text-zinc-400">{emptyLabel}</div>;
+  }
 
-  const mains = courses.filter((c) => c.courseType === "main");
-  const addons = courses.filter((c) => c.courseType === "addon");
-
-  return (
-    <div className="border-b border-zinc-200 pb-2.5 space-y-2">
-      {/* Main courses */}
-      <div>
-        <span className={labelCls}>Course chính</span>
-        <div className="flex flex-wrap gap-1.5 mt-0.5">
-          {mains.map((c) => {
-            const selected = mainCourseId === c.id;
+  return groups.map((group) => {
+    const styles = courseCategoryStyles[group.category];
+    return (
+      <div
+        key={group.key}
+        className="grid min-h-11 grid-cols-[minmax(112px,160px)_minmax(0,1fr)] border-t border-zinc-200 first:border-t-0"
+      >
+        <div className="flex items-center border-r border-zinc-200 bg-zinc-50 p-2">
+          <span className={`w-full rounded border px-2 py-1.5 text-center text-[11px] font-semibold ${styles.label}`}>
+            {group.name}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5 p-2">
+          {group.variants.map((course) => {
+            const selected = selectedIds.includes(course.id);
             return (
               <button
-                key={c.id}
+                key={course.id}
                 type="button"
-                onClick={() => setValue("mainCourseId", selected ? "" : c.id, { shouldDirty: true, shouldValidate: true })}
-                className={`${chipBase} ${selected ? "bg-blue-600 text-white border-blue-600" : "bg-white text-zinc-700 border-zinc-300 hover:border-blue-400"}`}
+                aria-pressed={selected}
+                title={`${course.name} · ${course.durationMinutes} phút · ${course.price.toLocaleString("vi-VN")}₫`}
+                onClick={() => onToggle(course, selected)}
+                className={`h-7 min-w-11 rounded border px-2 text-[11px] font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 ${
+                  selected ? styles.selected : styles.idle
+                }`}
               >
-                <span className="font-medium">{c.name}</span>
-                <span className="ml-1.5 opacity-70">({c.durationMinutes}p)</span>
-                {c.price > 0 && <span className="ml-1 opacity-60">{c.price.toLocaleString("vi-VN")}₫</span>}
+                {course.durationMinutes}
               </button>
             );
           })}
-          {mains.length === 0 && <span className="text-xs text-zinc-400 italic py-1">Không có course chính</span>}
         </div>
-        <FieldError name="mainCourseId" />
       </div>
-      {/* Addon courses */}
-      {addons.length > 0 && (
+    );
+  });
+}
+
+export function BookingCourseMatrix({ courses }: { courses: CourseUiModel[] }) {
+  const { setValue, watch } = useFormContext<BookingFormValues>();
+  const mainCourseId = watch("mainCourseId");
+  const addonCourseIds = watch("addonCourseIds");
+  const mainGroups = groupCourseVariants(courses.filter((course) => course.courseType === "main"));
+  const addonGroups = groupCourseVariants(courses.filter((course) => course.courseType === "addon"));
+
+  return (
+    <WorkspaceRow label="Course" className="border-b">
+      <div className="grid min-w-0 gap-2 xl:grid-cols-2">
+        <div className="min-w-0 overflow-hidden rounded border border-zinc-200">
+          <div className="flex h-8 items-center justify-between border-b border-zinc-200 bg-zinc-100 px-3 text-[11px] font-semibold text-zinc-700">
+            <span>Course chính</span>
+            <span className="font-normal text-zinc-500">Chọn một thời lượng</span>
+          </div>
+          <CourseGroupRows
+            groups={mainGroups}
+            selectedIds={mainCourseId ? [mainCourseId] : []}
+            emptyLabel="Shop chưa có course chính đang hoạt động"
+            onToggle={(course, selected) =>
+              setValue("mainCourseId", selected ? "" : course.id, {
+                shouldDirty: true,
+                shouldValidate: true,
+              })
+            }
+          />
+        </div>
+        <div className="min-w-0 overflow-hidden rounded border border-zinc-200">
+          <div className="flex h-8 items-center justify-between border-b border-zinc-200 bg-zinc-100 px-3 text-[11px] font-semibold text-zinc-700">
+            <span>Course thêm</span>
+            <span className="font-normal text-zinc-500">Có thể chọn nhiều</span>
+          </div>
+          <CourseGroupRows
+            groups={addonGroups}
+            selectedIds={addonCourseIds}
+            emptyLabel="Shop chưa có course thêm đang hoạt động"
+            onToggle={(course, selected) => {
+              const next = selected
+                ? addonCourseIds.filter((id) => id !== course.id)
+                : [...addonCourseIds, course.id];
+              setValue("addonCourseIds", next, { shouldDirty: true });
+            }}
+          />
+        </div>
+      </div>
+      <FieldError name="mainCourseId" />
+    </WorkspaceRow>
+  );
+}
+
+export function BookingTherapistRow({ therapists }: { therapists: TherapistUiModel[] }) {
+  const { setValue } = useFormContext<BookingFormValues>();
+  const requestType = useWatch({ name: "therapistRequestType" });
+  const requestedTherapistId = useWatch({ name: "requestedTherapistId" });
+  const requestedGender = useWatch({ name: "requestedGender" });
+
+  const setRequestType = (type: BookingFormValues["therapistRequestType"]) => {
+    setValue("therapistRequestType", type, { shouldDirty: true, shouldValidate: true });
+    if (type !== "specific") setValue("requestedTherapistId", "", { shouldDirty: true });
+    if (type !== "gender") setValue("requestedGender", undefined, { shouldDirty: true });
+  };
+
+  return (
+    <WorkspaceRow label="Yêu cầu therapist" className="border-b">
+      <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
         <div>
-          <span className={labelCls}>Course thêm</span>
-          <div className="flex flex-wrap gap-1.5 mt-0.5">
-            {addons.map((c) => {
-              const selected = addonCourseIds.includes(c.id);
+          <span className={fieldLabelClass}>Hình thức</span>
+          <div className="flex flex-wrap gap-1.5">
+            {THERAPIST_REQUEST_TYPES.map((type) => {
+              const selected = requestType === type;
+              const label = type === "none" ? "Không yêu cầu" : type === "gender" ? "Theo giới tính" : "Chỉ định cụ thể";
               return (
                 <button
-                  key={c.id}
+                  key={type}
                   type="button"
-                  onClick={() => {
-                    const next = selected
-                      ? addonCourseIds.filter((id: string) => id !== c.id)
-                      : [...addonCourseIds, c.id];
-                    setValue("addonCourseIds", next, { shouldDirty: true });
-                  }}
-                  className={`${chipBase} ${selected ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-zinc-700 border-zinc-300 hover:border-emerald-400"}`}
+                  aria-pressed={selected}
+                  onClick={() => setRequestType(type)}
+                  className={`${chipClass} ${selected ? "border-blue-700 bg-blue-600 text-white" : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"}`}
                 >
-                  <span className="font-medium">{c.name}</span>
-                  <span className="ml-1.5 opacity-70">({c.durationMinutes}p)</span>
-                  {c.price > 0 && <span className="ml-1 opacity-60">{c.price.toLocaleString("vi-VN")}₫</span>}
+                  {label}
                 </button>
               );
             })}
           </div>
+          <FieldError name="therapistRequestType" />
         </div>
-      )}
-    </div>
-  );
-}
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 4. TherapistRow — request type + therapist select
-// ═══════════════════════════════════════════════════════════════════════════
-export function TherapistRow({ therapists }: { therapists: TherapistUiModel[] }) {
-  const { register, setValue } = useFormContext<BookingFormValues>();
-  const requestType = useWatch({ name: "therapistRequestType" });
-  const therapistOptions = therapists.map((t) => ({ value: t.id, label: `${t.name} (${t.gender === "male" ? "Nam" : "Nữ"})` }));
-  const genderOptions = GENDERS.map((g) => ({ value: g, label: g === "male" ? "Nam" : "Nữ" }));
-
-  return (
-    <div className="border-b border-zinc-200 pb-2.5">
-      <div className="flex flex-wrap items-end gap-3">
-        <div>
-          <label className={labelCls}>Yêu cầu therapist</label>
-          <div className="flex rounded border border-zinc-300 overflow-hidden h-8">
-            {THERAPIST_REQUEST_TYPES.map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => {
-                  setValue("therapistRequestType", t, { shouldDirty: true, shouldValidate: true });
-                  if (t === "none") {
-                    setValue("requestedTherapistId", "", { shouldDirty: true });
-                    setValue("requestedGender", undefined, { shouldDirty: true });
-                  }
-                }}
-                className={`px-2.5 text-xs font-medium transition-colors ${
-                  requestType === t
-                    ? "bg-blue-600 text-white"
-                    : "bg-white text-zinc-600 hover:bg-zinc-50"
-                }`}
-              >
-                {t === "none" ? "Không yêu cầu" : t === "specific" ? "Cụ thể" : "Theo giới tính"}
-              </button>
-            ))}
-          </div>
-        </div>
-        {requestType === "specific" && (
-          <div>
-            <label className={labelCls}>Chọn therapist</label>
-            <select className="h-8 rounded border border-zinc-300 px-2 text-xs min-w-[160px]" {...register("requestedTherapistId")}>
-              <option value="">-- Chọn --</option>
-              {therapistOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-            <FieldError name="requestedTherapistId" />
-          </div>
-        )}
         {requestType === "gender" && (
           <div>
-            <label className={labelCls}>Giới tính</label>
-            <select className="h-8 rounded border border-zinc-300 px-2 text-xs" {...register("requestedGender")}>
-              <option value="">-- Chọn --</option>
-              {genderOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            <span className={fieldLabelClass}>Giới tính therapist</span>
+            <div className="flex gap-1.5">
+              {GENDERS.map((gender) => {
+                const selected = requestedGender === gender;
+                return (
+                  <button
+                    key={gender}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setValue("requestedGender", gender, { shouldDirty: true, shouldValidate: true })}
+                    className={`${chipClass} ${selected ? "border-blue-700 bg-blue-600 text-white" : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"}`}
+                  >
+                    {gender === "male" ? "Nam" : "Nữ"}
+                  </button>
+                );
+              })}
+            </div>
             <FieldError name="requestedGender" />
           </div>
         )}
+
+        {requestType === "specific" && (
+          <div className="min-w-[280px] flex-1">
+            <span className={fieldLabelClass}>Therapist cụ thể</span>
+            <div className="flex max-h-20 flex-wrap gap-1.5 overflow-y-auto pr-1">
+              {therapists.map((therapist) => {
+                const selected = requestedTherapistId === therapist.id;
+                return (
+                  <button
+                    key={therapist.id}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() =>
+                      setValue("requestedTherapistId", therapist.id, {
+                        shouldDirty: true,
+                        shouldValidate: true,
+                      })
+                    }
+                    className={`${chipClass} ${selected ? "border-blue-700 bg-blue-600 text-white" : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"}`}
+                  >
+                    {therapist.name} · {therapist.gender === "male" ? "Nam" : "Nữ"}
+                  </button>
+                );
+              })}
+              {therapists.length === 0 && <span className="text-xs text-zinc-400">Không có therapist hoạt động</span>}
+            </div>
+            <FieldError name="requestedTherapistId" />
+          </div>
+        )}
       </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 5. BookingSummaryBar — tổng duration, giá, availability (trong footer)
-// ═══════════════════════════════════════════════════════════════════════════
-export function BookingSummaryBar({
-  courses,
-  availability,
-  availabilityLoading,
-}: {
-  courses: CourseUiModel[];
-  availability?: { available: boolean; message?: string } | null;
-  availabilityLoading?: boolean;
-}) {
-  const { watch } = useFormContext<BookingFormValues>();
-  const values = watch();
-  const selected = courses.filter(
-    (c) => c.id === values.mainCourseId || values.addonCourseIds.includes(c.id),
-  );
-  const totalMin = selected.reduce((s, c) => s + c.durationMinutes, 0);
-  const totalPrice = selected.reduce((s, c) => s + c.price, 0);
-
-  return (
-    <div className="flex items-center gap-3 text-xs text-zinc-600">
-      {totalMin > 0 && (
-        <span className="font-medium text-zinc-800">
-          Tổng: <b className="text-blue-700">{totalMin}p</b>
-          {" · "}
-          <b className="text-emerald-700">{totalPrice.toLocaleString("vi-VN")}₫</b>
-        </span>
-      )}
-      {totalMin > 0 && <span className="text-zinc-300">|</span>}
-      {availabilityLoading ? (
-        <span className="text-zinc-400 italic">Đang kiểm tra...</span>
-      ) : availability ? (
-        availability.available ? (
-          <span className="font-medium text-emerald-600">✔ Khả dụng</span>
-        ) : (
-          <span className="font-medium text-red-600">✖ {availability.message ?? "Trùng lịch"}</span>
-        )
-      ) : (
-        <span className="text-zinc-400 italic">Chưa kiểm tra</span>
-      )}
-      {values.numberOfPeople > 1 && (
-        <>
-          <span className="text-zinc-300">|</span>
-          <span>{values.numberOfPeople} người</span>
-        </>
-      )}
-    </div>
+    </WorkspaceRow>
   );
 }

@@ -23,6 +23,7 @@ export function BookingLiveChecks({
   onEligibility,
   onAvailability,
   onAvailabilityLoading,
+  refreshToken = 0,
 }: {
   form: UseFormReturn<BookingFormValues>;
   shopId: UUID;
@@ -30,6 +31,7 @@ export function BookingLiveChecks({
   onEligibility: (r: EligibilityResult | null) => void;
   onAvailability: (a: AvailabilityState | null) => void;
   onAvailabilityLoading: (loading: boolean) => void;
+  refreshToken?: number;
 }) {
   const phone = useWatch({ control: form.control, name: "customerPhone" });
   const mainCourseId = useWatch({ control: form.control, name: "mainCourseId" });
@@ -117,6 +119,7 @@ export function BookingLiveChecks({
     submitting,
     onAvailability,
     onAvailabilityLoading,
+    refreshToken,
   ]);
 
   return null;
