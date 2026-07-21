@@ -8,7 +8,7 @@ from app.core.exceptions import AppError
 from app.repositories import TherapistRepository, ShiftRepository, ReservationRepository
 
 
-class TherapistScheduleService:
+class TherapistBookingService:
     # Khởi tạo với session và repository
     def __init__(self, session: Session):
         self.session = session

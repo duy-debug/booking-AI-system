@@ -15,8 +15,9 @@ from app.api.public.shops import router as public_shops_router
 from app.api.public.available_slots import router as public_slots_router
 from app.api.public.booking_eligibility import router as public_eligibility_router
 from app.api.public.bookings import router as public_bookings_router
-from app.api.public.therapist_schedule import router as therapist_schedule_router
+from app.api.public.therapist_booking import router as therapist_booking_router
 from app.api.admin.bookings import router as admin_bookings_router
+from app.api.admin.booking import router as admin_booking_router
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -87,8 +88,9 @@ app.include_router(public_shops_router)
 app.include_router(public_slots_router)
 app.include_router(public_eligibility_router)
 app.include_router(public_bookings_router)
-app.include_router(therapist_schedule_router)
+app.include_router(therapist_booking_router)
 app.include_router(admin_bookings_router)
+app.include_router(admin_booking_router)
 
 
 @app.get("/")

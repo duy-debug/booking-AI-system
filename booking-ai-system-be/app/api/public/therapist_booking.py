@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.core.exceptions import AppError
-from app.services import TherapistScheduleService
+from app.services import TherapistBookingService
 
 
 router = APIRouter(prefix="/api/therapists", tags=["therapist"])
@@ -32,6 +32,6 @@ def get_my_schedule(
     except ValueError:
         raise AppError(400, code="INVALID_THERAPIST_ID", detail="therapist_id khong dung format UUID")
 
-    service = TherapistScheduleService(db)
+    service = TherapistBookingService(db)
     result = service.get_schedule(uid, d)
     return {"data": result}

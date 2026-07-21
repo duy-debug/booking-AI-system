@@ -37,6 +37,18 @@ class Settings(BaseSettings):
     # CORS — cho phép FE local dev
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
+    # Supabase test account (chỉ dùng cho integration tests — conftest.py)
+    SUPABASE_TEST_EMAIL: str | None = None
+    SUPABASE_TEST_PASSWORD: str | None = None
+
+    # Múi giờ nghiệp vụ mặc định của shop. Backend lưu start_time/end_time là
+    # giá trị NAIVE (không kèm múi giờ); client phải interpret theo múi giờ này.
+    SHOP_TIMEZONE: str = "Asia/Ho_Chi_Minh"
+
+    # Khung giờ hoạt động mặc định dùng khi shop không có ca nào trong ngày.
+    BUSINESS_HOURS_OPEN: str = "09:00"
+    BUSINESS_HOURS_CLOSE: str = "22:00"
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
