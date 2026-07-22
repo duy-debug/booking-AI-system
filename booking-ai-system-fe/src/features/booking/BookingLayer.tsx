@@ -12,6 +12,7 @@ interface BookingLayerProps {
   onSelect: (booking: BookingViewModel) => void;
 }
 
+// Render một booking active riêng lẻ, xử lý click và tối ưu re-render bằng memo.
 const BookingBlock = memo(function BookingBlock({
   booking,
   x,
@@ -25,6 +26,7 @@ const BookingBlock = memo(function BookingBlock({
   style: (typeof STATUS_STYLES)[keyof typeof STATUS_STYLES];
   onSelect: (b: BookingViewModel) => void;
 }) {
+  // Chuyển booking hiện tại về callback selection ổn định khi người dùng mở chi tiết.
   const handleClick = useCallback(() => onSelect(booking), [booking, onSelect]);
   const narrow = w < 80;
 
@@ -61,6 +63,7 @@ const BookingBlock = memo(function BookingBlock({
   );
 });
 
+// Render booking active thành block tương tác và định vị chúng theo phút trên timeline.
 export function BookingLayer({ bookings, range, pxPerMinute, onSelect }: BookingLayerProps) {
   return (
     <div className="pointer-events-none absolute inset-0 z-[2]" data-layer="active-bookings">

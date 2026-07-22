@@ -6,6 +6,7 @@ import { ApiError, type ApiErrorBody } from "@/shared/types/api-error";
 // Căn cứ: app/main.py (bọc {data}), app/core/exceptions.py (format lỗi),
 //          docs/frontend-analysis.md §6.3, §6.4.
 
+// Chuẩn hóa URL backend từ biến môi trường và loại bỏ dấu gạch chéo cuối để ghép đường dẫn API chính xác.
 const API_BASE_URL = (() => {
   const url = process.env.NEXT_PUBLIC_API_URL;
   return url ? url.replace(/\/$/, "") : "http://localhost:8000";
@@ -26,11 +27,13 @@ export interface ApiSingleResponse<T> {
   data: T;
 }
 
+// Đọc Supabase session hiện tại và trả access token để gắn vào Authorization header nếu có.
 async function getAccessToken(): Promise<string | null> {
   const { data } = await supabase.auth.getSession();
   return data.session?.access_token ?? null;
 }
 
+// Gửi HTTP request chung, parse JSON envelope và chuyển Problem Details của backend thành ApiError.
 async function request<T>(
   method: string,
   path: string,

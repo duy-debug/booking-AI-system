@@ -1,3 +1,4 @@
+// Hiển thị điểm vào của phân hệ quản lý therapist theo từng shop.
 export default function AdminTherapistsPage() {
   return (
     <div>

@@ -42,6 +42,7 @@ export interface ShiftUiModel {
   updatedAt: string;
 }
 
+// Chuyển shift DTO sang UI model camelCase và giữ nguyên các mốc ngày giờ phục vụ form.
 export function toShiftUiModel(dto: ShiftResponse): ShiftUiModel {
   return {
     id: dto.shift_id,

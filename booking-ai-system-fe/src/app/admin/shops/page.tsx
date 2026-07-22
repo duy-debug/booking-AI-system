@@ -1,5 +1,6 @@
 import { ShopList } from "@/features/shop/ShopList";
 
+// Trình bày tiêu đề và danh sách chi nhánh dưới dạng bảng hoặc card responsive.
 export default function AdminShopsPage() {
   return (
     <section className="mx-auto w-full max-w-7xl min-w-0">

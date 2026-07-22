@@ -1,3 +1,4 @@
+// Hiển thị điểm vào của danh sách khách hàng bị hạn chế quyền đặt lịch.
 export default function AdminRestrictionsPage() {
   return (
     <div>

@@ -19,6 +19,7 @@ export interface EligibilityResult {
   restriction: null;
 }
 
+// Tạo mutation kiểm tra số điện thoại có đủ điều kiện đặt lịch tại shop hay thuộc NG list.
 export function useCheckEligibility() {
   return useApiMutation<{ phone: string; shop_id: UUID }, EligibilityResult>(
     (input) =>

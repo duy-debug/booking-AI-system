@@ -30,6 +30,7 @@ interface AlertContextValue {
 
 const AlertContext = createContext<AlertContextValue | null>(null);
 
+// Quản lý vòng đời của một alert và tự gọi dismiss sau đúng thời lượng cấu hình.
 function TimedAlert({
   item,
   onDismiss,
@@ -37,6 +38,7 @@ function TimedAlert({
   item: AlertItem;
   onDismiss: (id: number) => void;
 }) {
+  // Đóng đúng alert hiện tại bằng ID ổn định để timer không bị reset khi danh sách thay đổi.
   const dismissItem = useCallback(() => onDismiss(item.id), [item.id, onDismiss]);
 
   useEffect(() => {
@@ -47,14 +49,17 @@ function TimedAlert({
   return <Alert message={item.message} tone={item.tone} onDismiss={dismissItem} />;
 }
 
+// Cung cấp API alert toàn cục, xếp chồng tối đa bốn thông báo và render chúng trên mọi modal.
 export function AlertProvider({ children }: { children: ReactNode }) {
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const nextId = useRef(1);
 
+  // Loại alert có ID tương ứng khỏi hàng đợi hiển thị.
   const dismiss = useCallback((id: number) => {
     setAlerts((current) => current.filter((alert) => alert.id !== id));
   }, []);
 
+  // Chuẩn hóa nội dung, tạo ID tăng dần và thêm alert mới trong giới hạn hàng đợi.
   const showAlert = useCallback((message: string, tone: AlertTone = "info") => {
     const normalizedMessage = message.trim();
     if (!normalizedMessage) return;
@@ -62,6 +67,7 @@ export function AlertProvider({ children }: { children: ReactNode }) {
     setAlerts((current) => [...current.slice(-3), { id, message: normalizedMessage, tone }]);
   }, []);
 
+  // Giữ object context ổn định và cung cấp các helper theo tone cho component con.
   const value = useMemo<AlertContextValue>(() => ({
     showAlert,
     showSuccess: (message) => showAlert(message, "success"),
@@ -90,6 +96,7 @@ export function AlertProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// Trả các hàm hiển thị alert theo tone và ngăn sử dụng hook bên ngoài provider.
 export function useAlert() {
   const context = useContext(AlertContext);
   if (!context) {

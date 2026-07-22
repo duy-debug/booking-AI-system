@@ -44,5 +44,6 @@ class ReservationCourse(Base):
     reservation = relationship("Reservation", back_populates="reservation_courses")
     course = relationship("Course", back_populates="reservation_courses")
 
+    # Tạo chuỗi đại diện cho snapshot course đã gắn với reservation khi đặt lịch.
     def __repr__(self) -> str:
         return f"<ReservationCourse {self.course_role} - {self.course_name_snapshot}>"

@@ -25,6 +25,7 @@ const baseSchema = z.object({
   autoAssignTherapists: z.boolean(),
 });
 
+// Kiểm tra chéo dữ liệu tạo booking, gồm course bắt buộc và điều kiện yêu cầu therapist theo loại booking.
 export const bookingFormSchema = baseSchema.superRefine((values, ctx) => {
   if (!values.mainCourseId) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["mainCourseId"], message: "Chọn ít nhất 1 course chính" });
@@ -40,10 +41,12 @@ export const bookingFormSchema = baseSchema.superRefine((values, ctx) => {
   }
 });
 
+// Kiểm tra chéo dữ liệu chỉnh sửa để số người, therapist và bộ course của booking nhóm luôn nhất quán.
 export const bookingUpdateFormSchema = baseSchema.superRefine((values, ctx) => {
   if (values.reservations.length !== values.numberOfPeople) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["reservations"], message: "Số reservation phải bằng số người" });
   }
+  // Thu therapist ID của từng người để kiểm tra thiếu hoặc phân công trùng trong nhóm.
   const therapistIds = values.reservations.map((item) => item.therapistId);
   if (values.autoAssignTherapists && therapistIds.some(Boolean)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["reservations"], message: "Không được chỉ định therapist khi chuyển sang booking nhóm" });
@@ -55,6 +58,7 @@ export const bookingUpdateFormSchema = baseSchema.superRefine((values, ctx) => {
   if (new Set(assignedTherapistIds).size !== assignedTherapistIds.length) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["reservations"], message: "Mỗi người phải có therapist khác nhau" });
   }
+  // Chuẩn hóa lựa chọn course thành signature để bảo đảm mọi người trong nhóm dùng cùng dịch vụ.
   const courseSignatures = values.reservations.map((reservation) =>
     JSON.stringify([
       reservation.mainCourseId,
@@ -72,6 +76,7 @@ export const bookingUpdateFormSchema = baseSchema.superRefine((values, ctx) => {
 
 export type BookingFormValues = z.infer<typeof baseSchema>;
 
+// Xác định trường hợp chuyển booking một người thành nhóm để backend tự động phân công therapist.
 export function shouldAutoAssignTherapists(
   originalNumberOfPeople: number,
   nextNumberOfPeople: number,
@@ -106,6 +111,7 @@ export interface CreateBookingPayload {
   confirmed_by_customer: boolean;
 }
 
+// Chuyển form tạo mới sang payload API và vô hiệu hóa yêu cầu specific đối với booking nhóm.
 export function toCreatePayload(values: BookingFormValues): CreateBookingPayload {
   const effectiveType = values.numberOfPeople > 1 && values.therapistRequestType === "specific" ? "none" : values.therapistRequestType;
   const therapistRequest: CreateBookingPayload["therapist_request"] = { type: effectiveType };
@@ -139,6 +145,7 @@ export interface UpdateBookingPayload {
   auto_assign_therapists: boolean;
 }
 
+// Chuyển form chỉnh sửa thành payload theo reservation để backend cập nhật đúng từng người.
 export function toUpdatePayload(values: BookingFormValues): UpdateBookingPayload {
   return {
     booking_date: values.bookingDate,

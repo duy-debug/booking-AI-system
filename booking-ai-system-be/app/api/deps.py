@@ -10,8 +10,8 @@ from app.core.exceptions import AppError
 from app.db.session import SessionLocal
 
 
+# Tạo database session cho từng request và luôn đóng kết nối sau khi handler hoàn tất.
 def get_db() -> Generator[Session, None, None]:
-    # Inject DB session vào router handler
     db = SessionLocal()
     try:
         yield db
@@ -19,8 +19,8 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
+# Chuyển chuỗi sang UUID; nếu sai định dạng thì trả AppError 400 gắn với đúng tên trường.
 def parse_uuid(value: str, field_name: str = "id") -> UUID:
-    # Parse UUID string, raise 400 nếu không hợp lệ
     try:
         return UUID(value)
     except ValueError:

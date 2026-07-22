@@ -14,6 +14,7 @@ import { BookingDrawer, type BookingDrawerState } from "@/features/booking/booki
 import { todayShopDate } from "@/shared/lib/datetime";
 import type { UUID } from "@/shared/types/common";
 
+// Điều phối shop, ngày, timeline, selection và modal để tạo hoặc chỉnh sửa booking trên một màn hình.
 export default function AdminBookingsPage() {
   const [date, setDate] = useState<string>(todayShopDate());
   const [shopId, setShopId] = useState<UUID | null>(null);
@@ -22,6 +23,7 @@ export default function AdminBookingsPage() {
 
   const queryClient = useQueryClient();
   const shopsQuery = useShops(true);
+  // Rút gọn shop model thành option ID/tên và giữ reference ổn định cho toolbar.
   const shops = useMemo(
     () => (shopsQuery.data ?? []).map((s) => ({ id: s.id, name: s.name })),
     [shopsQuery.data],
@@ -31,11 +33,13 @@ export default function AdminBookingsPage() {
 
   const scheduleQuery = useScheduleData(activeShopId, date);
 
+  // Dịch ngày timeline theo số ngày dương hoặc âm và lưu lại theo định dạng API yyyy-MM-dd.
   const shiftDay = useCallback((delta: number) => {
     const next = addDays(parseISO(date), delta);
     setDate(format(next, "yyyy-MM-dd"));
   }, [date]);
 
+  // Mở drawer tạo mới từ selection, giữ đúng shop, ngày, timezone và giới hạn đặt trước.
   const handleCreate = useCallback((sel: Selection) => {
     if (!activeShopId) return;
     setDrawer({
@@ -48,11 +52,13 @@ export default function AdminBookingsPage() {
     });
   }, [activeShopId, date, scheduleQuery.data]);
 
+  // Mở drawer chỉnh sửa khi người dùng chọn một booking active hoặc nút chi tiết booking hủy.
   const handleSelectBooking = useCallback((b: BookingViewModel) => {
     if (!activeShopId) return;
     setDrawer({ kind: "edit", booking: b, shopId: activeShopId, bookingDate: date });
   }, [activeShopId, date]);
 
+  // Làm mới cache timeline/detail sau khi lưu rồi đóng drawer hiện tại.
   const handleSaved = useCallback((bookingId: UUID) => {
     queryClient.invalidateQueries({ queryKey: ["schedule", activeShopId, date] });
     queryClient.invalidateQueries({ queryKey: ["admin-booking", bookingId] });

@@ -71,6 +71,7 @@ export function BookingLiveChecks({
       return;
     }
     eligibilityPhone.current = phone;
+    // Debounce request eligibility để không gọi API ở mỗi ký tự số điện thoại.
     const t = setTimeout(async () => {
       try {
         const result = await checkEligibilityRef.current({ phone, shop_id: shopId });
@@ -116,6 +117,7 @@ export function BookingLiveChecks({
       numberOfPeople > 1 && therapistRequestType === "specific"
         ? "none"
         : therapistRequestType;
+    // Debounce availability và bỏ qua response cũ bằng request ID khi input thay đổi liên tục.
     const t = setTimeout(async () => {
       onAvailabilityLoading(true);
       try {
@@ -134,6 +136,7 @@ export function BookingLiveChecks({
             effectiveRequestType === "gender" ? requestedGender : undefined,
         });
         if (reqId !== availabilityReqId.current) return;
+        // Chọn đúng slot trùng giờ bắt đầu hiện tại để cập nhật trạng thái availability của form.
         const match = slots.find((s) => s.start_time.startsWith(startTime));
         if (!match) {
           onAvailability({

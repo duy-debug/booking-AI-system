@@ -12,6 +12,7 @@ interface CancelledBookingLayerProps {
   onSelect: (booking: BookingViewModel) => void;
 }
 
+// Render booking đã hủy ở lớp nền không chặn selection, chỉ nút chi tiết nhận sự kiện click.
 export function CancelledBookingLayer({
   bookings,
   range,

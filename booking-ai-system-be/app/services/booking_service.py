@@ -32,15 +32,15 @@ from app.services.therapist_availability_service import TherapistAvailabilitySer
 _secure_random = SystemRandom()
 
 
+# Chuẩn hóa đối tượng time hoặc chuỗi giờ về định dạng HH:MM dùng trong response API.
 def _to_hhmm(value) -> str:
-    # time/Time -> "HH:MM" (bỏ giây)
     if isinstance(value, time):
         return value.strftime("%H:%M")
     return str(value)
 
 
+# Xác định một khoảng giờ có đi qua nửa đêm bằng cách so sánh tổng số phút đầu và cuối.
 def _spans_midnight(start: str, end: str) -> bool:
-    # So sánh "HH:MM": nếu end < start => qua nửa đêm
     try:
         sh, sm = (int(x) for x in start.split(":"))
         eh, em = (int(x) for x in end.split(":"))
@@ -49,14 +49,14 @@ def _spans_midnight(start: str, end: str) -> bool:
     return (eh * 60 + em) < (sh * 60 + sm)
 
 
+# Cộng số phút vào một thời điểm và tự quay vòng sang ngày mới nếu vượt quá 24 giờ.
 def _add_minutes_to_time(t: time, minutes: int) -> time:
-    """Cộng thêm phút vào time, xử lý qua nửa đêm."""
     total = t.hour * 60 + t.minute + minutes
     return time((total // 60) % 24, total % 60)
 
 
+# Chuyển Booking cùng customer, reservation và course snapshot thành cấu trúc response chi tiết.
 def _booking_to_detail(booking: Booking) -> dict:
-    """Format một Booking thành dict response chi tiết."""
     res_list = []
     for res in booking.reservations:
         courses = [
@@ -136,6 +136,7 @@ class BookingService:
             self.session.rollback()
             raise
 
+    # Kiểm tra toàn bộ quy tắc tạo lịch, phân công therapist và lưu booking trong transaction hiện tại.
     def _create(self, body: BookingCreate, idempotency_key: str) -> dict:
         if (
             body.number_of_people > 1
@@ -302,6 +303,7 @@ class BookingService:
             self.session.rollback()
             raise
 
+    # Điều phối cập nhật hoặc hủy booking, sau đó chuyển sang luồng cập nhật nhóm khi payload có reservations.
     def _update(self, booking_id: UUID, body: BookingPatchInput) -> dict:
         booking = self.schedule_repo.find_by_id(booking_id)
         if not booking:
@@ -338,8 +340,8 @@ class BookingService:
         self.session.flush()
         return _booking_to_detail(booking)
 
+    # Cập nhật toàn bộ booking nhóm theo reservation_id và đồng bộ customer, course, therapist lẫn thời gian.
     def _update_group(self, booking: Booking, body: BookingPatchInput) -> dict:
-        """Update a whole booking while addressing each person by reservation_id."""
         booking_date = body.booking_date or booking.booking_date
         start_time = body.start_time or booking.start_time
         time_changed = booking_date != booking.booking_date or start_time != booking.start_time
@@ -583,6 +585,7 @@ class BookingService:
         booking.reservations.sort(key=lambda reservation: reservation.person_index)
         return _booking_to_detail(booking)
 
+    # Chọn ngẫu nhiên đủ therapist đang rảnh cho booking nhóm và loại trừ chính booking được chỉnh sửa.
     def _auto_assign_group_therapists(
         self,
         booking: Booking,
@@ -614,6 +617,7 @@ class BookingService:
         )
         return [therapist.therapist_id for therapist in selected]
 
+    # Kiểm tra tổ hợp course của một người, trả các model hợp lệ và tổng thời lượng thực hiện.
     def _prepare_reservation_courses(self, shop_id: UUID, course_inputs: list) -> tuple[list, int]:
         rows = []
         duration = 0
@@ -658,6 +662,7 @@ class BookingService:
         return rows, duration
 
     # ── Internal: chọn therapist ──────────────────────────────────────
+    # Ưu tiên therapist được khách chỉ định bằng cách tái phân công reservation auto đang giữ therapist đó.
     def _resolve_specific_therapist_with_priority(
         self,
         shop_id: UUID,
@@ -666,7 +671,6 @@ class BookingService:
         end_time: time,
         requested_therapist_id: UUID,
     ) -> UUID:
-        """Give a specific request priority over one overlapping auto assignment."""
         requested = self.availability_service.evaluate(
             shop_id=shop_id,
             booking_date=booking_date,
@@ -733,6 +737,7 @@ class BookingService:
         self.session.flush()
         return requested_therapist_id
 
+    # Tìm đủ therapist theo yêu cầu none, gender hoặc specific và từ chối khi số lượng không đáp ứng.
     def _resolve_therapists(
         self,
         shop_id: UUID,

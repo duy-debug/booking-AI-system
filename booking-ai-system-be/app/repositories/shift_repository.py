@@ -83,6 +83,7 @@ class ShiftRepository:
         stmt = stmt.limit(1)
         return self.session.scalar(stmt) is not None
 
+    # Kiểm tra một inactive shift có chặn bất kỳ phần nào của khoảng thời gian yêu cầu hay không.
     def exists_inactive_overlap(
         self,
         therapist_id: UUID,
@@ -90,7 +91,6 @@ class ShiftRepository:
         start_time: time,
         end_time: time,
     ) -> bool:
-        """Return whether an inactive shift blocks any part of the interval."""
         stmt = (
             select(TherapistShift.shift_id)
             .where(

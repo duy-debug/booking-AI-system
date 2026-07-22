@@ -44,6 +44,7 @@ export interface CourseUiModel {
   updatedAt: string;
 }
 
+// Chuyển course DTO sang UI model, bao gồm ép giá tiền từ chuỗi decimal sang number.
 export function toCourseUiModel(dto: AdminCourseResponse): CourseUiModel {
   return {
     id: dto.course_id,

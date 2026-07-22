@@ -33,5 +33,6 @@ class TherapistShift(TimestampMixin, Base):
     therapist = relationship("Therapist", back_populates="shifts")
     shop = relationship("Shop", back_populates="therapist_shifts")
 
+    # Tạo chuỗi đại diện cho ngày và khung giờ của ca làm việc khi debug.
     def __repr__(self) -> str:
         return f"<Shift {self.work_date} {self.start_time}-{self.end_time}>"

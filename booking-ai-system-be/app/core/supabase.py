@@ -4,6 +4,7 @@ from supabase import create_client, Client
 _supabase: Client | None = None
 
 
+# Khởi tạo Supabase service client theo kiểu singleton để tránh tạo lại kết nối cho mỗi lần sử dụng.
 def get_supabase() -> Client:
     global _supabase
     if _supabase is None:

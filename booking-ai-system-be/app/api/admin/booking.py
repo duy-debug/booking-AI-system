@@ -13,6 +13,7 @@ from app.services.booking_service import BookingService
 router = APIRouter(prefix="/api/admin/booking", tags=["admin-booking"], dependencies=[Depends(require_admin)])
 
 
+# Tổng hợp shop, therapist, ca làm và booking theo ngày để dựng toàn bộ timeline quản trị.
 @router.get("")
 def get_schedule(
     shop_id: str = Query(..., description="ID shop (bắt buộc)"),
@@ -45,6 +46,7 @@ def get_schedule(
     return {"data": data}
 
 
+# Kiểm tra chuỗi có đúng định dạng giờ 24 tiếng HH:MM và nằm trong miền giá trị hợp lệ hay không.
 def _is_hhmm(value: str) -> bool:
     parts = value.split(":")
     if len(parts) != 2:

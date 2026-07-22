@@ -23,18 +23,19 @@ class TherapistAvailabilityResult:
     busy_therapist_count: int
     blocked_therapist_count: int
 
+    # Trả số therapist thực sự khả dụng sau khi đã lọc ca làm, blocked range và reservation overlap.
     @property
     def available_therapist_count(self) -> int:
         return len(self.available_therapists)
 
 
 class TherapistAvailabilityService:
-    """Find distinct therapists that can serve the whole interval in parallel."""
-
+    # Khởi tạo repository ca làm và reservation dùng cho mọi phép đánh giá availability.
     def __init__(self, session: Session):
         self.shift_repo = ShiftRepository(session)
         self.reservation_repo = ReservationRepository(session)
 
+    # Đánh giá danh sách therapist phục vụ trọn khoảng giờ theo request type và tùy chọn khóa shift.
     def evaluate(
         self,
         shop_id: UUID,
@@ -102,6 +103,7 @@ class TherapistAvailabilityService:
             blocked_therapist_count=blocked_count,
         )
 
+    # Nạp trước ca làm, blocked range và reservation của một ngày để tái sử dụng khi tính nhiều slot.
     def load_day_context(
         self, shop_id: UUID, booking_date: date
     ) -> AvailabilityDayContext:
@@ -147,6 +149,7 @@ class TherapistAvailabilityService:
             reservations_by_therapist=reservations_by_therapist,
         )
 
+    # Đánh giá availability hoàn toàn trên dữ liệu context đã nạp, tránh phát sinh truy vấn cho từng slot.
     @staticmethod
     def _evaluate_context(
         context: AvailabilityDayContext,
@@ -199,6 +202,7 @@ class TherapistAvailabilityService:
             blocked_therapist_count=blocked_count,
         )
 
+    # Kiểm tra một khoảng giờ có giao với bất kỳ khoảng đã tồn tại nào theo quy tắc đầu đóng cuối mở.
     @staticmethod
     def _has_overlap(
         intervals: list[tuple[time, time]], start_time: time, end_time: time
@@ -208,5 +212,6 @@ class TherapistAvailabilityService:
             for existing_start, existing_end in intervals
         )
 
+    # Cung cấp API rút gọn chỉ trả danh sách therapist từ kết quả đánh giá đầy đủ.
     def find_available_therapists(self, **kwargs) -> list:
         return self.evaluate(**kwargs).available_therapists

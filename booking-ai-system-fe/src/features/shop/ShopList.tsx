@@ -2,6 +2,7 @@
 
 import { useShops } from "@/features/shop/use-shop-queries";
 
+// Chuyển trạng thái hoạt động của shop thành badge màu ngắn gọn, nhất quán ở table và mobile card.
 function ShopStatus({ isActive }: { isActive: boolean }) {
   return (
     <span
@@ -16,6 +17,7 @@ function ShopStatus({ isActive }: { isActive: boolean }) {
   );
 }
 
+// Tải danh sách shop và render bảng desktop hoặc card mobile cùng các trạng thái loading/error/empty.
 export function ShopList() {
   const { data, isLoading, isError, error } = useShops();
 

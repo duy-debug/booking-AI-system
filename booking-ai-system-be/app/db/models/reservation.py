@@ -43,5 +43,6 @@ class Reservation(TimestampMixin, Base):
         cascade="all, delete-orphan",
     )
 
+    # Tạo chuỗi đại diện cho từng người trong booking cùng trạng thái reservation hiện tại.
     def __repr__(self) -> str:
         return f"<Reservation #{self.person_index} - {self.status}>"

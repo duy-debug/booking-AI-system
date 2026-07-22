@@ -6,6 +6,7 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 
+// Thu thập email, mật khẩu, gọi Supabase đăng nhập và hiển thị trạng thái gửi form.
 export function LoginForm() {
   const { signIn } = useAuth();
   const router = useRouter();
@@ -14,6 +15,7 @@ export function LoginForm() {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  // Ngăn submit mặc định, gọi auth provider và hiển thị lỗi đăng nhập nếu Supabase từ chối.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");

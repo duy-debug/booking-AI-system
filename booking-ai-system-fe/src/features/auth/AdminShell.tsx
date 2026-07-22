@@ -35,6 +35,7 @@ const sidebarItems: SidebarItem[] = [
   { label: "Cấm khách", href: "/admin/restrictions", icon: UserRoundX },
 ];
 
+// Dựng layout admin responsive, bảo vệ route và tách vùng cuộn sidebar khỏi nội dung chính.
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const { user, isLoading, signOut } = useAuth();
   const router = useRouter();

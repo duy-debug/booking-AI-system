@@ -8,6 +8,7 @@ import type { ScheduleResponseRaw } from "./schedule.api";
 import type { ScheduleViewModel } from "./schedule.types";
 import type { ISODate, UUID } from "@/shared/types/common";
 
+// Gọi endpoint tổng hợp timeline theo shop/ngày và chuyển raw response thành ScheduleViewModel.
 async function fetchSchedule(
   shopId: UUID,
   date: ISODate,
@@ -18,6 +19,7 @@ async function fetchSchedule(
   return toScheduleViewModel(raw, FULL_DAY_RANGE);
 }
 
+// Quản lý cache timeline và chỉ tải khi đã có shop cùng ngày hợp lệ.
 export function useScheduleData(shopId: UUID | null, date: ISODate) {
   return useQuery<ScheduleViewModel, Error>({
     queryKey: ["schedule", shopId, date],

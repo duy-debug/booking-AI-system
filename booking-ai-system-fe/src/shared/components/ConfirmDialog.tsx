@@ -25,6 +25,7 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
 
+// Hiển thị hộp thoại xác nhận có focus an toàn, hai hành động và trạng thái loading tùy chọn.
 export function ConfirmDialog({
   open,
   title,
@@ -58,6 +59,7 @@ export function ConfirmDialog({
     const safeButton = dialog?.querySelector<HTMLElement>("[data-safe-action]");
     safeButton?.focus();
 
+    // Đóng dialog bằng Escape khi không loading và giữ focus không thoát khỏi modal.
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -96,6 +98,7 @@ export function ConfirmDialog({
 
   if (!open) return null;
 
+  // Chặn double-submit và chuyển mọi callback confirm đồng bộ/bất đồng bộ về cùng một luồng.
   const handleConfirm = async () => {
     setInternalLoading(true);
     try {

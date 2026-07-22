@@ -13,10 +13,12 @@ class BookingStartWindow:
     earliest_allowed_at: datetime
 
 
+# Lấy thời điểm UTC hiện tại qua một hàm riêng để nghiệp vụ thời gian có thể được cố định trong test.
 def current_utc_time() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# Quy đổi ngày giờ tại timezone của shop sang UTC và tính mốc sớm nhất khách được phép đặt lịch.
 def booking_start_window(
     booking_date: date,
     start_time: time,
@@ -46,6 +48,7 @@ def booking_start_window(
     )
 
 
+# Xác thực giờ bắt đầu không nằm trong quá khứ và đáp ứng số phút đặt trước tối thiểu.
 def validate_booking_start(
     booking_date: date,
     start_time: time,
@@ -81,6 +84,7 @@ def validate_booking_start(
     return window
 
 
+# Trả về boolean cho biết thời điểm bắt đầu đã vượt qua mốc đặt trước tối thiểu hay chưa.
 def is_booking_start_allowed(
     booking_date: date,
     start_time: time,

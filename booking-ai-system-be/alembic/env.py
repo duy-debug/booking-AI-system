@@ -27,6 +27,7 @@ target_metadata = Base.metadata
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 
+# Cấu hình migration offline bằng URL và literal bind để sinh SQL mà không mở kết nối database.
 def run_migrations_offline() -> None:
     context.configure(
         url=DATABASE_URL,
@@ -38,6 +39,7 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+# Mở kết nối database không dùng pool và chạy migration online trong một transaction Alembic.
 def run_migrations_online() -> None:
     connectable = create_engine(DATABASE_URL, poolclass=pool.NullPool)
     with connectable.connect() as connection:

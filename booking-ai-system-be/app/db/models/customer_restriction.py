@@ -32,5 +32,6 @@ class CustomerRestriction(TimestampMixin, Base):
         Boolean, default=True, nullable=False  # Còn hiệu lực không
     )
 
+    # Tạo chuỗi đại diện chứa số điện thoại và trạng thái hạn chế của khách hàng.
     def __repr__(self) -> str:
         return f"<Restriction {self.phone} active={self.is_active}>"

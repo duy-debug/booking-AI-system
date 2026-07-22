@@ -16,6 +16,7 @@ interface ZonedParts {
   seconds: number;
 }
 
+// Tách ngày giờ theo timezone của shop thay vì timezone máy người dùng để so sánh chính xác.
 function zonedParts(value: Date, timeZone: string): ZonedParts {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
@@ -27,6 +28,7 @@ function zonedParts(value: Date, timeZone: string): ZonedParts {
     second: "2-digit",
     hourCycle: "h23",
   }).formatToParts(value);
+  // Đọc một date-time part đã format và chuyển sang số để xây cấu trúc ZonedParts.
   const read = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((part) => part.type === type)?.value ?? "00";
   const date = `${read("year")}-${read("month")}-${read("day")}`;
@@ -39,6 +41,7 @@ function zonedParts(value: Date, timeZone: string): ZonedParts {
   };
 }
 
+// Tính phút bắt đầu sớm nhất sau khi cộng thời gian đặt trước và làm tròn theo step.
 export function earliestSelectableForDate({
   bookingDate,
   stepMinutes,
@@ -61,6 +64,7 @@ export function earliestSelectableForDate({
   return Math.ceil(earliest.seconds / (stepMinutes * 60)) * stepMinutes;
 }
 
+// Kiểm tra selection có nằm trong quá khứ hoặc sát giờ hơn giới hạn đặt trước hay không.
 export function validateBookingStart({
   bookingDate,
   startMinutes,

@@ -34,6 +34,7 @@ export interface TherapistUiModel {
   updatedAt: string;
 }
 
+// Ánh xạ therapist DTO sang UI model camelCase và giữ nguyên ID dùng cho phân công booking.
 export function toTherapistUiModel(dto: TherapistResponse): TherapistUiModel {
   return {
     id: dto.therapist_id,

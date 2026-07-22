@@ -11,6 +11,7 @@ import {
   type ShiftUpdateInput,
 } from "./shift.types";
 
+// Tải ca làm theo shop với bộ lọc ngày, therapist và trạng thái active tùy chọn.
 export function useShifts(
   shopId: UUID,
   opts?: { workDate?: string; therapistId?: UUID; isActive?: boolean },
@@ -27,12 +28,14 @@ export function useShifts(
   );
 }
 
+// Tạo mutation thêm ca làm mới cho therapist.
 export function useCreateShift() {
   return useApiMutation<ShiftCreateInput, ShiftResponse>((input) =>
     apiClient.post<ShiftResponse>(shiftApi.create, input),
   );
 }
 
+// Tạo mutation cập nhật ca làm hiện có theo shift ID.
 export function useUpdateShift(id: UUID) {
   return useApiMutation<ShiftUpdateInput, ShiftResponse>((input) =>
     apiClient.patch<ShiftResponse>(shiftApi.update(id), input),

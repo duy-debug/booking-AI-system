@@ -95,6 +95,7 @@ CUSTOMER_COUNT = 240
 SEED_DAYS = 21
 
 
+# Sinh danh sách therapist tên Nhật cho từng shop với mã POS, giới tính và tên không bị lệch chỉ số.
 def build_therapists() -> dict[str, list[tuple[str, str, str]]]:
     result = {}
     for shop_index, shop_code in enumerate(COURSES):
@@ -114,6 +115,7 @@ def build_therapists() -> dict[str, list[tuple[str, str, str]]]:
     return result
 
 
+# Sinh tập khách hàng Nhật có số điện thoại duy nhất, hạng thành viên và lịch sử ghé thăm đa dạng.
 def build_customers() -> list[dict]:
     customers = []
     all_given_names = JAPANESE_FEMALE_NAMES + JAPANESE_MALE_NAMES
@@ -155,6 +157,7 @@ def clean(db: Session):
         db.execute(text(f"DELETE FROM {table}"))
     db.commit()
 
+# Tạo các shop hoạt động, flush để lấy khóa chính và trả map theo shop_code cho các bước seed sau.
 def seed_shops(db: Session) -> dict[str, Shop]:
     print("  Tạo chi nhánh...")
     result = {}
@@ -165,6 +168,7 @@ def seed_shops(db: Session) -> dict[str, Shop]:
         result[d["shop_code"]] = s
     return result
 
+# Tạo main course và add-on đúng shop, đồng thời chuyển giá cấu hình sang Decimal trước khi lưu.
 def seed_courses(db: Session, shops: dict[str, Shop]):
     print("  Tạo dịch vụ...")
     for shop_code, items in COURSES.items():
@@ -174,6 +178,7 @@ def seed_courses(db: Session, shops: dict[str, Shop]):
                           duration_minutes=duration, price=Decimal(price_str), course_type=ctype, is_active=True))
     db.flush()
 
+# Tạo therapist cho từng shop và trả danh sách model đã có ID để seed shift và reservation.
 def seed_therapists(db: Session, shops: dict[str, Shop]) -> dict[str, list[Therapist]]:
     print("  Tạo therapist...")
     result = {}
@@ -188,6 +193,7 @@ def seed_therapists(db: Session, shops: dict[str, Shop]) -> dict[str, list[Thera
         result[shop_code] = lst
     return result
 
+# Tạo ca làm toàn ngày trong ba tuần cho từng therapist, bỏ qua Chủ nhật theo lịch vận hành mẫu.
 def seed_shifts(db: Session, shops: dict[str, Shop], therapists: dict[str, list[Therapist]]):
     print("  Tạo ca làm...")
     today = date.today()
@@ -202,6 +208,7 @@ def seed_shifts(db: Session, shops: dict[str, Shop], therapists: dict[str, list[
                                       work_date=d, start_time=time(8), end_time=time(22), is_active=True))
     db.flush()
 
+# Lưu toàn bộ khách hàng mẫu và trả model đã flush để liên kết luân phiên với các booking.
 def seed_customers(db: Session) -> list[Customer]:
     print("  Tạo khách hàng...")
     customers = []
@@ -213,12 +220,14 @@ def seed_customers(db: Session) -> list[Customer]:
         customers.append(c)
     return customers
 
+# Tạo cả hạn chế đang hiệu lực và lịch sử hạn chế đã gỡ để kiểm thử NG list.
 def seed_restrictions(db: Session):
     print("  Tạo NG list...")
     for d in RESTRICTIONS:
         db.add(CustomerRestriction(**d))
     db.flush()
 
+# Sinh booking đơn và nhóm không trùng therapist, kèm course snapshot và nguồn phân công auto.
 def seed_bookings(
     db: Session,
     shops: dict[str, Shop],
@@ -302,6 +311,7 @@ def seed_bookings(
     db.flush()
     return booking_number
 
+# Điều phối xóa dữ liệu cũ, seed theo đúng thứ tự khóa ngoại, commit và in thống kê kết quả.
 def main():
     print("=== Seed dữ liệu mẫu ===")
     with Session(engine) as db:

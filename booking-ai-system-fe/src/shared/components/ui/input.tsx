@@ -5,6 +5,7 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   error?: string;
 }
 
+// Render input có label liên kết accessibility và thông báo validation ngay dưới trường dữ liệu.
 export function Input({ label, error, className = "", id, ...rest }: InputProps) {
   const inputId = id ?? rest.name;
   return (

@@ -9,6 +9,7 @@ interface TimeGridProps {
   step: number;
 }
 
+// Vẽ các đường chia phút, giờ và step làm nền căn chỉnh cho mọi layer trên timeline.
 export function TimeGrid({ range, height, pxPerMinute, step }: TimeGridProps) {
   const span = range.end - range.start;
 

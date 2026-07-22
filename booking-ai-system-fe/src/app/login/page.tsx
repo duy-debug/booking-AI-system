@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { LoginForm } from "@/features/auth/LoginForm";
 
+// Hiển thị form đăng nhập và tự chuyển người đã có session hợp lệ về khu vực admin.
 export default function LoginPage() {
   const { user, isLoading } = useAuth();
   const router = useRouter();

@@ -29,6 +29,7 @@ const LEGEND_ITEMS = [
   { key: "cancelled", label: "Huỷ", dot: STATUS_STYLES.cancelled.dot },
 ] as const;
 
+// Cung cấp bộ điều khiển shop, ngày, step và điều hướng ngày cho timeline booking.
 export function ScheduleToolbar({
   date,
   onDateChange,

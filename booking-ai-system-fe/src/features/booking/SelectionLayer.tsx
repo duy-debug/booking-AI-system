@@ -18,6 +18,7 @@ interface SelectionLayerProps {
   onClear: () => void;
 }
 
+// Hiển thị vùng giờ đang chọn và phát sự kiện commit để mở form tạo booking.
 export function SelectionLayer({
   selection,
   range,
@@ -25,9 +26,11 @@ export function SelectionLayer({
   onCommit,
   onClear,
 }: SelectionLayerProps) {
+  // Xác nhận vùng selection hiện tại để cha mở luồng tạo booking.
   const handleCommit = useCallback(() => {
     if (selection) onCommit(selection);
   }, [selection, onCommit]);
+  // Xóa selection mà không tạo booking khi người dùng hủy vùng đã chọn.
   const handleClear = useCallback(() => onClear(), [onClear]);
 
   if (!selection) return null;

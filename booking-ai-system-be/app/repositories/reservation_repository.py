@@ -76,6 +76,7 @@ class ReservationRepository:
         stmt = stmt.limit(1)
         return self.session.scalar(stmt) is not None
 
+    # Tìm và khóa các reservation active đang chiếm therapist trong khoảng giờ để tái cân bằng an toàn.
     def find_overlaps_for_update(
         self,
         therapist_id: UUID,
@@ -83,7 +84,6 @@ class ReservationRepository:
         start_time: time,
         end_time: time,
     ) -> list[Reservation]:
-        """Lock active reservations occupying a therapist in an interval."""
         stmt = (
             select(Reservation)
             .join(Booking)
@@ -100,6 +100,7 @@ class ReservationRepository:
         )
         return list(self.session.scalars(stmt).all())
 
+    # Tìm các reservation active bị giao với khoảng giờ nhưng không khóa dòng, phù hợp cho bước dự báo.
     def find_overlaps(
         self,
         therapist_id: UUID,
@@ -107,7 +108,6 @@ class ReservationRepository:
         start_time: time,
         end_time: time,
     ) -> list[Reservation]:
-        """Return active reservations occupying a therapist without taking locks."""
         stmt = (
             select(Reservation)
             .join(Booking)

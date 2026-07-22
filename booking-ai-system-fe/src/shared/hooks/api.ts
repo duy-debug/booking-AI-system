@@ -25,6 +25,7 @@ export function useApiQuery<T, TOut = T>(
   });
 }
 
+// Tải API dạng danh sách, lấy trường data và ánh xạ từng DTO sang model hiển thị khi có mapper.
 export function useApiListQuery<TRaw, TOut = TRaw>(
   key: readonly unknown[],
   path: string,
@@ -42,6 +43,7 @@ export function useApiListQuery<TRaw, TOut = TRaw>(
   });
 }
 
+// Bọc mutationFn bằng TanStack Query để các feature dùng chung trạng thái pending, error và result.
 export function useApiMutation<TVariables, TData>(
   fn: (vars: TVariables) => Promise<TData>,
   options?: Omit<UseMutationOptions<TData, Error, TVariables>, "mutationFn">,

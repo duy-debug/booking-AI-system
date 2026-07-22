@@ -11,12 +11,12 @@ interface CurrentTimeLineProps {
   pxPerMinute: number;
 }
 
-// Only rendered when the selected date is today (checked in parent).
-// Updates position every 60s using the shop's timezone.
+// Hiển thị đường thời gian hiện tại khi ngày được chọn là hôm nay và cập nhật vị trí mỗi phút theo múi giờ của shop.
 export function CurrentTimeLine({ range, date, timezone, pxPerMinute }: CurrentTimeLineProps) {
   const [x, setX] = useState<number | null>(null);
 
   useEffect(() => {
+    // Tính lại tọa độ thời gian hiện tại để đường đỏ dịch chuyển theo đồng hồ thực.
     const update = () => setX(nowAbsoluteMinutes(range, date, timezone));
     update();
     const t = setInterval(update, 60_000);

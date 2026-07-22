@@ -35,5 +35,6 @@ class Customer(TimestampMixin, Base):
 
     bookings = relationship("Booking", back_populates="customer")
 
+    # Tạo chuỗi đại diện chứa số điện thoại và tên khách hàng khi kiểm tra dữ liệu ORM.
     def __repr__(self) -> str:
         return f"<Customer {self.phone} - {self.name}>"

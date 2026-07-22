@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 
+// Tạo QueryClient với chính sách stale, retry và cache phù hợp cho dữ liệu quản trị.
 function makeQueryClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
@@ -22,6 +23,7 @@ function makeQueryClient(): QueryClient {
 
 let browserQueryClient: QueryClient | undefined;
 
+// Dùng client riêng khi SSR và singleton trên trình duyệt để giữ cache qua các lần render.
 function getQueryClient(): QueryClient {
   if (isServer) {
     return makeQueryClient();
@@ -32,6 +34,7 @@ function getQueryClient(): QueryClient {
   return browserQueryClient;
 }
 
+// Cấp QueryClient ổn định cho toàn bộ query và mutation nằm dưới cây component.
 export function AppQueryClientProvider({ children }: { children: ReactNode }) {
   const [queryClient] = useState(getQueryClient);
   return (

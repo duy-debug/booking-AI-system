@@ -115,6 +115,7 @@ export interface BookingDetailUi {
 // --- Mappers ---
 import { resolveEndDate, parseDecimal } from "@/shared/lib/datetime";
 
+// Chuyển booking detail sang model camelCase, chuẩn hóa tiền và danh sách reservation.
 export function toBookingDetailUi(raw: BookingDetailRaw): BookingDetailUi {
   return {
     id: raw.booking_id,
@@ -164,6 +165,7 @@ export interface BookingListUi {
   status: BookingStatus;
 }
 
+// Ánh xạ booking rút gọn của admin sang model dùng cho bảng hoặc danh sách quản trị.
 export function toBookingListUi(raw: AdminBookingListItemRaw): BookingListUi {
   return {
     id: raw.booking_id,

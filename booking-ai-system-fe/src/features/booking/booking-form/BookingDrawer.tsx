@@ -46,12 +46,14 @@ interface BookingDrawerProps {
   onSaved: (bookingId: UUID) => void;
 }
 
+// Chỉ mount modal khi có state create/edit và chuyển xử lý chi tiết cho component nội bộ.
 export function BookingDrawer({ state, onClose, onSaved }: BookingDrawerProps) {
   if (!state) return null;
   return <BookingModalInner state={state} onClose={onClose} onSaved={onSaved} />;
 }
 
 // ─── Modal inner ────────────────────────────────────────────────────────
+// Điều phối detail query, dirty state, lưu/hủy booking và các dialog xác nhận trong modal.
 function BookingModalInner({
   state,
   onClose,
@@ -99,8 +101,10 @@ function BookingModalInner({
     }
   }, [detailQuery.isError, showError]);
 
+  // Đóng modal qua callback của trang cha để trạng thái drawer được đặt lại tập trung.
   const closeBookingForm = useCallback(() => onClose(), [onClose]);
 
+  // Đóng ngay khi form sạch hoặc mở xác nhận nếu còn thay đổi chưa lưu.
   const requestClose = useCallback(() => {
     if (resolveCloseIntent(dirty) === "close-form") {
       closeBookingForm();
@@ -109,11 +113,13 @@ function BookingModalInner({
     setConfirmCloseOpen(true);
   }, [closeBookingForm, dirty]);
 
+  // Hủy ý định rời form và xóa navigation target đang chờ.
   const cancelDiscardChanges = useCallback(() => {
     setConfirmCloseOpen(false);
     setPendingNavigation(null);
   }, []);
 
+  // Reset form, đóng modal và tiếp tục điều hướng sau khi người dùng chấp nhận bỏ thay đổi.
   const confirmDiscardChanges = useCallback(() => {
     const navigationTarget = pendingNavigation;
     formRef.current?.reset();
@@ -125,6 +131,7 @@ function BookingModalInner({
   }, [closeBookingForm, pendingNavigation, router]);
 
   useEffect(() => {
+    // Phân giải phím Escape theo dialog đang mở và dirty state của form.
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       const intent = resolveEscapeIntent({
@@ -147,6 +154,7 @@ function BookingModalInner({
   }, [cancelDiscardChanges, closeBookingForm, confirmCloseOpen, dirty, showCancelConfirm]);
 
   useEffect(() => {
+    // Chặn link nội bộ khi form bẩn để yêu cầu xác nhận trước khi mất dữ liệu.
     const interceptNavigation = (event: MouseEvent) => {
       if (!dirty || confirmCloseOpen || showCancelConfirm || event.defaultPrevented) return;
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -201,6 +209,7 @@ function BookingModalInner({
     };
   }, [state, detailQuery.data]);
 
+  // Gửi yêu cầu hủy booking, phát alert kết quả và làm mới timeline khi thành công.
   const handleCancelBooking = async () => {
     if (!bookingId) return;
     setCancelling(true);
@@ -217,6 +226,7 @@ function BookingModalInner({
     }
   };
 
+  // Đánh dấu form sạch trước khi báo booking vừa lưu cho trang cha.
   const handleSaved = (id: UUID) => {
     setDirty(false);
     onSaved(id);

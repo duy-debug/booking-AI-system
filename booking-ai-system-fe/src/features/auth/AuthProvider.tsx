@@ -39,6 +39,7 @@ function isAdminEmail(email: string | undefined): boolean {
     .includes(email.toLowerCase());
 }
 
+// Theo dõi Supabase session, cung cấp trạng thái đăng nhập và các thao tác sign-in/sign-out cho ứng dụng.
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -69,12 +70,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Đăng nhập bằng email/mật khẩu và chuyển lỗi Supabase về cho form xử lý.
   const signIn = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return { error: error.message };
     return {};
   }, []);
 
+  // Đăng xuất session hiện tại và xóa trạng thái user cục bộ sau khi Supabase hoàn tất.
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
   }, []);
@@ -92,6 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+// Trả auth context hiện tại và báo lỗi rõ ràng nếu hook được gọi ngoài AuthProvider.
 export function useAuth(): AuthState {
   const ctx = useContext(AuthContext);
   if (!ctx) {

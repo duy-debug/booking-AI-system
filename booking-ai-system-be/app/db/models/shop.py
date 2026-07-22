@@ -35,5 +35,6 @@ class Shop(TimestampMixin, Base):
     therapist_shifts = relationship("TherapistShift", back_populates="shop")
     bookings = relationship("Booking", back_populates="shop")
 
+    # Tạo chuỗi đại diện gồm mã và tên shop để hỗ trợ log và debug ORM.
     def __repr__(self) -> str:
         return f"<Shop {self.shop_code} - {self.name}>"

@@ -6,6 +6,7 @@ interface ResourceColumnProps {
   hasAnyShift: boolean;
 }
 
+// Hiển thị tên therapist và trạng thái ca làm trong cột resource cố định của timeline.
 export function ResourceColumn({ name, hasActiveShift, hasAnyShift }: ResourceColumnProps) {
   let statusDot: string;
   let statusLabel: string;

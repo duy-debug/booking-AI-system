@@ -40,5 +40,6 @@ class Course(TimestampMixin, Base):
     shop = relationship("Shop", back_populates="courses")
     reservation_courses = relationship("ReservationCourse", back_populates="course")
 
+    # Tạo chuỗi đại diện gồm tên và loại course để hỗ trợ debug dữ liệu ORM.
     def __repr__(self) -> str:
         return f"<Course {self.name} - {self.course_type} - ¥{self.price}>"

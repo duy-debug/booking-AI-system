@@ -14,14 +14,14 @@ from app.core.exceptions import AppError
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
+# Khởi tạo và cache JWKS client để tái sử dụng public key khi xác thực nhiều request.
 @lru_cache(maxsize=1)
 def _jwk_client() -> PyJWKClient:
-    # JWKS client — cache để không fetch public key mỗi request
     return PyJWKClient(settings.SUPABASE_JWKS_URL)
 
 
+# Xác minh chữ ký và hạn sử dụng của Supabase JWT, sau đó trả payload người dùng đã tin cậy.
 def verify_supabase_token(token: str) -> dict:
-    # Giải mã & verify Supabase Auth JWT bằng public key từ JWKS
     try:
         signing_key = _jwk_client().get_signing_key_from_jwt(token)
         return jwt.decode(
@@ -36,19 +36,19 @@ def verify_supabase_token(token: str) -> dict:
         raise AppError(401, code="AUTHENTICATION_REQUIRED", detail="Token khong hop le")
 
 
+# Đọc Bearer token từ request và trả payload của người dùng đã đăng nhập.
 def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> dict:
-    # Dependency — lấy payload user từ Bearer token Supabase
     if credentials is None:
         raise AppError(401, code="AUTHENTICATION_REQUIRED", detail="Thieu Authorization header")
     return verify_supabase_token(credentials.credentials)
 
 
+# Xác thực token và chỉ cho phép email nằm trong danh sách tài khoản quản trị cấu hình sẵn.
 def require_admin(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> dict:
-    # Dependency — chỉ cho phép user có email nằm trong ADMIN_EMAILS
     if credentials is None:
         raise AppError(401, code="AUTHENTICATION_REQUIRED", detail="Thieu Authorization header")
     payload = verify_supabase_token(credentials.credentials)

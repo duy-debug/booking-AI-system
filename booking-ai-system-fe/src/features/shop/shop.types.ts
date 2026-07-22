@@ -50,6 +50,7 @@ export interface ShopUiModel {
 }
 
 // --- Mapper (DTO -> UI model, nguyên tắc 7) ---
+// Ánh xạ DTO snake_case của shop từ backend sang model camelCase an toàn cho UI.
 export function toShopUiModel(dto: AdminShopResponse): ShopUiModel {
   return {
     id: dto.shop_id,

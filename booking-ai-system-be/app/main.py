@@ -29,9 +29,9 @@ app = FastAPI(
 # Exception handlers — RFC 9457 Problem Details cho toàn bộ API
 
 
+# Chuyển lỗi kiểm tra dữ liệu đầu vào của FastAPI sang cấu trúc Problem Details thống nhất cho frontend.
 @app.exception_handler(RequestValidationError)
 def validation_handler(request: Request, exc: RequestValidationError):
-    """FastAPI validation error → RFC 9457 format"""
     return JSONResponse(
         status_code=422,
         content={
@@ -49,9 +49,9 @@ def validation_handler(request: Request, exc: RequestValidationError):
     )
 
 
+# Chuẩn hóa AppError và HTTPException thành response RFC 9457, đồng thời giữ nguyên mã lỗi nghiệp vụ.
 @app.exception_handler(HTTPException)
 def http_exception_handler(request: Request, exc: HTTPException):
-    """AppError / HTTPException → RFC 9457 Problem Details (unwrap detail dict)"""
     if isinstance(exc.detail, dict):
         return JSONResponse(status_code=exc.status_code, content=exc.detail)
     return JSONResponse(
@@ -93,11 +93,13 @@ app.include_router(admin_bookings_router)
 app.include_router(admin_booking_router)
 
 
+# Trả về tên và phiên bản ứng dụng để xác nhận nhanh backend đang hoạt động.
 @app.get("/")
 def root():
     return {"message": f"{settings.APP_NAME} v{settings.APP_VERSION}"}
 
 
+# Cung cấp endpoint health-check tối giản cho Docker, CI hoặc hệ thống giám sát.
 @app.get("/health")
 def health():
     return {"status": "ok"}

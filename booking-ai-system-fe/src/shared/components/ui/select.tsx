@@ -6,6 +6,7 @@ interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   options: { value: string; label: string }[];
 }
 
+// Render select dùng chung với label, placeholder, danh sách option và trạng thái lỗi validation.
 export function Select({
   label,
   error,

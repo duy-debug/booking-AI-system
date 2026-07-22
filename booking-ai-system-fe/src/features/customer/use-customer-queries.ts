@@ -13,6 +13,7 @@ import {
   type RestrictionUpdateInput,
 } from "./customer.types";
 
+// Tải danh sách hạn chế khách hàng theo số điện thoại hoặc trạng thái hiệu lực.
 export function useRestrictions(opts?: { phone?: string; isActive?: boolean }) {
   return useApiListQuery<RestrictionResponse, RestrictionUiModel>(
     ["restrictions", opts?.phone, opts?.isActive],
@@ -22,12 +23,14 @@ export function useRestrictions(opts?: { phone?: string; isActive?: boolean }) {
   );
 }
 
+// Tạo mutation thêm khách hàng vào danh sách hạn chế đặt lịch.
 export function useCreateRestriction() {
   return useApiMutation<RestrictionCreateInput, RestrictionResponse>((input) =>
     apiClient.post<RestrictionResponse>(restrictionApi.create, input),
   );
 }
 
+// Tạo mutation thay đổi lý do hoặc trạng thái của một restriction theo ID.
 export function useUpdateRestriction(id: UUID) {
   return useApiMutation<RestrictionUpdateInput, RestrictionResponse>((input) =>
     apiClient.patch<RestrictionResponse>(restrictionApi.update(id), input),

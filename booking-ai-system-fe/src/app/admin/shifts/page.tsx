@@ -1,3 +1,4 @@
+// Hiển thị điểm vào của phân hệ quản lý ca làm việc theo shop và ngày.
 export default function AdminShiftsPage() {
   return (
     <div>

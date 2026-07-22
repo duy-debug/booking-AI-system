@@ -6,6 +6,7 @@ import { AppQueryClientProvider } from "@/shared/hooks/query-client-provider";
 import { AuthProvider } from "@/features/auth/AuthProvider";
 import { AlertProvider } from "@/shared/components/AlertProvider";
 
+// Ghép QueryClient, alert và authentication provider theo thứ tự dùng chung cho toàn ứng dụng.
 export function AppProviders({ children }: { children: ReactNode }) {
   return (
     <AppQueryClientProvider>

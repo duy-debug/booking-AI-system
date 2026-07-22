@@ -29,6 +29,7 @@ interface ScheduleBoardProps {
   onCreateBooking: (selection: Selection) => void;
 }
 
+// Tính tỉ lệ timeline, quản lý selection và render toàn bộ resource rows của lịch trong ngày.
 export function ScheduleBoard({
   schedule,
   isLoading,
@@ -45,6 +46,7 @@ export function ScheduleBoard({
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
+    // Cập nhật đồng hồ định kỳ để vùng không được chọn tiến theo thời gian thực.
     const timer = window.setInterval(() => setNow(new Date()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
@@ -59,6 +61,7 @@ export function ScheduleBoard({
   useEffect(() => {
     const el = boardRef.current;
     if (!el) return;
+    // Theo dõi chiều rộng board để chuyển giữa chế độ fit desktop và cuộn ngang mobile.
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
         setBoardWidth(entry.contentRect.width);
@@ -68,10 +71,13 @@ export function ScheduleBoard({
     return () => ro.disconnect();
   }, []);
 
+  // Xóa selection hiện tại khi người dùng hủy hoặc chuyển sang vùng khác.
   const handleClearSelection = useCallback(() => setSelection(null), []);
+  // Ghi nhận selection bước đầu để layer hiển thị khoảng giờ đang chọn.
   const handleStartSelection = useCallback((sel: Selection) => {
     setSelection(sel);
   }, []);
+  // Xác thực giới hạn đặt trước rồi mở form tạo booking hoặc hiển thị alert lỗi thời gian.
   const handleCommitSelection = useCallback((sel: Selection) => {
     if (!schedule) return;
     const validation = validateBookingStart({
@@ -90,6 +96,7 @@ export function ScheduleBoard({
     setSelection(null);
   }, [onCreateBooking, schedule, showError]);
 
+  // Nhóm booking theo therapist một lần để mỗi ResourceRow chỉ nhận dữ liệu liên quan.
   const bookingsByTherapist = useMemo(() => {
     if (!schedule) return new Map<string, BookingViewModel[]>();
     const map = new Map<string, BookingViewModel[]>();

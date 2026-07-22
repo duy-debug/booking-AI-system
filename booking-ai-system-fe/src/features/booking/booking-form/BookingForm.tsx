@@ -86,6 +86,7 @@ interface BookingFormProps {
   editDetail?: AdminBookingDetailRaw;
 }
 
+// Quản lý toàn bộ state form tạo/chỉnh sửa, live checks, payload API và thông báo kết quả booking.
 export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(function BookingForm({
   initial,
   onSaved,
@@ -147,6 +148,7 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
+    // Cập nhật đồng hồ định kỳ để danh sách giờ bị khóa luôn bám sát giới hạn đặt trước.
     const timer = window.setInterval(() => setNow(new Date()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
@@ -168,6 +170,7 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
         now,
         advanceMinutes: minimumBookingAdvanceMinutes,
       });
+  // Đánh dấu option giờ sớm hơn giới hạn hiện tại là disabled mà không tạo lại mảng dư thừa.
   const timeOptions = useMemo(
     () => TIME_OPTIONS.map((option) => ({
       ...option,
@@ -177,10 +180,12 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
     })),
     [earliestSelectableMinutes],
   );
+  // Tính thời lượng và tổng giá song song cho form tạo mới hoặc từng reservation khi chỉnh sửa.
   const summary = useMemo<BookingFormSummary>(() => {
     const selectedCourses = courses.filter(
       (course) => course.id === mainCourseId || addonCourseIds.includes(course.id),
     );
+    // Tính duration/price riêng từng người trước khi tổng hợp booking nhóm.
     const editedPeople = reservationEdits.map((reservation) => {
       const selected = courses.filter(
         (course) => course.id === reservation.mainCourseId || reservation.addonCourseIds.includes(course.id),
@@ -251,6 +256,7 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
         shouldValidate: true,
       });
     }
+    // Sao chép reservation còn giữ lại để thay đổi số người mà không mutate state hiện tại.
     const next = current.slice(0, numberOfPeople).map((reservation) => ({
       ...reservation,
       addonCourseIds: [...reservation.addonCourseIds],
@@ -286,6 +292,7 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
     );
   }, [editDetail?.reservations, form, initial.numberOfPeople, isEdit, numberOfPeople]);
 
+  // Ánh xạ lỗi field vào React Hook Form và đưa lỗi nghiệp vụ/server lên alert dùng chung.
   const applyApiErrors = (err: unknown) => {
     if (err instanceof ApiError) {
       const fields = err.fieldErrors();
@@ -319,6 +326,7 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
     }
   };
 
+  // Chống gửi lặp, gọi mutation create/update, reset form và phát sự kiện lưu thành công.
   const onSubmit = form.handleSubmit(async (vals) => {
     if (submitting) return;
     setSubmitting(true);

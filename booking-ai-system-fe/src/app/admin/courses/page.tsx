@@ -1,3 +1,4 @@
+// Hiển thị điểm vào của phân hệ quản lý course và hướng dẫn chọn shop cần thao tác.
 export default function AdminCoursesPage() {
   return (
     <div>

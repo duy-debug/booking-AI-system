@@ -20,6 +20,7 @@ export interface BookingListQuery {
   cursor?: string | null;
 }
 
+// Tải danh sách booking admin theo bộ lọc và ánh xạ từng DTO sang model danh sách.
 export function useAdminBookings(query: BookingListQuery) {
   return useApiListQuery<AdminBookingListItemRaw, BookingListUi>(
     ["admin-bookings", query],
@@ -37,6 +38,7 @@ export function useAdminBookings(query: BookingListQuery) {
   );
 }
 
+// Tải chi tiết booking cho modal chỉnh sửa và cho phép caller điều khiển trạng thái enabled.
 export function useAdminBookingDetail(
   id: UUID,
   options?: { enabled?: boolean },
@@ -60,6 +62,7 @@ export interface CancelBookingResponse {
   status: BookingStatus;
 }
 
+// Gửi PATCH chuyển booking sang cancelled cùng lý do hủy do admin cung cấp.
 export function cancelBooking({ id, cancelReason }: CancelBookingVars) {
   return apiClient.patch<CancelBookingResponse>(bookingApi.cancel(id), {
     status: "cancelled",
@@ -67,6 +70,7 @@ export function cancelBooking({ id, cancelReason }: CancelBookingVars) {
   });
 }
 
+// Bọc thao tác hủy booking trong mutation để UI theo dõi loading, error và kết quả.
 export function useCancelBooking() {
   return useApiMutation<CancelBookingVars, CancelBookingResponse>(cancelBooking);
 }

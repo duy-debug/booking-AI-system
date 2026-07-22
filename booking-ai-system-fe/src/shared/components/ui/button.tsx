@@ -16,6 +16,7 @@ const variants: Record<NonNullable<ButtonProps["variant"]>, string> = {
     "bg-transparent text-zinc-700 hover:bg-zinc-100 disabled:opacity-50",
 };
 
+// Chuẩn hóa button theo variant, trạng thái disabled/loading và cho phép bổ sung class từ nơi gọi.
 export function Button({
   variant = "primary",
   loading = false,

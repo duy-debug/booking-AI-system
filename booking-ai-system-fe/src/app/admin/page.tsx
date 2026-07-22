@@ -1,3 +1,4 @@
+// Hiển thị trang chào tổng quan và hướng người dùng đến các phân hệ trong sidebar.
 export default function AdminHomePage() {
   return (
     <div>

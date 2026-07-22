@@ -15,6 +15,7 @@ import type {
   ScheduleBookingRaw,
 } from "./schedule.api";
 
+// Chuẩn hóa status backend về tập token giới hạn mà timeline biết cách hiển thị.
 function statusToken(status: string): BookingStatusToken {
   if (status === "confirmed") return "confirmed";
   if (status === "pending") return "pending";
@@ -24,10 +25,12 @@ function statusToken(status: string): BookingStatusToken {
   return "other";
 }
 
+// Chuyển giờ bắt đầu shift sang phút tuyệt đối theo cửa sổ timeline có thể qua nửa đêm.
 function toShiftStartMinutes(startTime: string, spansMidnight: boolean): number {
   return spansMidnight ? parseTimeToMinutes(startTime) : parseTimeToMinutes(startTime);
 }
 
+// Chuyển giờ kết thúc shift sang phút tuyệt đối và cộng một ngày khi shift qua nửa đêm.
 function toShiftEndMinutes(endTime: string, spansMidnight: boolean): number {
   if (spansMidnight) return toOvernightEndMinutes(endTime);
   return parseTimeToMinutes(endTime);

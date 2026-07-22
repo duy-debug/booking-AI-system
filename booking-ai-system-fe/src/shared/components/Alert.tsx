@@ -23,6 +23,7 @@ const alertStyles: Record<AlertTone, { icon: typeof Info; className: string }> =
   },
 };
 
+// Hiển thị một thông báo có màu và icon theo mức độ, kèm nút đóng hỗ trợ accessibility.
 export function Alert({
   message,
   tone,

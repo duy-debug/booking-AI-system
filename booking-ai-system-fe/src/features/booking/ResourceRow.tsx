@@ -27,6 +27,7 @@ interface ResourceRowProps {
   onInvalidSelection: () => void;
 }
 
+// Tách booking cancelled khỏi booking active để render đúng layer và quy tắc pointer-event.
 export function splitBookingsByCancellation(bookings: BookingViewModel[]) {
   return {
     cancelled: bookings.filter((booking) => booking.status === "cancelled"),
@@ -34,6 +35,7 @@ export function splitBookingsByCancellation(bookings: BookingViewModel[]) {
   };
 }
 
+// Kiểm tra một phút có nằm trong booking active và phải chặn selection hay không.
 export function isMinuteBlockedByBooking(
   bookings: BookingViewModel[],
   minute: number,
@@ -46,6 +48,7 @@ export function isMinuteBlockedByBooking(
   );
 }
 
+// Kiểm tra khoảng selection có giao với bất kỳ booking active nào của therapist hiện tại không.
 export function doesSelectionOverlapActiveBooking(
   bookings: BookingViewModel[],
   startMinutes: number,
@@ -59,6 +62,7 @@ export function doesSelectionOverlapActiveBooking(
   );
 }
 
+// Ghép resource column và các timeline layer thành một hàng therapist, đồng thời tránh render dư thừa.
 const ResourceRowInner = memo(function ResourceRowInner({
   resource,
   bookings,
@@ -77,9 +81,11 @@ const ResourceRowInner = memo(function ResourceRowInner({
   const totalWidth = (range.end - range.start) * pxPerMinute;
   const bookingLayers = splitBookingsByCancellation(bookings);
 
+  // Xác định therapist có ít nhất một ca active để hiển thị đúng trạng thái resource column.
   const hasActiveShift = resource.shifts.some((s) => s.isActive);
   const hasAnyShift = resource.shifts.length > 0;
 
+  // Quy đổi tọa độ click thành phút/step, kiểm tra vùng bị chặn và bắt đầu hoặc commit selection.
   const handleClick = useCallback((e: React.MouseEvent) => {
     if (!trackRef.current) return;
     const rect = trackRef.current.getBoundingClientRect();

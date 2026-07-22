@@ -38,5 +38,6 @@ class Therapist(TimestampMixin, Base):
     shifts = relationship("TherapistShift", back_populates="therapist")
     reservations = relationship("Reservation", back_populates="therapist")
 
+    # Tạo chuỗi đại diện gồm tên và giới tính therapist khi kiểm tra đối tượng ORM.
     def __repr__(self) -> str:
         return f"<Therapist {self.name} ({self.gender})>"

@@ -7,6 +7,7 @@ export const metadata: Metadata = {
   description: "Hệ thống đặt lịch massage",
 };
 
+// Khai báo HTML shell, metadata và các provider dùng chung cho toàn bộ route của ứng dụng.
 export default function RootLayout({
   children,
 }: Readonly<{

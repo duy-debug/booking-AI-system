@@ -15,6 +15,7 @@ from app.services.therapist_availability_service import TherapistAvailabilitySer
 
 
 class SlotService:
+    # Khởi tạo các repository và availability service dùng chung cho nghiệp vụ tra cứu slot.
     def __init__(self, session: Session):
         self.session = session
         self.shop_repo = ShopRepository(session)
@@ -22,6 +23,7 @@ class SlotService:
         self.reservation_repo = ReservationRepository(session)
         self.availability_service = TherapistAvailabilityService(session)
 
+    # Tạo danh sách slot 15 phút, tính thời lượng course và đánh giá số therapist đáp ứng từng khung giờ.
     def list_available_slots(
         self,
         shop_id,
@@ -137,6 +139,7 @@ class SlotService:
             ).model_dump(mode="json"),
         }
 
+    # Dự đoán yêu cầu specific có thể thay thế một reservation auto mà không làm thay đổi dữ liệu hiện tại.
     def _can_rebalance_specific_assignment(
         self,
         shop_id: UUID,
@@ -172,6 +175,7 @@ class SlotService:
             for therapist in replacement.available_therapists
         )
 
+    # Liệt kê therapist có ca bao phủ toàn bộ khoảng giờ, không bị block và không trùng reservation active.
     def list_available_therapists(
         self,
         shop_id,
@@ -215,6 +219,7 @@ class SlotService:
             ]
         }
 
+    # Kiểm tra main course và add-on thuộc đúng shop, sau đó cộng tổng thời lượng cần giữ slot.
     def _course_duration(
         self, shop_id: UUID, main_course_id: UUID, addon_course_ids: str | None
     ) -> int:
@@ -246,6 +251,7 @@ class SlotService:
             total += addon.duration_minutes
         return total
 
+    # Kiểm tra shift có thuộc shop, therapist còn hoạt động và thỏa yêu cầu specific hoặc gender hay không.
     @staticmethod
     def _shift_matches_request(
         shift,
@@ -263,6 +269,7 @@ class SlotService:
             return therapist.gender == therapist_gender
         return True
 
+    # Chuyển kết quả availability và cửa sổ thời gian thành mã cùng thông báo không khả dụng phù hợp.
     @staticmethod
     def _unavailable_reason(number_of_people, result, window) -> tuple[str | None, str | None]:
         if window.start_at < window.now:
@@ -280,6 +287,7 @@ class SlotService:
             )
         return "SLOT_CONFLICT", "Therapist không rảnh trong khung giờ này."
 
+    # Tạo response rỗng nhưng vẫn giữ metadata ngày, shop và số người khi không có ca phù hợp.
     @staticmethod
     def _empty_slots_response(booking_date: date, shop_id, number_of_people: int) -> dict:
         return {
@@ -291,10 +299,12 @@ class SlotService:
             ).model_dump(mode="json"),
         }
 
+    # Quy đổi đối tượng time sang tổng số phút tính từ đầu ngày để thuận tiện duyệt slot.
     @staticmethod
     def _time_to_minutes(value: time) -> int:
         return value.hour * 60 + value.minute
 
+    # Chuyển tổng số phút trong ngày trở lại đối tượng time dùng cho truy vấn availability.
     @staticmethod
     def _minutes_to_time(value: int) -> time:
         return time(value // 60, value % 60)

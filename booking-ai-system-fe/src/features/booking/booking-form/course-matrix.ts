@@ -35,6 +35,7 @@ export const courseCategoryStyles: Record<
   },
 };
 
+// Loại hậu tố thời lượng khỏi tên course để gom các biến thể cùng dịch vụ vào một nhóm.
 export function courseBaseName(name: string): string {
   const withoutDuration = name.replace(
     /\s*[-–—(/]?\s*\d+\s*(?:phút|phut|minutes?|mins?|min|p)\s*\)?\s*$/i,
@@ -43,6 +44,7 @@ export function courseBaseName(name: string): string {
   return withoutDuration.trim() || name.trim();
 }
 
+// Phân loại course thành main/add-on và nhóm thời lượng nhằm chọn style hiển thị phù hợp.
 export function courseCategory(course: CourseUiModel): CourseCategory {
   if (course.courseType === "addon") return "addon";
   const name = course.name.toLocaleLowerCase("vi");
@@ -51,6 +53,7 @@ export function courseCategory(course: CourseUiModel): CourseCategory {
   return "primary";
 }
 
+// Gom course cùng tên gốc thành nhóm biến thể và sắp xếp lựa chọn theo thời lượng tăng dần.
 export function groupCourseVariants(courses: CourseUiModel[]): CourseVariantGroup[] {
   const groups = new Map<string, CourseVariantGroup>();
 

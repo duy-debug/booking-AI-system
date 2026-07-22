@@ -24,5 +24,6 @@ class KnowledgeChunk(Base):
     chunk_order = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    # Tạo chuỗi đại diện rút gọn cho đoạn tri thức để thuận tiện theo dõi khi debug.
     def __repr__(self):
         return f"<KnowledgeChunk {self.source} #{self.chunk_order}>"

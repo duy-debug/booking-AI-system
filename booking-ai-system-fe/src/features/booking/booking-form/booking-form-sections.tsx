@@ -20,6 +20,7 @@ const fieldLabelClass = "mb-1 block text-[11px] font-medium text-zinc-600";
 const chipClass =
   "h-7 rounded border px-2.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1";
 
+// Tạo hàng workspace có nhãn cố định bên trái và vùng nội dung linh hoạt bên phải.
 function WorkspaceRow({
   label,
   children,
@@ -39,6 +40,7 @@ function WorkspaceRow({
   );
 }
 
+// Đọc lỗi của một field từ React Hook Form và hiển thị thông báo validation tương ứng.
 function FieldError({ name }: { name: keyof BookingFormValues }) {
   const {
     formState: { errors },
@@ -48,6 +50,7 @@ function FieldError({ name }: { name: keyof BookingFormValues }) {
   return <span className="mt-1 block text-[11px] text-red-600">{error.message as string}</span>;
 }
 
+// Hiển thị ngày, giờ, số người và mã booking; đồng bộ yêu cầu therapist khi đổi số người.
 export function BookingBasicInfoRow({
   timeOptions,
   bookingCode,
@@ -120,6 +123,7 @@ export function BookingBasicInfoRow({
   );
 }
 
+// Trình bày dữ liệu booking hiện tại làm thông tin tham chiếu trước khi chỉnh sửa.
 export function BookingEditDetails({
   detail,
 }: {
@@ -204,6 +208,7 @@ export function BookingEditDetails({
   );
 }
 
+// Render trình chỉnh sửa therapist và course theo từng reservation của booking nhóm.
 export function BookingReservationEditor({
   courses,
   therapists,
@@ -214,9 +219,12 @@ export function BookingReservationEditor({
   const { register, setValue, formState: { errors } } = useFormContext<BookingFormValues>();
   const reservations = (useWatch({ name: "reservations" }) ?? []) as BookingFormValues["reservations"];
   const autoAssignTherapists = useWatch({ name: "autoAssignTherapists" });
+  // Tách course chính để gán đúng trường mainCourseId cho từng reservation.
   const mainCourses = courses.filter((course) => course.courseType === "main");
+  // Tách add-on để quản lý danh sách addonCourseIds độc lập với course chính.
   const addonCourses = courses.filter((course) => course.courseType === "addon");
   const rootError = errors.reservations?.message;
+  // Đồng bộ main course được chọn cho mọi reservation trong booking nhóm.
   const applyMainCourseToGroup = (courseId: string) => {
     reservations.forEach((_, index) => {
       setValue(`reservations.${index}.mainCourseId`, courseId, {
@@ -225,6 +233,7 @@ export function BookingReservationEditor({
       });
     });
   };
+  // Đồng bộ toàn bộ add-on cho các reservation để bảo đảm course của nhóm luôn giống nhau.
   const applyAddonCoursesToGroup = (courseIds: string[]) => {
     reservations.forEach((_, index) => {
       setValue(`reservations.${index}.addonCourseIds`, [...courseIds], {
@@ -316,6 +325,7 @@ export function BookingReservationEditor({
   );
 }
 
+// Thu thập thông tin khách hàng và hiển thị kết quả kiểm tra điều kiện hoặc NG list.
 export function BookingCustomerRow({
   eligibility,
   eligibilityLoading,
@@ -386,6 +396,7 @@ export function BookingCustomerRow({
   );
 }
 
+// Render từng nhóm biến thể course dưới dạng nút chọn thời lượng và trạng thái hiện tại.
 function CourseGroupRows({
   groups,
   selectedIds,
@@ -437,11 +448,14 @@ function CourseGroupRows({
   });
 }
 
+// Chia course thành dịch vụ chính và add-on rồi render ma trận lựa chọn cho booking.
 export function BookingCourseMatrix({ courses }: { courses: CourseUiModel[] }) {
   const { setValue, watch } = useFormContext<BookingFormValues>();
   const mainCourseId = watch("mainCourseId");
   const addonCourseIds = watch("addonCourseIds");
+  // Gom các biến thể main course trước khi render ma trận lựa chọn.
   const mainGroups = groupCourseVariants(courses.filter((course) => course.courseType === "main"));
+  // Gom các biến thể add-on trước khi render ma trận lựa chọn.
   const addonGroups = groupCourseVariants(courses.filter((course) => course.courseType === "addon"));
 
   return (
@@ -487,6 +501,7 @@ export function BookingCourseMatrix({ courses }: { courses: CourseUiModel[] }) {
   );
 }
 
+// Cho phép chọn kiểu yêu cầu therapist none/specific/gender và dữ liệu phụ thuộc tương ứng.
 export function BookingTherapistRow({ therapists }: { therapists: TherapistUiModel[] }) {
   const { setValue } = useFormContext<BookingFormValues>();
   const requestType = useWatch({ name: "therapistRequestType" });
@@ -494,6 +509,7 @@ export function BookingTherapistRow({ therapists }: { therapists: TherapistUiMod
   const requestedGender = useWatch({ name: "requestedGender" });
   const numberOfPeople = useWatch({ name: "numberOfPeople" });
 
+  // Đổi loại yêu cầu therapist và xóa các giá trị specific/gender không còn phù hợp.
   const setRequestType = (type: BookingFormValues["therapistRequestType"]) => {
     setValue("therapistRequestType", type, { shouldDirty: true, shouldValidate: true });
     if (type !== "specific") setValue("requestedTherapistId", "", { shouldDirty: true });

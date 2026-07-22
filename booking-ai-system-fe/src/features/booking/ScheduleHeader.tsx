@@ -6,6 +6,7 @@ interface ScheduleHeaderProps {
   pxPerMinute: number;
 }
 
+// Render trục thời gian phía trên với nhãn giờ khớp tuyệt đối với các resource row.
 export function ScheduleHeader({ range, pxPerMinute }: ScheduleHeaderProps) {
   const totalWidth = (range.end - range.start) * pxPerMinute;
 

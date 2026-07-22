@@ -69,5 +69,6 @@ class Booking(TimestampMixin, Base):
         "Reservation", back_populates="booking", cascade="all, delete-orphan"
     )
 
+    # Tạo chuỗi đại diện ngắn gọn cho booking khi debug hoặc ghi log trong SQLAlchemy.
     def __repr__(self) -> str:
         return f"<Booking {self.pos_booking_code} - {self.status}>"

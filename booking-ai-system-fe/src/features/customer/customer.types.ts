@@ -33,6 +33,7 @@ export interface RestrictionUiModel {
   updatedAt: string;
 }
 
+// Ánh xạ restriction DTO sang model hiển thị và chuẩn hóa tên trường thời gian.
 export function toRestrictionUiModel(dto: RestrictionResponse): RestrictionUiModel {
   return {
     id: dto.restriction_id,
