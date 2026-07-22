@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
+import { useAlert } from "@/shared/components/AlertProvider";
 import { ApiError } from "@/shared/types/api-error";
 import type { UUID } from "@/shared/types/common";
 import { useAdminBookingDetail, useCancelBooking } from "@/features/booking/use-booking-queries";
@@ -61,6 +62,7 @@ function BookingModalInner({
   onSaved: (bookingId: UUID) => void;
 }) {
   const router = useRouter();
+  const { showError, showSuccess } = useAlert();
   const isEdit = state.kind === "edit";
   const bookingId = isEdit ? state.booking.bookingId : undefined;
 
@@ -69,12 +71,10 @@ function BookingModalInner({
   });
   const cancelMut = useCancelBooking();
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
-  const [cancelError, setCancelError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<string | null>(null);
-  const [formError, setFormError] = useState<string | null>(null);
   const [availability, setAvailability] = useState<{ available: boolean; message?: string } | null>(null);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [formSubmitting, setFormSubmitting] = useState(false);
@@ -91,7 +91,13 @@ function BookingModalInner({
   const formRef = useRef<BookingFormHandle>(null);
 
   // Clear footer state when modal opens fresh
-  useEffect(() => { setFormError(null); setAvailability(null); setAvailabilityLoading(false); /* eslint-disable-line react-hooks/set-state-in-effect */ }, [state]);
+  useEffect(() => { setAvailability(null); setAvailabilityLoading(false); /* eslint-disable-line react-hooks/set-state-in-effect */ }, [state]);
+
+  useEffect(() => {
+    if (detailQuery.isError) {
+      showError("Không tải được đầy đủ chi tiết booking.");
+    }
+  }, [detailQuery.isError, showError]);
 
   const closeBookingForm = useCallback(() => onClose(), [onClose]);
 
@@ -198,14 +204,14 @@ function BookingModalInner({
   const handleCancelBooking = async () => {
     if (!bookingId) return;
     setCancelling(true);
-    setCancelError(null);
     try {
       await cancelMut.mutateAsync({ id: bookingId, cancelReason: "Huỷ từ admin" });
       setShowCancelConfirm(false);
+      showSuccess("Hủy booking thành công.");
       onSaved(bookingId);
       onClose();
     } catch (err) {
-      setCancelError(err instanceof ApiError ? err.detail || "Huỷ thất bại" : "Huỷ thất bại");
+      showError(err instanceof ApiError ? err.detail || "Hủy booking thất bại." : "Hủy booking thất bại.");
     } finally {
       setCancelling(false);
     }
@@ -268,9 +274,6 @@ function BookingModalInner({
           {isEdit && detailQuery.isLoading && (
             <p className="text-xs text-zinc-400 mb-3">Đang tải chi tiết booking...</p>
           )}
-          {isEdit && detailQuery.isError && (
-            <p className="text-xs text-amber-600 mb-3">Không tải được chi tiết. Vẫn có thể sửa giờ.</p>
-          )}
           {(!isEdit || !detailQuery.isLoading) && (
             <BookingForm
               key={isEdit ? `${bookingId}:${detailQuery.data ? "detail" : "fallback"}` : "create"}
@@ -281,7 +284,6 @@ function BookingModalInner({
               onSaved={handleSaved}
               onAvailability={setAvailability}
               onAvailabilityLoading={setAvailabilityLoading}
-              onFormError={setFormError}
               onSubmittingChange={setFormSubmitting}
               onSummaryChange={setSummary}
             />
@@ -292,9 +294,6 @@ function BookingModalInner({
         <div className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 border-t border-zinc-300 bg-zinc-50 px-3 py-2">
           {/* Left: errors + summary + availability */}
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-            {formError && (
-              <span className="max-w-[420px] truncate font-medium text-red-600">{formError}</span>
-            )}
             {isEdit ? (
               <span className="text-zinc-500">Cập nhật toàn bộ nhóm booking</span>
             ) : availabilityLoading ? (
@@ -309,7 +308,7 @@ function BookingModalInner({
                   Khả dụng
                 </span>
               ) : (
-                <span className="font-medium text-red-600">Không khả dụng · {availability.message ?? "Trùng lịch"}</span>
+                <span className="font-medium text-red-600">Không khả dụng</span>
               )
             ) : (
               <span className="text-zinc-500">Chưa kiểm tra</span>
@@ -368,7 +367,7 @@ function BookingModalInner({
       <ConfirmDialog
         open={showCancelConfirm}
         title="Hủy booking"
-        description={cancelError ?? "Xác nhận hủy booking này? Thao tác không thể hoàn tác."}
+        description="Xác nhận hủy booking này? Thao tác không thể hoàn tác."
         cancelLabel="Không"
         confirmLabel="Hủy booking"
         tone="danger"

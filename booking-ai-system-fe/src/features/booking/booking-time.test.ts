@@ -72,15 +72,30 @@ describe("booking start rules", () => {
     expect(BUSINESS_HOURS).toEqual({ open: "00:00", close: "23:45" });
   });
 
-  it("keeps the form open and refreshes availability when backend rejects a stale slot", () => {
+  it("shows a shared alert and refreshes availability when backend rejects a stale slot", () => {
     const source = readFileSync(
       join(process.cwd(), "src/features/booking/booking-form/BookingForm.tsx"),
       "utf8",
     );
     expect(source).toContain('err.code === "BOOKING_START_IN_PAST"');
     expect(source).toContain('err.code === "BOOKING_START_TOO_SOON"');
-    expect(source).toContain('form.setError("startTime"');
+    expect(source).toContain("useAlert()");
+    expect(source).toContain("showError(message)");
+    expect(source).not.toContain('form.setError("startTime"');
     expect(source).toContain("setAvailabilityRefreshToken((token) => token + 1)");
+  });
+
+  it("does not render the minimum-advance error inside the schedule or booking form", () => {
+    const scheduleSource = readFileSync(
+      join(process.cwd(), "src/features/booking/ScheduleBoard.tsx"),
+      "utf8",
+    );
+    const formSource = readFileSync(
+      join(process.cwd(), "src/features/booking/booking-form/BookingForm.tsx"),
+      "utf8",
+    );
+    expect(scheduleSource).not.toContain("selectionError");
+    expect(formSource).not.toContain("timeNotice=");
   });
 
   it("does not depend on the unstable eligibility mutation result object", () => {

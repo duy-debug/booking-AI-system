@@ -17,6 +17,7 @@ import {
 } from "./schedule.utils";
 import { todayShopDate } from "@/shared/lib/datetime";
 import { earliestSelectableForDate, validateBookingStart } from "./booking-time";
+import { useAlert } from "@/shared/components/AlertProvider";
 
 interface ScheduleBoardProps {
   schedule: ScheduleViewModel | undefined;
@@ -37,11 +38,11 @@ export function ScheduleBoard({
   onSelectBooking,
   onCreateBooking,
 }: ScheduleBoardProps) {
+  const { showError } = useAlert();
   const [selection, setSelection] = useState<Selection | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const [boardWidth, setBoardWidth] = useState(0);
   const [now, setNow] = useState(() => new Date());
-  const [selectionError, setSelectionError] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 30_000);
@@ -69,7 +70,6 @@ export function ScheduleBoard({
 
   const handleClearSelection = useCallback(() => setSelection(null), []);
   const handleStartSelection = useCallback((sel: Selection) => {
-    setSelectionError(null);
     setSelection(sel);
   }, []);
   const handleCommitSelection = useCallback((sel: Selection) => {
@@ -83,12 +83,12 @@ export function ScheduleBoard({
     });
     if (!validation.valid) {
       setSelection(null);
-      setSelectionError(validation.message ?? "Thời gian bắt đầu không hợp lệ.");
+      showError(validation.message ?? "Thời gian bắt đầu không hợp lệ.");
       return;
     }
     onCreateBooking(sel);
     setSelection(null);
-  }, [onCreateBooking, schedule]);
+  }, [onCreateBooking, schedule, showError]);
 
   const bookingsByTherapist = useMemo(() => {
     if (!schedule) return new Map<string, BookingViewModel[]>();
@@ -156,11 +156,6 @@ export function ScheduleBoard({
       className={`h-full border border-zinc-200 rounded-lg bg-white ${isDesktop ? "overflow-hidden" : "overflow-auto"}`}
     >
       <ScheduleHeader range={range} pxPerMinute={pxPerMinute} />
-      {selectionError && (
-        <div role="status" className="border-b border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700">
-          {selectionError}
-        </div>
-      )}
       {/* Each ResourceRow has its own ResourceColumn + timeline */}
       <div className="relative">
         {schedule.resources.map((res) => (
@@ -177,7 +172,7 @@ export function ScheduleBoard({
             onCommitSelection={handleCommitSelection}
             onClearSelection={handleClearSelection}
             earliestSelectableMinutes={earliestSelectableMinutes}
-            onInvalidSelection={() => setSelectionError(
+            onInvalidSelection={() => showError(
               earliestSelectableMinutes === Number.POSITIVE_INFINITY
                 ? "Không thể tạo booking cho ngày trong quá khứ."
                 : `Booking phải bắt đầu sau ít nhất ${schedule.minimumBookingAdvanceMinutes} phút.`,

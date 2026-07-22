@@ -4,6 +4,7 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { FormProvider, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ApiError } from "@/shared/types/api-error";
+import { useAlert } from "@/shared/components/AlertProvider";
 import type { UUID } from "@/shared/types/common";
 import { useCourses } from "@/features/course/use-course-queries";
 import { useTherapists } from "@/features/therapist/use-therapist-queries";
@@ -34,7 +35,6 @@ import type { AdminBookingDetailRaw } from "../schedule.types";
 import { parseTimeToMinutes } from "../schedule.utils";
 import {
   earliestSelectableForDate,
-  validateBookingStart,
 } from "../booking-time";
 
 const TIME_OPTIONS: { value: string; label: string }[] = (() => {
@@ -81,7 +81,6 @@ interface BookingFormProps {
   onDirtyChange?: (dirty: boolean) => void;
   onAvailability?: (a: AvailabilityState | null) => void;
   onAvailabilityLoading?: (loading: boolean) => void;
-  onFormError?: (err: string | null) => void;
   onSubmittingChange?: (submitting: boolean) => void;
   onSummaryChange?: (summary: BookingFormSummary) => void;
   editDetail?: AdminBookingDetailRaw;
@@ -93,12 +92,12 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
   onDirtyChange,
   onAvailability,
   onAvailabilityLoading,
-  onFormError,
   onSubmittingChange,
   onSummaryChange,
   editDetail,
 }: BookingFormProps, ref) {
   const isEdit = initial.mode === "edit";
+  const { showError, showSuccess } = useAlert();
   const groupMainCourseId = editDetail?.reservations[0]?.courses.find(
     (course) => course.course_role === "main",
   )?.course_id ?? "";
@@ -144,7 +143,6 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
   const [availability, setAvailability] = useState<AvailabilityState | null>(null);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
   const [availabilityRefreshToken, setAvailabilityRefreshToken] = useState(0);
   const [now, setNow] = useState(() => new Date());
 
@@ -179,15 +177,6 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
     })),
     [earliestSelectableMinutes],
   );
-  const selectedTimeValidation = isEdit
-    ? { valid: true }
-    : validateBookingStart({
-        bookingDate,
-        startMinutes: parseTimeToMinutes(startTime),
-        timeZone: timezone,
-        now,
-        advanceMinutes: minimumBookingAdvanceMinutes,
-      });
   const summary = useMemo<BookingFormSummary>(() => {
     const selectedCourses = courses.filter(
       (course) => course.id === mainCourseId || addonCourseIds.includes(course.id),
@@ -221,7 +210,6 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
       setEligibility(null);
       setAvailability(null);
       setAvailabilityLoading(false);
-      setFormError(null);
     },
     checkAvailability: () => setAvailabilityRefreshToken((token) => token + 1),
   }), [form]);
@@ -231,10 +219,9 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
 
-  // Propagate availability/formError to parent (BookingDrawer footer)
+  // Propagate availability state to parent (BookingDrawer footer).
   useEffect(() => { onAvailability?.(availability); }, [availability, onAvailability]);
   useEffect(() => { onAvailabilityLoading?.(availabilityLoading); }, [availabilityLoading, onAvailabilityLoading]);
-  useEffect(() => { onFormError?.(formError); }, [formError, onFormError]);
   useEffect(() => { onSubmittingChange?.(submitting); }, [onSubmittingChange, submitting]);
   useEffect(() => {
     const previous = lastEmittedSummaryRef.current;
@@ -307,9 +294,7 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
       }
       if (err.code === "BOOKING_START_IN_PAST" || err.code === "BOOKING_START_TOO_SOON") {
         const message = err.detail || "Thời gian bắt đầu không còn hợp lệ.";
-        form.setError("startTime", { type: "server", message });
         setAvailability({ available: false, message });
-        setFormError(message);
         setAvailabilityRefreshToken((token) => token + 1);
       } else if (
         err.code === "SLOT_CONFLICT" ||
@@ -324,29 +309,29 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
           reasonCode: err.code,
           message: err.detail,
         });
-        setFormError(err.detail);
-      } else if (err.code === "CUSTOMER_IN_NG_LIST") {
-        setFormError("SĐT bị cấm đặt lịch (NG list).");
-      } else {
-        setFormError(err.detail || err.body.title || "Lỗi khi lưu booking.");
       }
+      const message = err.code === "CUSTOMER_IN_NG_LIST"
+        ? "SĐT bị cấm đặt lịch (NG list)."
+        : err.detail || err.body.title || "Lỗi khi lưu booking.";
+      showError(message);
     } else {
-      setFormError("Lỗi không xác định khi lưu booking.");
+      showError("Lỗi không xác định khi lưu booking.");
     }
   };
 
   const onSubmit = form.handleSubmit(async (vals) => {
     if (submitting) return;
     setSubmitting(true);
-    setFormError(null);
     try {
       if (isEdit && initial.bookingId) {
         await updateMut.mutateAsync(toUpdatePayload(vals));
         form.reset(vals);
+        showSuccess("Cập nhật booking thành công.");
         onSaved(initial.bookingId);
       } else {
         const created = await createMut.mutateAsync(toCreatePayload(vals));
         form.reset(vals);
+        showSuccess("Tạo booking thành công.");
         onSaved(created.booking_id);
       }
     } catch (err) {
@@ -377,7 +362,6 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
         <BookingBasicInfoRow
           timeOptions={timeOptions}
           bookingCode={isEdit ? initial.bookingId : undefined}
-          timeNotice={!selectedTimeValidation.valid ? selectedTimeValidation.message : undefined}
           numberOfPeopleReadOnly={false}
         />
 

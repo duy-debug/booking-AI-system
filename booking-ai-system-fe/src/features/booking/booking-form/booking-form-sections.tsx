@@ -51,12 +51,10 @@ function FieldError({ name }: { name: keyof BookingFormValues }) {
 export function BookingBasicInfoRow({
   timeOptions,
   bookingCode,
-  timeNotice,
   numberOfPeopleReadOnly = false,
 }: {
   timeOptions: { value: string; label: string; disabled?: boolean }[];
   bookingCode?: string;
-  timeNotice?: string;
   numberOfPeopleReadOnly?: boolean;
 }) {
   const { register, setValue } = useFormContext<BookingFormValues>();
@@ -80,7 +78,6 @@ export function BookingBasicInfoRow({
             ))}
           </select>
           <FieldError name="startTime" />
-          {timeNotice && <span className="mt-1 block max-w-[260px] text-[11px] text-amber-700">{timeNotice}</span>}
         </div>
         <div>
           <label className={fieldLabelClass}>Số người</label>
