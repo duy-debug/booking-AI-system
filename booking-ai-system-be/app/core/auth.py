@@ -29,6 +29,7 @@ def verify_supabase_token(token: str) -> dict:
             signing_key.key,
             algorithms=[settings.JWT_ALGORITHM],
             options={"verify_aud": False},
+            leeway=settings.JWT_CLOCK_SKEW_SECONDS,
         )
     except jwt.ExpiredSignatureError:
         raise AppError(401, code="AUTHENTICATION_REQUIRED", detail="Token het han")

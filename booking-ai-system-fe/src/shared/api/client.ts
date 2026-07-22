@@ -12,6 +12,9 @@ const API_BASE_URL = (() => {
   return url ? url.replace(/\/$/, "") : "http://localhost:8000";
 })();
 
+let activeAccessToken: string | null | undefined;
+let refreshAccessTokenPromise: Promise<string | null> | null = null;
+
 export interface ApiMeta {
   total?: number;
   limit?: number;
@@ -27,10 +30,36 @@ export interface ApiSingleResponse<T> {
   data: T;
 }
 
-// Đọc Supabase session hiện tại và trả access token để gắn vào Authorization header nếu có.
+// Đồng bộ token mà AuthProvider vừa nhận để request đầu tiên sau đăng nhập không đọc nhầm session cũ.
+export function setApiAccessToken(token: string | null): void {
+  activeAccessToken = token;
+}
+
+// Trả token đã được AuthProvider đồng bộ; chỉ đọc Supabase storage khi ứng dụng chưa khởi tạo auth.
 async function getAccessToken(): Promise<string | null> {
+  if (activeAccessToken !== undefined) {
+    return activeAccessToken;
+  }
   const { data } = await supabase.auth.getSession();
-  return data.session?.access_token ?? null;
+  activeAccessToken = data.session?.access_token ?? null;
+  return activeAccessToken;
+}
+
+// Làm mới session duy nhất một lần cho các request 401 đồng thời và cập nhật token dùng chung của API client.
+async function refreshAccessToken(): Promise<string | null> {
+  if (!refreshAccessTokenPromise) {
+    refreshAccessTokenPromise = supabase.auth
+      .refreshSession()
+      .then(({ data, error }) => {
+        const token = error ? null : (data.session?.access_token ?? null);
+        setApiAccessToken(token);
+        return token;
+      })
+      .finally(() => {
+        refreshAccessTokenPromise = null;
+      });
+  }
+  return refreshAccessTokenPromise;
 }
 
 // Gửi HTTP request chung, parse JSON envelope và chuyển Problem Details của backend thành ApiError.
@@ -58,18 +87,29 @@ async function request<T>(
     ...(options.headers ?? {}),
   };
 
+  let token: string | null = null;
   if (!options.anonymous) {
-    const token = await getAccessToken();
+    token = await getAccessToken();
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
     }
   }
 
-  const res = await fetch(url.toString(), {
+  const requestInit: RequestInit = {
     method,
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-  });
+  };
+  let res = await fetch(url.toString(), requestInit);
+
+  // Nếu token vừa chuyển phiên bị backend từ chối, làm mới session và thử lại đúng một lần bằng token mới.
+  if (res.status === 401 && !options.anonymous) {
+    const refreshedToken = await refreshAccessToken();
+    if (refreshedToken && refreshedToken !== token) {
+      headers["Authorization"] = `Bearer ${refreshedToken}`;
+      res = await fetch(url.toString(), requestInit);
+    }
+  }
 
   if (!res.ok) {
     let body: ApiErrorBody;

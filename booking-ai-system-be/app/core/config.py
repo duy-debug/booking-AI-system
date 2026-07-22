@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     # Auth — Supabase Auth JWT verification (asymmetric / JWKS)
     SUPABASE_JWKS_URL: str  # URL JWKS của project Supabase (verify token ECC/RS256)
     JWT_ALGORITHM: str = "ES256"  # Supabase mặc định ký bằng ECC P-256
+    JWT_CLOCK_SKEW_SECONDS: int = 30  # Dung sai lệch đồng hồ giữa Supabase và backend khi kiểm tra iat/nbf/exp
     ADMIN_EMAILS: list[str] = []  # Whitelist email được phép vào /api/admin/*
 
     # CORS — cho phép FE local dev

@@ -146,7 +146,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               : "min-h-full min-w-0 p-4 sm:p-5 lg:p-6"
           }
         >
-          {children}
+          {!isLoading && user ? children : null}
         </div>
         {(isLoading || !user) && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-white text-zinc-500">
