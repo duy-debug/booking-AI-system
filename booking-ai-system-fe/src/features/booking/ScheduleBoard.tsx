@@ -54,7 +54,7 @@ export function ScheduleBoard({
     setSelection(null);
   }, [schedule?.date]);
 
-  // ResizeObserver on the board container (entire width)
+  // Gắn lại ResizeObserver sau khi loading kết thúc vì lúc render loading thì board chưa tồn tại.
   useEffect(() => {
     const el = boardRef.current;
     if (!el) return;
@@ -66,7 +66,7 @@ export function ScheduleBoard({
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [isLoading, isError, schedule?.date, schedule?.resources.length]);
 
   // Xóa selection hiện tại khi người dùng hủy hoặc chuyển sang vùng khác.
   const handleClearSelection = useCallback(() => setSelection(null), []);

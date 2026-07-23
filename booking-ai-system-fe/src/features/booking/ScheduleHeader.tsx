@@ -6,9 +6,17 @@ interface ScheduleHeaderProps {
   pxPerMinute: number;
 }
 
+const MIN_HOUR_LABEL_SPACING_PX = 56;
+
+// Chọn mật độ nhãn phù hợp với tỷ lệ timeline để chữ không chồng lên nhau.
+export function getHourLabelStepMinutes(pxPerMinute: number): 60 | 120 {
+  return pxPerMinute * 60 >= MIN_HOUR_LABEL_SPACING_PX ? 60 : 120;
+}
+
 // Render trục thời gian phía trên với nhãn giờ khớp tuyệt đối với các resource row.
 export function ScheduleHeader({ range, pxPerMinute }: ScheduleHeaderProps) {
   const totalWidth = (range.end - range.start) * pxPerMinute;
+  const labelStepMinutes = getHourLabelStepMinutes(pxPerMinute);
 
   // Generate hour ticks (every 60 min)
   const hourTicks: { min: number; label: string }[] = [];
@@ -47,9 +55,20 @@ export function ScheduleHeader({ range, pxPerMinute }: ScheduleHeaderProps) {
             className="absolute top-0 flex flex-col h-full border-l border-zinc-300"
             style={{ left: (t.min - range.start) * pxPerMinute }}
           >
-            <span className="px-1 text-[11px] leading-tight text-zinc-500 pt-0.5">
-              {t.label}
-            </span>
+            {(t.min === range.end ||
+              (t.min - range.start) % labelStepMinutes === 0) && (
+              <span
+                className={`px-1 pt-0.5 text-[11px] leading-tight text-zinc-500 ${
+                  t.min === range.start
+                    ? ""
+                    : t.min === range.end
+                      ? "-translate-x-full"
+                      : "-translate-x-1/2"
+                }`}
+              >
+                {t.label}
+              </span>
+            )}
           </div>
         ))}
       </div>

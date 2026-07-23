@@ -17,6 +17,7 @@ import {
   FULL_DAY_RANGE,
 } from "./schedule.utils";
 import { shouldUseCompactBookingLayout } from "./BookingLayer";
+import { getHourLabelStepMinutes } from "./ScheduleHeader";
 
 describe("FULL_DAY_RANGE (24h timeline)", () => {
   it("rangeStart = 0 (00:00)", () => {
@@ -274,5 +275,12 @@ describe("booking block responsive content", () => {
     expect(shouldUseCompactBookingLayout(47)).toBe(true);
     expect(shouldUseCompactBookingLayout(48)).toBe(false);
     expect(shouldUseCompactBookingLayout(79)).toBe(false);
+  });
+});
+
+describe("timeline hour label density", () => {
+  it("giãn nhãn thành hai giờ khi không đủ chỗ và giữ vạch chia theo giờ", () => {
+    expect(getHourLabelStepMinutes(0.8)).toBe(120);
+    expect(getHourLabelStepMinutes(1)).toBe(60);
   });
 });
