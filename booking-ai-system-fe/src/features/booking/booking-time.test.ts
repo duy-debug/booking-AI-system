@@ -35,7 +35,6 @@ describe("booking start rules", () => {
   it("allows future dates without a current-time cutoff", () => {
     expect(earliestSelectableForDate({
       bookingDate: "2026-07-22",
-      stepMinutes: 15,
       timeZone: "UTC",
       now,
     })).toBeNull();
@@ -44,19 +43,17 @@ describe("booking start rules", () => {
   it("disables every slot on a past date", () => {
     expect(earliestSelectableForDate({
       bookingDate: "2026-07-20",
-      stepMinutes: 15,
       timeZone: "UTC",
       now,
     })).toBe(Number.POSITIVE_INFINITY);
   });
 
-  it("ceilToStep includes seconds", () => {
+  it("làm tròn lên phút kế tiếp khi thời điểm tối thiểu có giây", () => {
     expect(earliestSelectableForDate({
       bookingDate: "2026-07-21",
-      stepMinutes: 15,
       timeZone: "UTC",
       now: new Date("2026-07-21T02:00:01.000Z"),
-    })).toBe(150);
+    })).toBe(136);
   });
 
   it("uses the shop timezone rather than the machine timezone", () => {

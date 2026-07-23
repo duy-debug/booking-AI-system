@@ -30,6 +30,7 @@ class SlotService:
         booking_date: date,
         number_of_people: int,
         main_course_id,
+        requested_start_time: time | None = None,
         addon_course_ids: str | None = None,
         therapist_request_type: str | None = None,
         therapist_id: str | None = None,
@@ -68,7 +69,11 @@ class SlotService:
             )
 
         step = 15
-        cursor = min(self._time_to_minutes(s.start_time) for s in shifts)
+        cursor = (
+            self._time_to_minutes(requested_start_time)
+            if requested_start_time is not None
+            else min(self._time_to_minutes(s.start_time) for s in shifts)
+        )
         last_end = max(self._time_to_minutes(s.end_time) for s in shifts)
         now = booking_time.current_utc_time()
         slots = []
@@ -128,6 +133,8 @@ class SlotService:
                     required_therapist_count=number_of_people,
                 ).model_dump(mode="json")
             )
+            if requested_start_time is not None:
+                break
             cursor += step
 
         return {

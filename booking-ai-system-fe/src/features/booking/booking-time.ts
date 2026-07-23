@@ -41,16 +41,14 @@ function zonedParts(value: Date, timeZone: string): ZonedParts {
   };
 }
 
-// Tính phút bắt đầu sớm nhất sau khi cộng thời gian đặt trước và làm tròn theo step.
+// Tính phút bắt đầu sớm nhất sau khi cộng thời gian đặt trước, chính xác tới từng phút.
 export function earliestSelectableForDate({
   bookingDate,
-  stepMinutes,
   timeZone,
   now = new Date(),
   advanceMinutes = DEFAULT_MINIMUM_BOOKING_ADVANCE_MINUTES,
 }: {
   bookingDate: string;
-  stepMinutes: number;
   timeZone: string;
   now?: Date;
   advanceMinutes?: number;
@@ -61,7 +59,7 @@ export function earliestSelectableForDate({
   const earliest = zonedParts(new Date(now.getTime() + advanceMinutes * 60_000), timeZone);
   if (bookingDate < earliest.date) return Number.POSITIVE_INFINITY;
   if (bookingDate > earliest.date) return null;
-  return Math.ceil(earliest.seconds / (stepMinutes * 60)) * stepMinutes;
+  return Math.ceil(earliest.seconds / 60);
 }
 
 // Kiểm tra selection có nằm trong quá khứ hoặc sát giờ hơn giới hạn đặt trước hay không.

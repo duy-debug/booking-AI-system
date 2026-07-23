@@ -2,8 +2,12 @@
 
 import { useRef, useCallback, memo } from "react";
 import type { TimeRange } from "./schedule.utils";
-import { xToMinutes, createDefaultSelection } from "./schedule.utils";
-import { ROW_HEIGHT, type TimeStep } from "./schedule.theme";
+import { xToMinutes } from "./schedule.utils";
+import {
+  DEFAULT_SELECTION_DURATION_MINUTES,
+  GRID_STEP_MINUTES,
+  ROW_HEIGHT,
+} from "./schedule.theme";
 import { ResourceColumn } from "./ResourceColumn";
 import { ShiftLayer } from "./ShiftLayer";
 import { BookingLayer } from "./BookingLayer";
@@ -16,7 +20,6 @@ interface ResourceRowProps {
   resource: ResourceViewModel;
   bookings: BookingViewModel[];
   range: TimeRange;
-  step: TimeStep;
   pxPerMinute: number;
   selection: Selection | null;
   onSelectBooking: (b: BookingViewModel) => void;
@@ -67,7 +70,6 @@ const ResourceRowInner = memo(function ResourceRowInner({
   resource,
   bookings,
   range,
-  step,
   pxPerMinute,
   selection,
   onSelectBooking,
@@ -106,10 +108,18 @@ const ResourceRowInner = memo(function ResourceRowInner({
     );
     if (!inActiveShift) return;
 
-    const sel = createDefaultSelection(clickedMinutes, step, range.end, resource.therapistId);
+    const startMinutes = Math.floor(clickedMinutes);
+    const sel = {
+      startMinutes,
+      endMinutes: Math.min(
+        startMinutes + DEFAULT_SELECTION_DURATION_MINUTES,
+        range.end,
+      ),
+      therapistId: resource.therapistId,
+    };
     if (doesSelectionOverlapActiveBooking(bookings, sel.startMinutes, sel.endMinutes)) return;
     onStartSelection(sel);
-  }, [range, step, pxPerMinute, resource.therapistId, onStartSelection, resource.shifts, bookings, earliestSelectableMinutes, onInvalidSelection]);
+  }, [range, pxPerMinute, resource.therapistId, onStartSelection, resource.shifts, bookings, earliestSelectableMinutes, onInvalidSelection]);
 
   const rowSelection = selection?.therapistId === resource.therapistId ? selection : null;
 
@@ -123,7 +133,12 @@ const ResourceRowInner = memo(function ResourceRowInner({
         onClick={handleClick}
         title={earliestSelectableMinutes === Number.POSITIVE_INFINITY ? "Không thể tạo booking cho ngày trong quá khứ" : undefined}
       >
-        <TimeGrid range={range} height={ROW_HEIGHT} pxPerMinute={pxPerMinute} step={step} />
+        <TimeGrid
+          range={range}
+          height={ROW_HEIGHT}
+          pxPerMinute={pxPerMinute}
+          step={GRID_STEP_MINUTES}
+        />
         <ShiftLayer shifts={resource.shifts} range={range} pxPerMinute={pxPerMinute} />
         {earliestSelectableMinutes !== null && earliestSelectableMinutes > range.start && (
           <div

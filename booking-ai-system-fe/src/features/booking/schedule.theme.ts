@@ -10,8 +10,8 @@ export const RESOURCE_COLUMN_WIDTH = 190; // px — cố định, không tham gi
 export const HEADER_HEIGHT = 44;
 export const ROW_HEIGHT = 60;
 
-export const TIME_STEPS = [5, 10, 15, 30] as const;
-export type TimeStep = (typeof TIME_STEPS)[number];
+export const GRID_STEP_MINUTES = 15;
+export const DEFAULT_SELECTION_DURATION_MINUTES = 15;
 
 // === Booking status tokens ===
 export type BookingStatusToken = "confirmed" | "pending" | "checked-in" | "completed" | "cancelled" | "other";

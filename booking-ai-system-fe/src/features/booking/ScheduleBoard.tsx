@@ -6,7 +6,6 @@ import { ResourceRow } from "./ResourceRow";
 import { CurrentTimeLine } from "./CurrentTimeLine";
 import { type Selection } from "./SelectionLayer";
 import type { BookingViewModel, ScheduleViewModel } from "./schedule.types";
-import type { TimeStep } from "./schedule.theme";
 import {
   RESOURCE_COLUMN_WIDTH,
 } from "./schedule.theme";
@@ -24,7 +23,6 @@ interface ScheduleBoardProps {
   isLoading: boolean;
   isError: boolean;
   error?: Error;
-  step: TimeStep;
   onSelectBooking: (b: BookingViewModel) => void;
   onCreateBooking: (selection: Selection) => void;
 }
@@ -35,7 +33,6 @@ export function ScheduleBoard({
   isLoading,
   isError,
   error,
-  step,
   onSelectBooking,
   onCreateBooking,
 }: ScheduleBoardProps) {
@@ -51,11 +48,11 @@ export function ScheduleBoard({
     return () => window.clearInterval(timer);
   }, []);
 
-  // Clear selection when step or date changes
+  // Xóa selection khi chuyển ngày để không giữ lại khung giờ của lịch cũ.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelection(null);
-  }, [step, schedule?.date]);
+  }, [schedule?.date]);
 
   // ResizeObserver on the board container (entire width)
   useEffect(() => {
@@ -151,7 +148,6 @@ export function ScheduleBoard({
   const isToday = schedule.date === todayShopDate(schedule.timezone);
   const earliestSelectableMinutes = earliestSelectableForDate({
     bookingDate: schedule.date,
-    stepMinutes: step,
     timeZone: schedule.timezone,
     now,
     advanceMinutes: schedule.minimumBookingAdvanceMinutes,
@@ -175,7 +171,6 @@ export function ScheduleBoard({
             resource={res}
             bookings={bookingsByTherapist.get(res.therapistId) ?? []}
             range={range}
-            step={step}
             pxPerMinute={pxPerMinute}
             selection={selection}
             onSelectBooking={onSelectBooking}

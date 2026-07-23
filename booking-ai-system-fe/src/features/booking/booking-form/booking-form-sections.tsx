@@ -52,11 +52,9 @@ function FieldError({ name }: { name: keyof BookingFormValues }) {
 
 // Hiển thị ngày, giờ, số người và mã booking; đồng bộ yêu cầu therapist khi đổi số người.
 export function BookingBasicInfoRow({
-  timeOptions,
   bookingCode,
   numberOfPeopleReadOnly = false,
 }: {
-  timeOptions: { value: string; label: string; disabled?: boolean }[];
   bookingCode?: string;
   numberOfPeopleReadOnly?: boolean;
 }) {
@@ -73,13 +71,12 @@ export function BookingBasicInfoRow({
         </div>
         <div>
           <label className={fieldLabelClass}>Giờ bắt đầu</label>
-          <select className={`${inputClass} w-[100px]`} {...register("startTime")}>
-            {timeOptions.map((option) => (
-              <option key={option.value} value={option.value} disabled={option.disabled}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <input
+            type="time"
+            step={60}
+            className={`${inputClass} w-[110px]`}
+            {...register("startTime")}
+          />
           <FieldError name="startTime" />
         </div>
         <div>

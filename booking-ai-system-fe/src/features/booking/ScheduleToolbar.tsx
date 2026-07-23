@@ -1,7 +1,6 @@
 "use client";
 
 import { Button } from "@/shared/components/ui/button";
-import { TIME_STEPS, type TimeStep } from "./schedule.theme";
 import { STATUS_STYLES } from "./schedule.theme";
 import type { ISODate, UUID } from "@/shared/types/common";
 import { todayShopDate } from "@/shared/lib/datetime";
@@ -13,8 +12,6 @@ interface ScheduleToolbarProps {
   shopId: UUID | null;
   onShopChange: (id: UUID) => void;
   shops: { id: UUID; name: string }[];
-  step: TimeStep;
-  onStepChange: (s: TimeStep) => void;
   onPrevDay: () => void;
   onNextDay: () => void;
   scheduleData: ScheduleViewModel | null;
@@ -36,8 +33,6 @@ export function ScheduleToolbar({
   shopId,
   onShopChange,
   shops,
-  step,
-  onStepChange,
   onPrevDay,
   onNextDay,
   scheduleData,
@@ -96,29 +91,6 @@ export function ScheduleToolbar({
               </>
             )}
           </select>
-        </div>
-
-        <div className="w-px h-5 bg-zinc-300" />
-
-        {/* Step selector */}
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-zinc-500">Bước:</span>
-          <div className="flex rounded border border-zinc-300 overflow-hidden">
-            {TIME_STEPS.map((s) => (
-              <button
-                key={s}
-                onClick={() => onStepChange(s)}
-                className={`px-1.5 py-1 text-xs transition-colors ${
-                  step === s
-                    ? "bg-blue-600 text-white"
-                    : "bg-white text-zinc-600 hover:bg-zinc-100"
-                }`}
-                aria-label={`Chia ${s} phút`}
-              >
-                {s}&apos;
-              </button>
-            ))}
-          </div>
         </div>
 
         <div className="w-px h-5 bg-zinc-300" />

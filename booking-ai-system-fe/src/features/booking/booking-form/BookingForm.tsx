@@ -23,7 +23,7 @@ import {
   type BookingFormInitial,
   type BookingFormValues,
 } from "./booking-form.schema";
-import { BUSINESS_HOURS, SHOP_TIMEZONE } from "@/shared/config/shop";
+import { SHOP_TIMEZONE } from "@/shared/config/shop";
 import {
   BookingBasicInfoRow,
   BookingCustomerRow,
@@ -32,24 +32,6 @@ import {
   BookingTherapistRow,
 } from "./booking-form-sections";
 import type { AdminBookingDetailRaw } from "../schedule.types";
-import { parseTimeToMinutes } from "../schedule.utils";
-import {
-  earliestSelectableForDate,
-} from "../booking-time";
-
-const TIME_OPTIONS: { value: string; label: string }[] = (() => {
-  const out: { value: string; label: string }[] = [];
-  const [oh, om] = BUSINESS_HOURS.open.split(":").map(Number);
-  const [ch, cm] = BUSINESS_HOURS.close.split(":").map(Number);
-  const start = oh * 60 + om;
-  const end = ch * 60 + cm;
-  for (let m = start; m <= end; m += 15) {
-    const hh = String(Math.floor(m / 60)).padStart(2, "0");
-    const mm = String(m % 60).padStart(2, "0");
-    out.push({ value: `${hh}:${mm}`, label: `${hh}:${mm}` });
-  }
-  return out;
-})();
 
 const EMPTY_COURSES: CourseUiModel[] = [];
 const EMPTY_THERAPISTS: TherapistUiModel[] = [];
@@ -145,14 +127,6 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [availabilityRefreshToken, setAvailabilityRefreshToken] = useState(0);
-  const [now, setNow] = useState(() => new Date());
-
-  useEffect(() => {
-    // Cập nhật đồng hồ định kỳ để danh sách giờ bị khóa luôn bám sát giới hạn đặt trước.
-    const timer = window.setInterval(() => setNow(new Date()), 30_000);
-    return () => window.clearInterval(timer);
-  }, []);
-
   const bookingDate = form.watch("bookingDate");
   const startTime = form.watch("startTime");
   const numberOfPeople = form.watch("numberOfPeople");
@@ -161,25 +135,6 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
   const reservationEdits = form.watch("reservations");
   const timezone = initial.timezone ?? SHOP_TIMEZONE;
   const minimumBookingAdvanceMinutes = initial.minimumBookingAdvanceMinutes ?? 15;
-  const earliestSelectableMinutes = isEdit
-    ? null
-    : earliestSelectableForDate({
-        bookingDate,
-        stepMinutes: 15,
-        timeZone: timezone,
-        now,
-        advanceMinutes: minimumBookingAdvanceMinutes,
-      });
-  // Đánh dấu option giờ sớm hơn giới hạn hiện tại là disabled mà không tạo lại mảng dư thừa.
-  const timeOptions = useMemo(
-    () => TIME_OPTIONS.map((option) => ({
-      ...option,
-      disabled:
-        earliestSelectableMinutes !== null &&
-        parseTimeToMinutes(option.value) < earliestSelectableMinutes,
-    })),
-    [earliestSelectableMinutes],
-  );
   // Tính thời lượng và tổng giá song song cho form tạo mới hoặc từng reservation khi chỉnh sửa.
   const summary = useMemo<BookingFormSummary>(() => {
     const selectedCourses = courses.filter(
@@ -368,7 +323,6 @@ export const BookingForm = forwardRef<BookingFormHandle, BookingFormProps>(funct
 
         {/* Hàng 1: Ngày, giờ, số người */}
         <BookingBasicInfoRow
-          timeOptions={timeOptions}
           bookingCode={isEdit ? initial.bookingId : undefined}
           numberOfPeopleReadOnly={false}
         />

@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api/shops/{shop_id}", tags=["public-slots"])
 def list_available_slots(
     shop_id: str,
     booking_date: str = Query(...),
+    start_time: str | None = Query(None),
     number_of_people: int = Query(..., ge=1, le=3),
     main_course_id: str = Query(...),
     addon_course_ids: str | None = Query(None),
@@ -29,6 +30,14 @@ def list_available_slots(
         bdate = date.fromisoformat(booking_date)
     except ValueError:
         raise AppError(400, code="INVALID_QUERY_PARAMETER", detail="booking_date không đúng format YYYY-MM-DD")
+    try:
+        requested_start_time = time.fromisoformat(start_time) if start_time else None
+    except ValueError:
+        raise AppError(
+            400,
+            code="INVALID_QUERY_PARAMETER",
+            detail="start_time không đúng format HH:MM",
+        )
 
     suid = parse_uuid(shop_id, "shop")
     mcid = parse_uuid(main_course_id, "course")
@@ -37,6 +46,7 @@ def list_available_slots(
     return service.list_available_slots(
         shop_id=suid,
         booking_date=bdate,
+        requested_start_time=requested_start_time,
         number_of_people=number_of_people,
         main_course_id=mcid,
         addon_course_ids=addon_course_ids,

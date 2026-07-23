@@ -124,6 +124,7 @@ export function BookingLiveChecks({
         const slots = await checkAvailableSlots({
           shopId,
           bookingDate,
+          startTime,
           numberOfPeople,
           mainCourseId: mainCourseId as UUID,
           addonCourseIds: (addonCourseIds as UUID[]) ?? [],

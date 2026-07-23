@@ -60,6 +60,7 @@ export interface AvailableTherapist {
 export async function checkAvailableSlots(params: {
   shopId: UUID;
   bookingDate: string;
+  startTime?: string;
   numberOfPeople: number;
   mainCourseId: UUID;
   addonCourseIds?: UUID[];
@@ -72,6 +73,9 @@ export async function checkAvailableSlots(params: {
     number_of_people: String(params.numberOfPeople),
     main_course_id: params.mainCourseId,
   };
+  if (params.startTime) {
+    query.start_time = params.startTime;
+  }
   if (params.addonCourseIds?.length) {
     query.addon_course_ids = params.addonCourseIds.join(",");
   }

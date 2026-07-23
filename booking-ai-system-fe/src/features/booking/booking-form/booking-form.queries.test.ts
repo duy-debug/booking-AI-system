@@ -33,6 +33,7 @@ describe("booking availability queries", () => {
       checkAvailableSlots({
         shopId: "shop-id",
         bookingDate: "2026-07-21",
+        startTime: "10:01",
         numberOfPeople: 1,
         mainCourseId: "course-id",
       }),
@@ -41,6 +42,7 @@ describe("booking availability queries", () => {
     expect(get).toHaveBeenCalledWith("/api/shops/shop-id/available-slots", {
       query: {
         booking_date: "2026-07-21",
+        start_time: "10:01",
         number_of_people: "1",
         main_course_id: "course-id",
       },

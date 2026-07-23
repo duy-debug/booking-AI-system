@@ -9,7 +9,6 @@ import { useShops } from "@/features/shop/use-shop-queries";
 import { useScheduleData } from "@/features/booking/schedule.queries";
 import { type Selection } from "@/features/booking/SelectionLayer";
 import type { BookingViewModel } from "@/features/booking/schedule.types";
-import { type TimeStep } from "@/features/booking/schedule.theme";
 import { BookingDrawer, type BookingDrawerState } from "@/features/booking/booking-form/BookingDrawer";
 import { todayShopDate } from "@/shared/lib/datetime";
 import type { UUID } from "@/shared/types/common";
@@ -18,7 +17,6 @@ import type { UUID } from "@/shared/types/common";
 export default function AdminBookingsPage() {
   const [date, setDate] = useState<string>(todayShopDate());
   const [shopId, setShopId] = useState<UUID | null>(null);
-  const [step, setStep] = useState<TimeStep>(15);
   const [drawer, setDrawer] = useState<BookingDrawerState>(null);
 
   const queryClient = useQueryClient();
@@ -73,8 +71,6 @@ export default function AdminBookingsPage() {
         shopId={activeShopId}
         onShopChange={(id) => setShopId(id || null)}
         shops={shops}
-        step={step}
-        onStepChange={setStep}
         onPrevDay={() => shiftDay(-1)}
         onNextDay={() => shiftDay(1)}
         scheduleData={scheduleQuery.data ?? null}
@@ -86,7 +82,6 @@ export default function AdminBookingsPage() {
           isLoading={scheduleQuery.isLoading}
           isError={scheduleQuery.isError}
           error={scheduleQuery.error ?? undefined}
-          step={step}
           onSelectBooking={handleSelectBooking}
           onCreateBooking={handleCreate}
         />

@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 class AvailableSlotQuery(BaseModel):
 
     booking_date: date
+    start_time: time | None = None
     number_of_people: int = Field(..., ge=1, le=3)
     main_course_id: UUID
     addon_course_ids: str | None = None  # UUIDs cách nhau bằng dấu phẩy
