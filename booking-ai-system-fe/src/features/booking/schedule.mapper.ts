@@ -104,6 +104,7 @@ export function toScheduleViewModel(
     date,
     timezone: raw.shop.timezone,
     minimumBookingAdvanceMinutes: raw.shop.minimum_booking_advance_minutes ?? 15,
+    therapistBreakMinutes: raw.shop.therapist_break_minutes ?? 0,
     timelineStartMinutes: timeline.start,
     timelineEndMinutes: timeline.end,
   };

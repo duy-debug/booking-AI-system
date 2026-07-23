@@ -14,6 +14,7 @@ import { BookingLayer } from "./BookingLayer";
 import { CancelledBookingLayer } from "./CancelledBookingLayer";
 import { SelectionLayer, type Selection } from "./SelectionLayer";
 import { TimeGrid } from "./TimeGrid";
+import { BookingBreakLayer } from "./BookingBreakLayer";
 import type { BookingViewModel, ResourceViewModel } from "./schedule.types";
 
 interface ResourceRowProps {
@@ -28,6 +29,7 @@ interface ResourceRowProps {
   onClearSelection: () => void;
   earliestSelectableMinutes: number | null;
   onInvalidSelection: () => void;
+  breakMinutes: number;
 }
 
 // Tách booking cancelled khỏi booking active để render đúng layer và quy tắc pointer-event.
@@ -56,12 +58,13 @@ export function doesSelectionOverlapActiveBooking(
   bookings: BookingViewModel[],
   startMinutes: number,
   endMinutes: number,
+  breakMinutes = 0,
 ) {
   return bookings.some(
     (booking) =>
       booking.status !== "cancelled" &&
-      startMinutes < booking.endMinutes &&
-      endMinutes > booking.startMinutes,
+      startMinutes < booking.endMinutes + breakMinutes &&
+      endMinutes > booking.startMinutes - breakMinutes,
   );
 }
 
@@ -78,6 +81,7 @@ const ResourceRowInner = memo(function ResourceRowInner({
   onClearSelection,
   earliestSelectableMinutes,
   onInvalidSelection,
+  breakMinutes,
 }: ResourceRowProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const totalWidth = (range.end - range.start) * pxPerMinute;
@@ -117,9 +121,14 @@ const ResourceRowInner = memo(function ResourceRowInner({
       ),
       therapistId: resource.therapistId,
     };
-    if (doesSelectionOverlapActiveBooking(bookings, sel.startMinutes, sel.endMinutes)) return;
+    if (doesSelectionOverlapActiveBooking(
+      bookings,
+      sel.startMinutes,
+      sel.endMinutes,
+      breakMinutes,
+    )) return;
     onStartSelection(sel);
-  }, [range, pxPerMinute, resource.therapistId, onStartSelection, resource.shifts, bookings, earliestSelectableMinutes, onInvalidSelection]);
+  }, [range, pxPerMinute, resource.therapistId, onStartSelection, resource.shifts, bookings, breakMinutes, earliestSelectableMinutes, onInvalidSelection]);
 
   const rowSelection = selection?.therapistId === resource.therapistId ? selection : null;
 
@@ -157,6 +166,12 @@ const ResourceRowInner = memo(function ResourceRowInner({
           range={range}
           pxPerMinute={pxPerMinute}
           onSelect={onSelectBooking}
+        />
+        <BookingBreakLayer
+          bookings={bookingLayers.active}
+          breakMinutes={breakMinutes}
+          range={range}
+          pxPerMinute={pxPerMinute}
         />
         <BookingLayer
           bookings={bookingLayers.active}

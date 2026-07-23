@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.db.models.booking import Booking
 from app.db.models.reservation import Reservation
 from app.db.models.reservation_course import ReservationCourse
+from app.core.time_ranges import expand_time_window
 
 
 class ReservationRepository:
@@ -63,7 +64,11 @@ class ReservationRepository:
         start_time: time,
         end_time: time,
         exclude_booking_id: UUID | None = None,
+        break_minutes: int = 0,
     ) -> bool:
+        overlap_start, overlap_end = expand_time_window(
+            start_time, end_time, break_minutes
+        )
         stmt = (
             select(Reservation.reservation_id)
             .join(Booking)
@@ -71,8 +76,8 @@ class ReservationRepository:
                 Reservation.therapist_id == therapist_id,
                 Booking.booking_date == booking_date,
                 Booking.status != "cancelled",
-                Reservation.start_time < end_time,
-                Reservation.end_time > start_time,
+                Reservation.start_time < overlap_end,
+                Reservation.end_time > overlap_start,
             )
         )
         if exclude_booking_id is not None:
@@ -87,7 +92,11 @@ class ReservationRepository:
         booking_date: date,
         start_time: time,
         end_time: time,
+        break_minutes: int = 0,
     ) -> list[Reservation]:
+        overlap_start, overlap_end = expand_time_window(
+            start_time, end_time, break_minutes
+        )
         stmt = (
             select(Reservation)
             .join(Booking)
@@ -95,8 +104,8 @@ class ReservationRepository:
                 Reservation.therapist_id == therapist_id,
                 Booking.booking_date == booking_date,
                 Booking.status != "cancelled",
-                Reservation.start_time < end_time,
-                Reservation.end_time > start_time,
+                Reservation.start_time < overlap_end,
+                Reservation.end_time > overlap_start,
             )
             .options(joinedload(Reservation.booking))
             .order_by(Reservation.reservation_id)
@@ -111,7 +120,11 @@ class ReservationRepository:
         booking_date: date,
         start_time: time,
         end_time: time,
+        break_minutes: int = 0,
     ) -> list[Reservation]:
+        overlap_start, overlap_end = expand_time_window(
+            start_time, end_time, break_minutes
+        )
         stmt = (
             select(Reservation)
             .join(Booking)
@@ -119,8 +132,8 @@ class ReservationRepository:
                 Reservation.therapist_id == therapist_id,
                 Booking.booking_date == booking_date,
                 Booking.status != "cancelled",
-                Reservation.start_time < end_time,
-                Reservation.end_time > start_time,
+                Reservation.start_time < overlap_end,
+                Reservation.end_time > overlap_start,
             )
             .options(joinedload(Reservation.booking))
             .order_by(Reservation.reservation_id)
@@ -134,7 +147,11 @@ class ReservationRepository:
         booking_date: date,
         start_time: time,
         end_time: time,
+        break_minutes: int = 0,
     ) -> bool:
+        overlap_start, overlap_end = expand_time_window(
+            start_time, end_time, break_minutes
+        )
         stmt = (
             select(Reservation.reservation_id)
             .join(Booking)
@@ -142,8 +159,8 @@ class ReservationRepository:
                 Booking.shop_id == shop_id,
                 Booking.booking_date == booking_date,
                 Booking.status != "cancelled",
-                Reservation.start_time < end_time,
-                Reservation.end_time > start_time,
+                Reservation.start_time < overlap_end,
+                Reservation.end_time > overlap_start,
             )
             .limit(1)
         )

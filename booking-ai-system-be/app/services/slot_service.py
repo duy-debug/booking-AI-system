@@ -156,8 +156,14 @@ class SlotService:
         requested_therapist_id: UUID,
         context,
     ) -> bool:
+        break_minutes = getattr(context, "break_minutes", 0)
+        overlap_args = {"break_minutes": break_minutes} if break_minutes else {}
         overlaps = self.reservation_repo.find_overlaps(
-            requested_therapist_id, booking_date, start_time, end_time
+            requested_therapist_id,
+            booking_date,
+            start_time,
+            end_time,
+            **overlap_args,
         )
         if len(overlaps) != 1 or overlaps[0].assignment_source != "auto":
             return False

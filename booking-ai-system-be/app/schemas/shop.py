@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -15,6 +16,7 @@ class ShopCreate(BaseModel):
     address: str | None = None
     phone: str | None = None
     is_active: bool = True
+    therapist_break_minutes: Literal[0, 5, 10, 15] = 0
 
 
 # Cập nhật shop — tất cả field đều optional (PATCH)
@@ -23,6 +25,7 @@ class ShopUpdate(BaseModel):
     address: str | None = None
     phone: str | None = None
     is_active: bool | None = None
+    therapist_break_minutes: Literal[0, 5, 10, 15] | None = None
 
 
 # Response chi tiết shop (admin) — gồm tất cả field
@@ -36,6 +39,7 @@ class AdminShopResponse(BaseModel):
     address: str | None = None
     phone: str | None = None
     is_active: bool
+    therapist_break_minutes: Literal[0, 5, 10, 15]
     created_at: datetime
     updated_at: datetime
 

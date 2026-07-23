@@ -49,6 +49,14 @@ describe("cancelled booking timeline behavior", () => {
     expect(doesSelectionOverlapActiveBooking([active], 585, 615)).toBe(true);
   });
 
+  it("blocks the configured break and permits the exact boundary", () => {
+    const active = booking("confirmed");
+    expect(doesSelectionOverlapActiveBooking([active], 660, 664, 5)).toBe(true);
+    expect(doesSelectionOverlapActiveBooking([active], 665, 680, 5)).toBe(false);
+    expect(doesSelectionOverlapActiveBooking([active], 540, 596, 5)).toBe(true);
+    expect(doesSelectionOverlapActiveBooking([active], 540, 595, 5)).toBe(false);
+  });
+
   it("does not treat a cancelled booking as active overlap for drag ranges", () => {
     expect(doesSelectionOverlapActiveBooking([booking("cancelled")], 590, 670)).toBe(false);
   });

@@ -1,5 +1,6 @@
 "use client";
 
+import { ShopBreakSelector } from "@/features/shop/ShopBreakSelector";
 import { useShops } from "@/features/shop/use-shop-queries";
 
 // Chuyển trạng thái hoạt động của shop thành badge màu ngắn gọn, nhất quán ở table và mobile card.
@@ -56,9 +57,10 @@ export function ShopList() {
         <table className="w-full table-fixed text-left text-sm">
           <thead className="border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase tracking-wide text-zinc-500">
             <tr>
-              <th className="w-[28%] px-4 py-2.5">Shop</th>
-              <th className="w-[22%] px-4 py-2.5">Mã hệ thống</th>
-              <th className="w-[34%] px-4 py-2.5">Liên hệ</th>
+              <th className="w-[24%] px-4 py-2.5">Shop</th>
+              <th className="w-[18%] px-4 py-2.5">Mã hệ thống</th>
+              <th className="w-[26%] px-4 py-2.5">Liên hệ</th>
+              <th className="w-[16%] px-4 py-2.5">Nghỉ giữa booking</th>
               <th className="w-[16%] px-4 py-2.5">Trạng thái</th>
             </tr>
           </thead>
@@ -81,6 +83,9 @@ export function ShopList() {
                   <p className="truncate" title={shop.phone ?? undefined}>
                     {shop.phone || "Chưa có số điện thoại"}
                   </p>
+                </td>
+                <td className="px-4 py-3 align-top">
+                  <ShopBreakSelector shop={shop} />
                 </td>
                 <td className="px-4 py-3 align-top">
                   <ShopStatus isActive={shop.isActive} />
@@ -108,6 +113,10 @@ export function ShopList() {
             <div className="mt-2 grid min-w-0 gap-1 border-t border-zinc-100 pt-2 text-xs text-zinc-600">
               <p className="truncate">{shop.address || "Chưa có địa chỉ"}</p>
               <p className="truncate">{shop.phone || "Chưa có số điện thoại"}</p>
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <span>Nghỉ giữa booking</span>
+                <ShopBreakSelector shop={shop} />
+              </div>
             </div>
           </article>
         ))}

@@ -96,6 +96,7 @@ export interface ScheduleViewModel {
   date: ISODate;
   timezone: string;
   minimumBookingAdvanceMinutes: number;
+  therapistBreakMinutes: number;
   // Khoảng hiển thị tính bằng phút tuyệt đối
   timelineStartMinutes: number;
   timelineEndMinutes: number;

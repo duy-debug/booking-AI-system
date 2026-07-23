@@ -178,6 +178,7 @@ export function ScheduleBoard({
             onCommitSelection={handleCommitSelection}
             onClearSelection={handleClearSelection}
             earliestSelectableMinutes={earliestSelectableMinutes}
+            breakMinutes={schedule.therapistBreakMinutes}
             onInvalidSelection={() => showError(
               earliestSelectableMinutes === Number.POSITIVE_INFINITY
                 ? "Không thể tạo booking cho ngày trong quá khứ."

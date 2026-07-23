@@ -9,6 +9,12 @@ export const shopCreateSchema = z.object({
   address: z.string().optional(),
   phone: z.string().optional(),
   is_active: z.boolean().default(true),
+  therapist_break_minutes: z.union([
+    z.literal(0),
+    z.literal(5),
+    z.literal(10),
+    z.literal(15),
+  ]).default(0),
 });
 export type ShopCreateInput = z.infer<typeof shopCreateSchema>;
 
@@ -24,6 +30,7 @@ export interface AdminShopResponse {
   address: string | null;
   phone: string | null;
   is_active: boolean;
+  therapist_break_minutes: 0 | 5 | 10 | 15;
   created_at: string;
   updated_at: string;
 }
@@ -45,6 +52,7 @@ export interface ShopUiModel {
   address: string | null;
   phone: string | null;
   isActive: boolean;
+  therapistBreakMinutes: 0 | 5 | 10 | 15;
   createdAt: string;
   updatedAt: string;
 }
@@ -60,6 +68,7 @@ export function toShopUiModel(dto: AdminShopResponse): ShopUiModel {
     address: dto.address,
     phone: dto.phone,
     isActive: dto.is_active,
+    therapistBreakMinutes: dto.therapist_break_minutes,
     createdAt: dto.created_at,
     updatedAt: dto.updated_at,
   };

@@ -4,7 +4,8 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.repositories import ReservationRepository, ShiftRepository
+from app.repositories import ReservationRepository, ShiftRepository, ShopRepository
+from app.core.time_ranges import intervals_overlap_with_break
 
 
 @dataclass(frozen=True)
@@ -14,6 +15,7 @@ class AvailabilityDayContext:
     shifts_by_therapist: dict
     blocked_by_therapist: dict
     reservations_by_therapist: dict
+    break_minutes: int = 0
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,7 @@ class TherapistAvailabilityService:
     def __init__(self, session: Session):
         self.shift_repo = ShiftRepository(session)
         self.reservation_repo = ReservationRepository(session)
+        self.shop_repo = ShopRepository(session)
 
     # Đánh giá danh sách therapist phục vụ trọn khoảng giờ theo request type và tùy chọn khóa shift.
     def evaluate(
@@ -48,6 +51,7 @@ class TherapistAvailabilityService:
         lock_shifts: bool = False,
         context: AvailabilityDayContext | None = None,
         exclude_booking_id: UUID | None = None,
+        break_minutes: int | None = None,
     ) -> TherapistAvailabilityResult:
         if context is not None:
             return self._evaluate_context(
@@ -58,6 +62,12 @@ class TherapistAvailabilityService:
                 requested_therapist_id=requested_therapist_id,
                 requested_gender=requested_gender,
             )
+
+        effective_break_minutes = break_minutes
+        if effective_break_minutes is None:
+            shop_repo = getattr(self, "shop_repo", None)
+            shop = shop_repo.find_by_id(shop_id) if shop_repo else None
+            effective_break_minutes = shop.therapist_break_minutes if shop else 0
 
         covering = {}
         for shift in self.shift_repo.find_available_with_therapist(
@@ -89,6 +99,8 @@ class TherapistAvailabilityService:
                 if exclude_booking_id is not None
                 else {}
             )
+            if effective_break_minutes:
+                overlap_kwargs["break_minutes"] = effective_break_minutes
             if self.reservation_repo.exists_overlap(
                 therapist_id, booking_date, start_time, end_time, **overlap_kwargs
             ):
@@ -116,6 +128,8 @@ class TherapistAvailabilityService:
         reservations = self.reservation_repo.find_by_shop_date_non_cancelled(
             shop_id, booking_date
         )
+        shop_repo = getattr(self, "shop_repo", None)
+        shop = shop_repo.find_by_id(shop_id) if shop_repo else None
 
         therapists = {}
         shifts_by_therapist = {}
@@ -147,6 +161,7 @@ class TherapistAvailabilityService:
             shifts_by_therapist=shifts_by_therapist,
             blocked_by_therapist=blocked_by_therapist,
             reservations_by_therapist=reservations_by_therapist,
+            break_minutes=shop.therapist_break_minutes if shop else 0,
         )
 
     # Đánh giá availability hoàn toàn trên dữ liệu context đã nạp, tránh phát sinh truy vấn cho từng slot.
@@ -190,6 +205,7 @@ class TherapistAvailabilityService:
                 context.reservations_by_therapist.get(therapist_id, []),
                 start_time,
                 end_time,
+                context.break_minutes,
             ):
                 busy_count += 1
                 continue
@@ -205,10 +221,19 @@ class TherapistAvailabilityService:
     # Kiểm tra một khoảng giờ có giao với bất kỳ khoảng đã tồn tại nào theo quy tắc đầu đóng cuối mở.
     @staticmethod
     def _has_overlap(
-        intervals: list[tuple[time, time]], start_time: time, end_time: time
+        intervals: list[tuple[time, time]],
+        start_time: time,
+        end_time: time,
+        break_minutes: int = 0,
     ) -> bool:
         return any(
-            existing_start < end_time and existing_end > start_time
+            intervals_overlap_with_break(
+                existing_start,
+                existing_end,
+                start_time,
+                end_time,
+                break_minutes,
+            )
             for existing_start, existing_end in intervals
         )
 

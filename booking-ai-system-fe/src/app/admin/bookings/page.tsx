@@ -28,6 +28,10 @@ export default function AdminBookingsPage() {
   );
 
   const activeShopId = shopId ?? shops[0]?.id ?? null;
+  const activeShop = useMemo(
+    () => shopsQuery.data?.find((shop) => shop.id === activeShopId) ?? null,
+    [activeShopId, shopsQuery.data],
+  );
 
   const scheduleQuery = useScheduleData(activeShopId, date);
 
@@ -71,6 +75,7 @@ export default function AdminBookingsPage() {
         shopId={activeShopId}
         onShopChange={(id) => setShopId(id || null)}
         shops={shops}
+        activeShop={activeShop}
         onPrevDay={() => shiftDay(-1)}
         onNextDay={() => shiftDay(1)}
         scheduleData={scheduleQuery.data ?? null}

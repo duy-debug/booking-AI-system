@@ -7,6 +7,7 @@ export interface ScheduleShopRaw {
   name: string;
   timezone: string;
   minimum_booking_advance_minutes: number;
+  therapist_break_minutes?: number;
   business_hours: {
     open: string;
     close: string;

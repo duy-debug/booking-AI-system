@@ -184,6 +184,9 @@ class ScheduleService:
                 "minimum_booking_advance_minutes": (
                     settings.MINIMUM_BOOKING_ADVANCE_MINUTES
                 ),
+                "therapist_break_minutes": getattr(
+                    shop, "therapist_break_minutes", 0
+                ),
                 "business_hours": business_hours,
             },
             "date": schedule_date,

@@ -5,6 +5,8 @@ import { STATUS_STYLES } from "./schedule.theme";
 import type { ISODate, UUID } from "@/shared/types/common";
 import { todayShopDate } from "@/shared/lib/datetime";
 import type { ScheduleViewModel } from "./schedule.types";
+import type { ShopUiModel } from "@/features/shop/shop.types";
+import { ShopBreakSelector } from "@/features/shop/ShopBreakSelector";
 
 interface ScheduleToolbarProps {
   date: ISODate;
@@ -12,6 +14,7 @@ interface ScheduleToolbarProps {
   shopId: UUID | null;
   onShopChange: (id: UUID) => void;
   shops: { id: UUID; name: string }[];
+  activeShop: ShopUiModel | null;
   onPrevDay: () => void;
   onNextDay: () => void;
   scheduleData: ScheduleViewModel | null;
@@ -33,6 +36,7 @@ export function ScheduleToolbar({
   shopId,
   onShopChange,
   shops,
+  activeShop,
   onPrevDay,
   onNextDay,
   scheduleData,
@@ -92,6 +96,18 @@ export function ScheduleToolbar({
             )}
           </select>
         </div>
+
+        {activeShop && (
+          <>
+            <div className="w-px h-5 bg-zinc-300" />
+            <div className="flex items-center gap-1">
+              <label className="whitespace-nowrap text-xs text-zinc-500">
+                Nghỉ giữa booking:
+              </label>
+              <ShopBreakSelector shop={activeShop} compact />
+            </div>
+          </>
+        )}
 
         <div className="w-px h-5 bg-zinc-300" />
 

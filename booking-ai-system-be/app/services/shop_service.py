@@ -87,6 +87,8 @@ class ShopService:
                 shop.phone = body.phone
             if "is_active" in update_data:
                 shop.is_active = body.is_active
+            if "therapist_break_minutes" in update_data:
+                shop.therapist_break_minutes = body.therapist_break_minutes
 
             self.session.commit()
             self.repo.refresh(shop)

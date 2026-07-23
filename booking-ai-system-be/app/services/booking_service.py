@@ -145,6 +145,7 @@ class BookingService:
                 start_time=body.start_time,
                 end_time=end_time,
                 requested_therapist_id=body.therapist_request.therapist_id,
+                break_minutes=shop.therapist_break_minutes,
             )]
         else:
             therapist_ids = self._resolve_therapists(
@@ -455,6 +456,11 @@ class BookingService:
                     start_time,
                     end_time,
                     exclude_booking_id=booking.booking_id,
+                    break_minutes=getattr(
+                        getattr(booking, "shop", None),
+                        "therapist_break_minutes",
+                        0,
+                    ),
                 ):
                     raise AppError(
                         409,
@@ -609,6 +615,7 @@ class BookingService:
         start_time: time,
         end_time: time,
         requested_therapist_id: UUID,
+        break_minutes: int = 0,
     ) -> UUID:
         requested = self.availability_service.evaluate(
             shop_id=shop_id,
@@ -628,8 +635,15 @@ class BookingService:
                 detail="Therapist được chỉ định không khả dụng trong khung giờ.",
             )
 
+        overlap_args = (
+            {"break_minutes": break_minutes} if break_minutes else {}
+        )
         overlaps = self.reservation_repo.find_overlaps_for_update(
-            requested_therapist_id, booking_date, start_time, end_time
+            requested_therapist_id,
+            booking_date,
+            start_time,
+            end_time,
+            **overlap_args,
         )
         if len(overlaps) != 1:
             raise AppError(

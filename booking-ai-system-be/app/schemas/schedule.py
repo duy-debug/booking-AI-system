@@ -26,6 +26,7 @@ class ScheduleShopResponse(BaseModel):
     name: str
     timezone: str
     minimum_booking_advance_minutes: int
+    therapist_break_minutes: int
     business_hours: ScheduleBusinessHoursResponse
 
 
