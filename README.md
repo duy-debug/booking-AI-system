@@ -243,7 +243,7 @@ OpenAPI: http://localhost:8000/openapi.json
 Qdrant và Booking Backend phải được khởi động trước Chatbot.
 
 ```bash
-cd booking-ai-chatbot
+cd booking-ai-chatbot/backend
 
 python -m venv .venv
 ```
@@ -321,7 +321,7 @@ SUPABASE_TEST_PASSWORD=test-password
 
 ### AI Chatbot
 
-Create `booking-ai-chatbot/.env` from `.env.example`.
+Create `booking-ai-chatbot/backend/.env` from `.env.example`.
 
 ```env
 GROQ_API_KEY=
@@ -394,7 +394,7 @@ pytest
 ### Chatbot
 
 ```bash
-cd booking-ai-chatbot
+cd booking-ai-chatbot/backend
 pytest
 ```
 

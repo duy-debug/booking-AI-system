@@ -16,10 +16,10 @@ services:
     restart: unless-stopped
 
   chatbot:
-    build: ./booking-ai-chatbot
+    build: ./booking-ai-chatbot/backend
     ports:
       - "8001:8000"
-    env_file: ./booking-ai-chatbot/.env
+    env_file: ./booking-ai-chatbot/backend/.env
     depends_on:
       - qdrant
     restart: unless-stopped

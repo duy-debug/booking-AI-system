@@ -1,0 +1,44 @@
+[project]
+name = "booking-ai-chatbot"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.139",
+    "uvicorn>=0.51",
+    "pydantic-settings>=2.14",
+    "python-dotenv>=1.1",
+    "openai>=1",
+    "sentence-transformers>=3",
+    "qdrant-client>=1.12",
+    "httpx>=0.28",
+    "redis>=5.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.15",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.12",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+warn_return_any = true
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

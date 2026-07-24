@@ -120,7 +120,7 @@ CORS_ORIGINS=["http://localhost:3000"]
 
 ---
 
-## Chatbot — `booking-ai-chatbot/`
+## Chatbot — `booking-ai-chatbot/backend/`
 
 **Công nghệ:** FastAPI + Python 3.12 + Qdrant + Groq + sentence-transformers
 
@@ -130,45 +130,28 @@ Dịch vụ AI riêng, xử lý hội thoại thông minh với RAG và intent r
 
 ```
 app/
-├── main.py            # FastAPI app, lifespan, router mount
-├── core/
-│   ├── config.py      # Settings (GROQ_API_KEY, QDRANT_HOST, ...)
-│   └── exceptions.py  # AppError base exception
-├── integrations/
-│   ├── groq.py        # Groq LLM client (OpenAI-compatible SDK)
-│   ├── qdrant.py      # Qdrant async client (lifespan-managed)
-│   └── booking_api.py # HTTP client gọi Booking Backend internal API
-├── rag/               # RAG pipeline
-│   ├── prompts.py     # System prompt template
-│   ├── embeddings.py  # Sentence-transformers embedding (threadpool)
-│   ├── vector_store.py# Qdrant operations (search, upsert, count, delete)
-│   ├── ingestion.py   # Document chunking + embed + seed to Qdrant
-│   ├── chain.py       # Retrieval + Groq generation
-│   └── router.py      # /api/chat, /api/kb/seed, /api/kb/stats
-└── tools/             # Intent classification + tool dispatch
-    ├── intent.py      # classify_query, extract_params
-    ├── faq.py         # FAQ answering (RAG-based)
-    ├── shop.py        # Shop / course info search (gọi BE API)
-    ├── slot.py        # Slot availability + eligibility (gọi BE API)
-    ├── booking.py     # Booking CRUD với confirmation gate (gọi BE API)
-    └── state.py       # Conversation state (in-memory, pending confirmations)
+├── api/               # FastAPI router và Pydantic schema
+├── application/       # Orchestrator, NLU, Intent Router, workflow
+├── domain/            # Intent, entity, state và pending action
+├── handlers/          # Information, booking, FAQ, general, clarification
+├── policies/          # Input guard và public tool allowlist
+├── tools/             # Read-only tools và mutation tools
+├── integrations/      # Booking API, Redis, Groq và Qdrant
+├── rag/               # Ingestion, embedding, retrieval và grounded response
+├── core/              # Settings và exception
+└── main.py            # Composition root và lifecycle
 ```
 
 ### Luồng xử lý chat
 
 ```
-User query → classify_query() → intent dispatch:
+Chat API → Input Guard → Orchestrator → Structured NLU → Intent Router
 
-  faq             → answer_faq() → embed → Qdrant search → Groq
-  shop_info       → search_shop_info() → gọi BE API /api/public/shops
-  course_info     → search_courses() → gọi BE API
-  check_slot      → search_available_slots() → gọi BE API
-  check_eligibility→ check_customer_eligibility() → gọi BE API
-  create_booking  → initiate_create_booking() → confirmation gate → BE API
-  cancel_booking  → initiate_cancel_booking() → confirmation gate → BE API
-  update_booking  → initiate_update_booking() → confirmation gate → BE API
-  lookup_booking  → lookup_customer_booking() → gọi BE API
-  unknown         → fallback → answer_faq()
+  information → Information Handler → Read-only Tools → Public Booking API
+  booking     → Booking Workflow → Confirmation Gate → Mutation Tools
+  faq         → FAQ Handler → Qdrant → Groq
+  general     → General Handler
+  unknown     → Clarification Handler
 ```
 
 ### Biến môi trường
@@ -182,6 +165,9 @@ EMBED_DIM=384
 QDRANT_HOST=localhost
 QDRANT_PORT=6333
 QDRANT_COLLECTION=kb_chunks
+REDIS_URL=redis://localhost:6379/0
+CONVERSATION_TTL_SECONDS=1800
+BUSINESS_TIMEZONE=Asia/Tokyo
 BOOKING_API_URL=http://localhost:8000
 BOOKING_API_SERVICE_KEY=...
 ADMIN_API_KEY=change-me-in-production
@@ -220,7 +206,7 @@ Mỗi service có Dockerfile riêng, orchestrate bằng `docker-compose.yml` ở
 | Service | Dockerfile | Base image |
 |---------|-----------|------------|
 | Backend | `booking-ai-system-be/Dockerfile` | python:3.12-slim |
-| Chatbot | `booking-ai-chatbot/Dockerfile` | python:3.12-slim |
+| Chatbot | `booking-ai-chatbot/backend/Dockerfile` | python:3.12-slim |
 | Frontend | `booking-ai-system-fe/Dockerfile` | node:22-alpine (multi-stage) |
 
 ### docker-compose.yml
@@ -229,7 +215,7 @@ Mỗi service có Dockerfile riêng, orchestrate bằng `docker-compose.yml` ở
 services:
   qdrant:        # image: qdrant/qdrant:latest, port 6333, volume qdrant_data
   backend:       # build ./booking-ai-system-be, port 8000
-  chatbot:       # build ./booking-ai-chatbot, port 8001, depends_on: qdrant
+  chatbot:       # build ./booking-ai-chatbot/backend, port 8001, depends_on: qdrant
   frontend:      # build ./booking-ai-system-fe, port 3000, depends_on: backend
 ```
 
