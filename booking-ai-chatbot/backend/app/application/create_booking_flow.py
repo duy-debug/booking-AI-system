@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date, datetime, time
+from datetime import date, time
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from app.application.contracts import ConversationStore
-from app.core.config import settings
+from app.core.business_time import business_today
 from app.core.exceptions import AppError
 from app.domain.nlu import NLUResult
 from app.domain.state import ConversationState, ConversationStep
@@ -97,6 +96,7 @@ class CreateBookingFlow:
             normalized["start_time"] = CreateBookingFlow._validate_start_time(
                 str(normalized["start_time"])
             )
+            normalized["requested_start_time"] = normalized["start_time"]
         phone = normalized.get("customer_phone")
         if phone and not re.fullmatch(r"0\d{9,10}", str(phone)):
             raise AppError(
@@ -160,6 +160,8 @@ class CreateBookingFlow:
                 )
             state.entities["number_of_people"] = people
             state.entities.pop("start_time", None)
+            if state.entities.get("requested_start_time"):
+                state.entities["start_time"] = state.entities["requested_start_time"]
             self._reset_therapist_request(state)
             if people > 1:
                 state.entities["therapist_request_type"] = "none"
@@ -172,6 +174,7 @@ class CreateBookingFlow:
 
         if entity == "start_time":
             state.entities["start_time"] = self._validate_start_time(str(value))
+            state.entities["requested_start_time"] = state.entities["start_time"]
             self._reset_therapist_request(state)
             if int(state.entities.get("number_of_people", 1)) > 1:
                 state.entities["therapist_request_type"] = "none"
@@ -376,7 +379,7 @@ class CreateBookingFlow:
     # Lấy ngày hiện tại theo múi giờ nghiệp vụ thay vì phụ thuộc timezone của máy chạy.
     @staticmethod
     def _business_today() -> date:
-        return datetime.now(ZoneInfo(settings.BUSINESS_TIMEZONE)).date()
+        return business_today()
 
     # Kiểm tra giờ theo định dạng 24 giờ và chuẩn hóa thành HH:MM.
     @staticmethod

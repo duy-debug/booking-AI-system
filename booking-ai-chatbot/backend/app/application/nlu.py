@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import re
+from datetime import timedelta
 
+from app.core.business_time import business_today
 from app.domain.intent import Intent
 from app.domain.nlu import NLUResult
-from app.tools.intent import classify_query
+from app.tools.intent import classify_query, normalize_text
 
 RESOURCE_BY_INTENT = {
     Intent.SHOP_INFO: ("shop", "list"),
@@ -35,9 +37,13 @@ class StructuredNLU:
     @staticmethod
     def _extract_entities(query: str) -> dict[str, str]:
         entities: dict[str, str] = {}
+        normalized_query = normalize_text(query)
         phone = re.search(r"(?<!\d)(0\d{9,10})(?!\d)", query)
         iso_date = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", query)
-        clock = re.search(r"\b([01]?\d|2[0-3])[:hH](\d{2})\b", query)
+        clock = re.search(
+            r"\b([01]?\d|2[0-3])(?:\s*[:h]\s*(\d{2})?|\s+gio)\b",
+            normalized_query,
+        )
         booking_id = re.search(
             r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-"
             r"[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\b",
@@ -48,8 +54,14 @@ class StructuredNLU:
             entities["phone"] = phone.group(1)
         if iso_date:
             entities["booking_date"] = iso_date.group(1)
+        elif "ngay kia" in normalized_query:
+            entities["booking_date"] = (business_today() + timedelta(days=2)).isoformat()
+        elif "ngay mai" in normalized_query:
+            entities["booking_date"] = (business_today() + timedelta(days=1)).isoformat()
+        elif "hom nay" in normalized_query:
+            entities["booking_date"] = business_today().isoformat()
         if clock:
-            entities["start_time"] = f"{int(clock.group(1)):02d}:{clock.group(2)}"
+            entities["start_time"] = f"{int(clock.group(1)):02d}:{clock.group(2) or '00'}"
         if booking_id:
             entities["booking_id"] = booking_id.group(0).lower()
         if booking_code:

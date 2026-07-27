@@ -1,4 +1,5 @@
-from unittest.mock import AsyncMock
+from datetime import date
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -34,6 +35,20 @@ async def test_nlu_extracts_booking_id() -> None:
     assert result.intent is Intent.LOOKUP_BOOKING
     assert result.entities["booking_id"] == booking_id
     assert result.entities["phone"] == "0901234567"
+
+
+@pytest.mark.asyncio
+async def test_nlu_understands_relative_date_and_short_hour() -> None:
+    with patch("app.application.nlu.business_today", return_value=date(2026, 7, 27)):
+        result = await StructuredNLU().parse(
+            "tôi muốn đặt booking ngày mai lúc 7h"
+        )
+
+    assert result.intent is Intent.CREATE_BOOKING
+    assert result.resource == "booking"
+    assert result.operation == "create"
+    assert result.entities["booking_date"] == "2026-07-28"
+    assert result.entities["start_time"] == "07:00"
 
 
 def test_router_sends_dynamic_information_to_information_handler():

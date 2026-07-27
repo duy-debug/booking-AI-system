@@ -21,6 +21,7 @@ class TestIntent:
     def test_intent_create_booking(self):
         assert classify_query("toi muon dat lich massage") == "create_booking"
         assert classify_query("dat cho") == "create_booking"
+        assert classify_query("tôi muốn đặt booking ngày mai") == "create_booking"
 
     def test_intent_cancel_booking(self):
         assert classify_query("toi muon huy lich") == "cancel_booking"
@@ -38,6 +39,12 @@ class TestIntent:
     def test_intent_course(self):
         assert classify_query("co dich vu massage nao?") == "course_info"
         assert classify_query("co nhung goi nao?") == "course_info"
+
+    def test_basic_conversation_uses_general_intent(self):
+        assert classify_query("xin chào") == "general"
+        assert classify_query("cảm ơn bạn") == "general"
+        assert classify_query("bạn khỏe không?") == "general"
+        assert classify_query("tạm biệt") == "general"
 
 
 class TestFAQIsolation:

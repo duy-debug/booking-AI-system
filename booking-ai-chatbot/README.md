@@ -45,7 +45,7 @@ booking-ai-chatbot/
 │   │   ├── chat/                   # Message list, input, streaming
 │   │   ├── booking/                # Shop, course, slot, summary
 │   │   └── common/
-│   ├── services/                   # HTTP/SSE client gọi Chatbot Backend
+│   ├── services/                   # Typed HTTP client gọi Chatbot Backend
 │   ├── stores/                     # UI state và conversation ID
 │   ├── schemas/                    # Zod validation
 │   └── types/
@@ -71,7 +71,8 @@ booking-ai-chatbot/
 └── README.md
 ```
 
-Giao diện chatbot được viết trong `frontend/`. Backend Python không chứa React
+Giao diện chatbot trong `frontend/` đã triển khai Next.js App Router, responsive
+chat shell, BFF proxy và renderer theo `ui.type`. Backend Python không chứa React
 component hoặc logic hiển thị.
 
 ## 3. Kiến trúc Chatbot Backend

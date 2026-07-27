@@ -182,6 +182,7 @@ Các service:
 | Service | Local URL |
 |---|---|
 | Frontend | `http://localhost:3000` |
+| Chatbot Frontend | `http://localhost:3002` |
 | Booking API | `http://localhost:8000` |
 | Booking API documentation | `http://localhost:8000/docs` |
 | Chatbot API | `http://localhost:8001` |

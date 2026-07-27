@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 def test_v1_chat_is_the_documented_contract(client: TestClient) -> None:
     schema = client.get("/openapi.json").json()
     assert "/api/v1/chat" in schema["paths"]
+    assert "/api/v1/chat/stream" in schema["paths"]
     assert "/api/chat" not in schema["paths"]
 
 

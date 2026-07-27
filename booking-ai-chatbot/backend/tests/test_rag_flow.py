@@ -29,14 +29,16 @@ class TestKB:
         r = client.get("/api/kb/stats")
         assert r.status_code == 401
 
-    def test_chat_valid(self, client: TestClient, mock_qdrant):
-        # Mock Qdrant search tra ve chunks
-        mock_qdrant.query_points.return_value.points = [
-            MagicMock(id="1", payload={"source": "test.md", "content": "Noi dung mau"}, score=0.9)
-        ]
+    def test_chat_valid(self, client: TestClient, mock_qdrant, mock_groq):
+        mock_qdrant.query_points.reset_mock()
+        mock_groq.chat.completions.create.reset_mock()
         r = client.post("/api/chat", json={"query": "xin chao"})
+
         assert r.status_code == 200
         assert "Cau tra loi" in r.json()["answer"]
+        assert r.json()["intent"] == "general"
+        mock_qdrant.query_points.assert_not_called()
+        mock_groq.chat.completions.create.assert_called_once()
 
     def test_chat_uses_context(self, client: TestClient, mock_qdrant):
         mock_qdrant.query_points.return_value.points = [

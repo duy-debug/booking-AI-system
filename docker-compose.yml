@@ -47,6 +47,17 @@ services:
       BOOKING_API_URL: http://backend:8000
     restart: unless-stopped
 
+  chatbot-frontend:
+    build: ./booking-ai-chatbot/frontend
+    ports:
+      - "3002:3000"
+    environment:
+      CHATBOT_API_URL: http://chatbot:8000
+    depends_on:
+      chatbot:
+        condition: service_started
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./booking-ai-system-fe

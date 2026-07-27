@@ -5,6 +5,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.core.exceptions import AppError
+from app.core.token_stream import get_token_emitter
 from app.integrations import groq as groq_integration
 from app.rag.prompts import build_grounded_prompt
 from app.rag.vector_store import search_chunks
@@ -21,6 +22,7 @@ async def answer_faq(query: str) -> str:
     if not chunks:
         return "Tôi chưa tìm thấy thông tin phù hợp trong kho kiến thức."
     client = get_groq_client()
+    emitter = get_token_emitter()
     messages = [
         {"role": "system", "content": build_grounded_prompt(chunks)},
         {"role": "user", "content": query},
@@ -28,6 +30,20 @@ async def answer_faq(query: str) -> str:
 
     # Chạy OpenAI-compatible SDK đồng bộ trên worker thread để không chặn event loop.
     def _complete() -> Any:
+        if emitter is not None:
+            stream = client.chat.completions.create(
+                model=settings.GROQ_MODEL,
+                messages=messages,
+                temperature=0,
+                stream=True,
+            )
+            pieces: list[str] = []
+            for chunk in stream:
+                delta = str(chunk.choices[0].delta.content or "")
+                if delta:
+                    pieces.append(delta)
+                    emitter(delta)
+            return "".join(pieces)
         return client.chat.completions.create(
             model=settings.GROQ_MODEL,
             messages=messages,
@@ -42,4 +58,8 @@ async def answer_faq(query: str) -> str:
             code="LLM_UNAVAILABLE",
             detail="Dịch vụ AI đang tạm thời không khả dụng.",
         ) from exc
-    return str(response.choices[0].message.content or "").strip()
+    return (
+        str(response).strip()
+        if emitter is not None
+        else str(response.choices[0].message.content or "").strip()
+    )

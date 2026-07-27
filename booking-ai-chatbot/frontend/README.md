@@ -1,20 +1,12 @@
 # Booking AI Chatbot Frontend
 
-Thư mục dành cho giao diện khách hàng bằng Next.js, React và TypeScript.
+Next.js customer chat interface for the Booking AI Chatbot.
 
-Frontend chỉ gọi Chatbot Backend qua HTTP/SSE. Frontend không gọi trực tiếp API
-mutation của Booking Backend và không giữ business rule đặt lịch.
-
-Cấu trúc dự kiến:
-
-```text
-app/
-components/
-├── chat/
-├── booking/
-└── common/
-services/
-stores/
-schemas/
-types/
+```powershell
+npm install
+npm run dev
 ```
+
+Open `http://localhost:3002`. The Next.js route handler proxies requests to
+`CHATBOT_API_URL` (default `http://localhost:8001`), so the browser never calls
+the Booking Backend directly.

@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     RATE_LIMIT_REQUESTS: int = 30
     RATE_LIMIT_WINDOW_SECONDS: int = 60
     CONTRACT_VERSION: str = "1.0"
+    SSE_TOKEN_DELAY_MS: int = Field(14, ge=0, le=100)
 
     # Chuyển chuỗi origin từ biến môi trường thành danh sách dùng cho CORS middleware.
     @property

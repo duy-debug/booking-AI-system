@@ -18,6 +18,14 @@ from app.db.models.customer_restriction import CustomerRestriction
 from app.db.models.booking import Booking
 from app.db.models.reservation import Reservation
 from app.db.models.reservation_course import ReservationCourse
+from app.scripts.seed_catalog_vi import (
+    COURSE_TEMPLATES as VIETNAMESE_COURSE_TEMPLATES,
+    FEMALE_NAMES as VIETNAMESE_FEMALE_NAMES,
+    MALE_NAMES as VIETNAMESE_MALE_NAMES,
+    RESTRICTIONS as VIETNAMESE_RESTRICTIONS,
+    SHOPS as VIETNAMESE_SHOPS,
+    SURNAMES as VIETNAMESE_SURNAMES,
+)
 
 
 engine = create_engine(settings.DATABASE_URL)
@@ -202,6 +210,9 @@ COURSE_TEMPLATES = [
     ("steam-sauna", "薬草蒸し風呂", 30, "2800", "addon"),
 ]
 
+SHOPS = VIETNAMESE_SHOPS
+COURSE_TEMPLATES = VIETNAMESE_COURSE_TEMPLATES
+
 COURSES = {
     shop["shop_code"]: list(COURSE_TEMPLATES)
     for shop in SHOPS
@@ -234,7 +245,7 @@ CUSTOMER_COUNT = 240
 SEED_DAYS = 21
 
 
-# Sinh danh sách therapist tên Nhật cho từng shop với mã POS, giới tính và tên không bị lệch chỉ số.
+# Sinh danh sách kỹ thuật viên tên Việt cho từng cửa hàng với mã POS và giới tính.
 def build_therapists() -> dict[str, list[tuple[str, str, str]]]:
     result = {}
     for shop_index, shop_code in enumerate(COURSES):
@@ -243,9 +254,13 @@ def build_therapists() -> dict[str, list[tuple[str, str, str]]]:
         for index in range(THERAPISTS_PER_SHOP):
             gender = "female" if index % 2 == 0 else "male"
             given_names = (
-                JAPANESE_FEMALE_NAMES if gender == "female" else JAPANESE_MALE_NAMES
+                VIETNAMESE_FEMALE_NAMES
+                if gender == "female"
+                else VIETNAMESE_MALE_NAMES
             )
-            surname = JAPANESE_SURNAMES[(index + shop_index * 17) % len(JAPANESE_SURNAMES)]
+            surname = VIETNAMESE_SURNAMES[
+                (index + shop_index * 17) % len(VIETNAMESE_SURNAMES)
+            ]
             given_name = given_names[(index * 3 + shop_index * 7) % len(given_names)]
             employees.append(
                 (f"ther-{prefix}-{index + 1:02d}", f"{surname} {given_name}", gender)
@@ -254,18 +269,20 @@ def build_therapists() -> dict[str, list[tuple[str, str, str]]]:
     return result
 
 
-# Sinh tập khách hàng Nhật có số điện thoại duy nhất, hạng thành viên và lịch sử ghé thăm đa dạng.
+# Sinh tập khách hàng Việt có số điện thoại duy nhất, hạng thành viên và lịch sử ghé thăm đa dạng.
 def build_customers() -> list[dict]:
     customers = []
-    all_given_names = JAPANESE_FEMALE_NAMES + JAPANESE_MALE_NAMES
+    all_given_names = VIETNAMESE_FEMALE_NAMES + VIETNAMESE_MALE_NAMES
     for index in range(CUSTOMER_COUNT):
-        surname = JAPANESE_SURNAMES[index % len(JAPANESE_SURNAMES)]
-        given_name = all_given_names[(index * 7 + index // len(JAPANESE_SURNAMES)) % len(all_given_names)]
+        surname = VIETNAMESE_SURNAMES[index % len(VIETNAMESE_SURNAMES)]
+        given_name = all_given_names[
+            (index * 7 + index // len(VIETNAMESE_SURNAMES)) % len(all_given_names)
+        ]
         is_member = index % 4 != 3
-        member_rank = "金会員" if index % 12 == 0 else "銀会員" if is_member else None
-        phone_prefix = ("070", "080", "090")[index % 3]
+        member_rank = "Hạng Vàng" if index % 12 == 0 else "Hạng Bạc" if is_member else None
+        phone_prefix = ("032", "076", "090")[index % 3]
         customers.append({
-            "phone": f"{phone_prefix}{index + 1:08d}",
+            "phone": f"{phone_prefix}{index + 1:07d}",
             "name": f"{surname} {given_name}",
             "is_member": is_member,
             "member_rank": member_rank,
@@ -309,6 +326,8 @@ RESTRICTIONS = [
         "is_active": True,
     },
 ]
+
+RESTRICTIONS = VIETNAMESE_RESTRICTIONS
 
 BOOKING_START_TIMES = [
     time(9, 0), time(10, 30), time(12, 0), time(14, 0),

@@ -15,8 +15,8 @@ from app.domain.nlu import NLUResult
 from app.handlers import (
     BookingConversationHandler,
     ClarificationHandler,
+    ConversationHandler,
     FAQHandler,
-    GeneralHandler,
     InformationHandler,
 )
 from app.integrations.booking_gateway import HttpBookingGateway
@@ -155,7 +155,7 @@ def build_orchestrator() -> ConversationOrchestrator:
                 cancel_booking_flow,
             ),
             RouteTarget.FAQ: FAQHandler(),
-            RouteTarget.GENERAL: GeneralHandler(),
+            RouteTarget.GENERAL: ConversationHandler(),
             RouteTarget.CLARIFY: ClarificationHandler(),
         },
     )
