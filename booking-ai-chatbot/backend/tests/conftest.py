@@ -64,12 +64,18 @@ def client(mock_qdrant, mock_groq):
             api_mod._client = httpx.AsyncClient()
         return api_mod._client
 
+    rate_store = MagicMock()
+    rate_store.check_rate_limit = AsyncMock(return_value=True)
     with patch("app.integrations.qdrant.init_qdrant", side_effect=fake_init_qdrant):
         with patch("app.integrations.booking_api.init_client", side_effect=fake_init_client):
-            from app.main import app
+            with patch(
+                "app.core.middleware.get_conversation_store",
+                return_value=rate_store,
+            ):
+                from app.main import app
 
-            with TestClient(app) as c:
-                yield c
+                with TestClient(app) as c:
+                    yield c
 
 
 @pytest.fixture(scope="session")

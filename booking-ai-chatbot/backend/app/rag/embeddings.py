@@ -2,19 +2,20 @@ from __future__ import annotations
 
 import hashlib
 from functools import lru_cache
+from typing import Any
 
 from app.core.config import settings
 
 
 # Nạp model embedding từ cache cục bộ để runtime không tự tải model ngoài ý muốn.
 @lru_cache(maxsize=1)
-def _get_model():
+def _get_model() -> Any:
     from sentence_transformers import SentenceTransformer
 
     return SentenceTransformer(settings.EMBED_MODEL_NAME, local_files_only=True)
 
 
-# Tạo vector ổn định dự phòng khi model chưa được tải vào môi trường triển khai.
+# Tạo vector ổn định chỉ dành cho test/dev khi model chưa được tải.
 def _fallback_embedding(text: str) -> list[float]:
     digest = hashlib.sha256(text.encode("utf-8")).digest()
     values = [
@@ -28,9 +29,11 @@ def _fallback_embedding(text: str) -> list[float]:
 def embed_text(text: str) -> list[float]:
     try:
         vector = _get_model().encode(text, normalize_embeddings=True)
-        return vector.tolist()
-    except (OSError, ValueError):
-        return _fallback_embedding(text)
+        return list(vector.tolist())
+    except (OSError, ValueError) as exc:
+        if settings.DEBUG:
+            return _fallback_embedding(text)
+        raise RuntimeError("Embedding model is unavailable") from exc
 
 
 # Sinh embedding cho nhiều đoạn tài liệu theo cùng cấu hình với truy vấn.

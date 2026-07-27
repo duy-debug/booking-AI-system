@@ -31,7 +31,7 @@ class TestKB:
 
     def test_chat_valid(self, client: TestClient, mock_qdrant):
         # Mock Qdrant search tra ve chunks
-        mock_qdrant.search.return_value = [
+        mock_qdrant.query_points.return_value.points = [
             MagicMock(id="1", payload={"source": "test.md", "content": "Noi dung mau"}, score=0.9)
         ]
         r = client.post("/api/chat", json={"query": "xin chao"})
@@ -39,7 +39,7 @@ class TestKB:
         assert "Cau tra loi" in r.json()["answer"]
 
     def test_chat_uses_context(self, client: TestClient, mock_qdrant):
-        mock_qdrant.search.return_value = [
+        mock_qdrant.query_points.return_value.points = [
             MagicMock(id="1", payload={"source": "test.md", "content": "A" * 1000}, score=0.9)
         ]
         with patch("app.rag.chain.get_groq_client") as mock_groq:

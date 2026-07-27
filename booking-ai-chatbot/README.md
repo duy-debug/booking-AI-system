@@ -16,7 +16,7 @@ Chatbot là một hệ thống độc lập với Booking Backend:
 ```mermaid
 flowchart LR
     Customer[Khách hàng] --> ChatFE[Chatbot Frontend]
-    ChatFE -->|HTTP / SSE| ChatBE[Chatbot Backend]
+    ChatFE -->|HTTP JSON| ChatBE[Chatbot Backend]
 
     ChatBE --> Groq[Groq LLM]
     ChatBE --> Qdrant[(Qdrant)]
@@ -281,7 +281,8 @@ Các endpoint:
 ```text
 Health:  http://localhost:8001/health
 Swagger: http://localhost:8001/docs
-Chat:    POST http://localhost:8001/api/chat
+Chat:    POST http://localhost:8001/api/v1/chat
+Ready:   GET  http://localhost:8001/ready
 ```
 
 Chạy test:

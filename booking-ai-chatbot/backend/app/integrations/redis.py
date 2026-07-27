@@ -118,6 +118,18 @@ class RedisConversationStore:
     async def delete_pending(self, conversation_id: str) -> None:
         await self._client.delete(self._pending_key(conversation_id))
 
+    async def ping(self) -> bool:
+        return bool(await self._client.ping())
+
+    async def check_rate_limit(
+        self, key: str, limit: int, window_seconds: int
+    ) -> bool:
+        redis_key = f"chatbot:rate:{key}"
+        count = await self._client.incr(redis_key)
+        if int(count) == 1:
+            await self._client.expire(redis_key, window_seconds)
+        return int(count) <= limit
+
     # Đóng Redis connection pool khi ứng dụng shutdown.
     async def close(self) -> None:
         await self._client.aclose()

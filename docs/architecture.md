@@ -183,8 +183,9 @@ ADMIN_API_KEY=change-me-in-production
 - **Client BE:** SQLAlchemy + `supabase-py` (service key)
 - **Client FE:** `@supabase/supabase-js` (anon key, RLS)
 - **Auth:** Supabase Auth (email/password, OAuth, magic link) + JWT nội bộ cho Admin API
-- **Vector:** pgvector extension — chỉ còn trong `kb_chunks` (legacy RAG, sẽ xoá).
-  RAG thực tế giờ chạy trên **Qdrant** bên phía Chatbot, không phải PostgreSQL.
+- **Vector:** Booking Backend không còn model hoặc bảng vector. Migration loại bỏ
+  `kb_chunks` vẫn giữ extension `vector` để không ảnh hưởng ứng dụng khác dùng chung database.
+  RAG chạy trên **Qdrant** bên phía Chatbot, không phải PostgreSQL.
 
 Các bảng chính: `bookings`, `shops`, `courses`, `therapists`, `therapist_shifts`,
 `customer_restrictions`, `reservations`, `reservation_courses`

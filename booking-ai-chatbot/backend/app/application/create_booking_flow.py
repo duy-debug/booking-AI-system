@@ -145,6 +145,12 @@ class CreateBookingFlow:
             return
 
         if entity == "number_of_people":
+            if value is None:
+                raise AppError(
+                    422,
+                    code="INVALID_NUMBER_OF_PEOPLE",
+                    detail="Số người là bắt buộc.",
+                )
             people = int(value)
             if people not in {1, 2, 3}:
                 raise AppError(
@@ -836,7 +842,7 @@ class CreateBookingFlow:
                 code="SELECTED_SLOT_UNAVAILABLE",
                 detail="Khung giờ đã chọn không còn khả dụng. Vui lòng chọn lại.",
             )
-        return selected_slot
+        return dict(selected_slot)
 
     # Tạo payload đúng schema Public Booking API và không truyền field UI nội bộ.
     @staticmethod

@@ -7,6 +7,7 @@ from app.application.contracts import ConversationStore
 from app.application.create_booking_flow import CreateBookingFlow
 from app.application.intent_router import RouteTarget, route_intent
 from app.application.lookup_booking_flow import LookupBookingFlow
+from app.application.manage_booking_flow import ManageBookingFlow
 from app.application.nlu import StructuredNLU
 from app.core.exceptions import AppError
 from app.domain.intent import Intent
@@ -80,6 +81,8 @@ class ConversationOrchestrator:
                     result.operation = {
                         Intent.CREATE_BOOKING: "create",
                         Intent.LOOKUP_BOOKING: "lookup",
+                        Intent.UPDATE_BOOKING: "update",
+                        Intent.CANCEL_BOOKING: "cancel",
                     }[active_intent]
             return result
 
@@ -92,6 +95,8 @@ class ConversationOrchestrator:
                 operation={
                     Intent.CREATE_BOOKING: "create",
                     Intent.LOOKUP_BOOKING: "lookup",
+                    Intent.UPDATE_BOOKING: "update",
+                    Intent.CANCEL_BOOKING: "cancel",
                 }[active_intent],
                 entities={},
             )
@@ -108,6 +113,10 @@ class ConversationOrchestrator:
             return Intent.CREATE_BOOKING
         if intent == Intent.LOOKUP_BOOKING.value:
             return Intent.LOOKUP_BOOKING
+        if intent == Intent.UPDATE_BOOKING.value:
+            return Intent.UPDATE_BOOKING
+        if intent == Intent.CANCEL_BOOKING.value:
+            return Intent.CANCEL_BOOKING
         return None
 
 
@@ -127,6 +136,13 @@ def build_orchestrator() -> ConversationOrchestrator:
         conversation_store=store,
         booking_gateway=gateway,
     )
+    mutation_tools = MutationTools(workflow)
+    update_booking_flow = ManageBookingFlow(
+        "update_booking", store, gateway, mutation_tools
+    )
+    cancel_booking_flow = ManageBookingFlow(
+        "cancel_booking", store, gateway, mutation_tools
+    )
     return ConversationOrchestrator(
         nlu=StructuredNLU(),
         conversation_store=store,
@@ -135,6 +151,8 @@ def build_orchestrator() -> ConversationOrchestrator:
             RouteTarget.BOOKING_WORKFLOW: BookingConversationHandler(
                 create_booking_flow,
                 lookup_booking_flow,
+                update_booking_flow,
+                cancel_booking_flow,
             ),
             RouteTarget.FAQ: FAQHandler(),
             RouteTarget.GENERAL: GeneralHandler(),

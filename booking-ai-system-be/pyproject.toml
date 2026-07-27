@@ -12,9 +12,6 @@ dependencies = [
     "python-dotenv>=1.1",
     "tzdata>=2025.2; platform_system == 'Windows'",
     "supabase>=2",
-    "openai>=1",
-    "sentence-transformers>=3",
-    "pgvector>=0.5",
 ]
 
 [tool.setuptools.packages.find]

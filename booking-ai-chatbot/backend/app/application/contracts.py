@@ -20,6 +20,13 @@ class BookingGateway(Protocol):
     # Định nghĩa thao tác cập nhật booking mà application được phép gọi.
     async def update_booking(self, booking_id: str, payload: dict[str, Any]) -> dict[str, Any]: ...
 
+    async def is_reschedule_available(
+        self,
+        booking: dict[str, Any],
+        booking_date: str,
+        start_time: str,
+    ) -> bool: ...
+
 
 class ConversationStore(Protocol):
     # Lưu state hội thoại sau mỗi bước thu thập dữ liệu.

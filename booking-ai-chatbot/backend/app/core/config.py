@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     BUSINESS_TIMEZONE: str = "Asia/Tokyo"
     ADMIN_API_KEY: str = "change-me-in-production"
     CORS_ORIGINS: str = "http://localhost:3000"
+    RATE_LIMIT_REQUESTS: int = 30
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
+    CONTRACT_VERSION: str = "1.0"
 
     # Chuyển chuỗi origin từ biến môi trường thành danh sách dùng cho CORS middleware.
     @property
@@ -41,7 +44,7 @@ class Settings(BaseSettings):
 # Cache cấu hình để toàn ứng dụng dùng chung một instance nhất quán.
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    return Settings()
+    return Settings()  # type: ignore[call-arg]
 
 
 settings = get_settings()

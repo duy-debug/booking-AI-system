@@ -62,7 +62,7 @@ class LookupBookingFlow:
             await self._store.save_state(state)
             return self._lookup_form_response(state, missing)
 
-        # Lưu thông tin đã nhập trước khi gọi hệ thống ngoài để khách có thể sửa nếu tra cứu thất bại.
+        # Lưu dữ liệu trước khi gọi hệ thống ngoài để khách có thể sửa nếu tra cứu thất bại.
         await self._store.save_state(state)
         booking = await self._gateway.lookup_booking(
             str(state.entities["booking_id"]),

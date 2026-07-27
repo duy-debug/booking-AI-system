@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends
 from app.api.schemas import ChatRequest, ChatResponse
 from app.application.orchestrator import ConversationOrchestrator, build_orchestrator
 
-router = APIRouter(prefix="/api", tags=["chat"])
+router = APIRouter(prefix="/api/v1", tags=["chat"])
+legacy_router = APIRouter(prefix="/api", tags=["chat"])
 
 
 # Khởi tạo orchestrator tại API composition root, không đưa Depends vào application.
@@ -15,6 +16,12 @@ def get_orchestrator() -> ConversationOrchestrator:
 
 # Nhận câu hỏi, điều phối qua application service và trả response có schema ổn định.
 @router.post("/chat", response_model=ChatResponse)
+@legacy_router.post(
+    "/chat",
+    response_model=ChatResponse,
+    include_in_schema=False,
+    deprecated=True,
+)
 async def chat(
     body: ChatRequest,
     orchestrator: Annotated[

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import httpx
 
 from app.core.config import settings
 from app.core.exceptions import AppError
+from app.core.request_context import correlation_id_context
 
 _client: httpx.AsyncClient | None = None
 
@@ -46,7 +47,9 @@ async def _request(
     unwrap_data: bool = True,
 ) -> Any:
     client = await get_client()
-    request_headers = {"X-Correlation-ID": str(uuid4())}
+    request_headers = {
+        "X-Correlation-ID": correlation_id_context.get() or str(uuid4())
+    }
     if settings.BOOKING_API_SERVICE_KEY:
         request_headers["X-Service-Key"] = settings.BOOKING_API_SERVICE_KEY
     if headers:
@@ -95,9 +98,14 @@ async def list_shops() -> list[dict[str, Any]]:
     return result if isinstance(result, list) else []
 
 
+async def health() -> bool:
+    result = await _request("GET", "/health", unwrap_data=False)
+    return isinstance(result, dict) and result.get("status") == "ok"
+
+
 # Lấy chi tiết một cửa hàng công khai.
 async def get_shop(shop_id: str) -> dict[str, Any]:
-    return await _request("GET", f"/api/shops/{shop_id}")
+    return cast(dict[str, Any], await _request("GET", f"/api/shops/{shop_id}"))
 
 
 # Lấy danh sách course công khai thuộc cửa hàng.
@@ -130,12 +138,12 @@ async def get_available_slots(
         "therapist_id": therapist_id,
         "therapist_gender": therapist_gender,
     }
-    return await _request(
+    return cast(dict[str, Any], await _request(
         "GET",
         f"/api/shops/{shop_id}/available-slots",
         params={key: value for key, value in params.items() if value is not None},
         unwrap_data=False,
-    )
+    ))
 
 
 # Lấy therapist còn trống trong một khung giờ để booking một người có thể chỉ định.
@@ -163,11 +171,11 @@ async def get_available_therapists(
 
 # Kiểm tra NG list và giới hạn đặt lịch trước khi tạo pending action.
 async def check_eligibility(phone: str, shop_id: str) -> dict[str, Any]:
-    return await _request(
+    return cast(dict[str, Any], await _request(
         "POST",
         "/api/booking-eligibility-checks",
         json={"phone": phone, "shop_id": shop_id},
-    )
+    ))
 
 
 # Tạo booking với idempotency key để retry không tạo bản ghi trùng.
@@ -175,26 +183,28 @@ async def create_booking(
     payload: dict[str, Any], idempotency_key: str | None = None
 ) -> dict[str, Any]:
     key = idempotency_key or str(payload.pop("_idempotency_key", uuid4()))
-    return await _request(
+    return cast(dict[str, Any], await _request(
         "POST",
         "/api/bookings",
         json=payload,
         headers={"Idempotency-Key": key},
-    )
+    ))
 
 
 # Tra cứu booking bằng ID và số điện thoại qua endpoint không yêu cầu OTP.
 async def lookup_booking(booking_id: str, phone: str) -> dict[str, Any]:
-    return await _request(
+    return cast(dict[str, Any], await _request(
         "POST",
         "/api/bookings/lookup",
         json={"booking_id": booking_id, "phone": phone},
-    )
+    ))
 
 
 # Lấy chi tiết booking từ public API.
 async def get_booking(booking_id: str) -> dict[str, Any]:
-    return await _request("GET", f"/api/bookings/{booking_id}")
+    return cast(
+        dict[str, Any], await _request("GET", f"/api/bookings/{booking_id}")
+    )
 
 
 # Tra cứu booking bằng các bộ lọc công khai.
@@ -209,7 +219,10 @@ async def list_bookings(**filters: Any) -> list[dict[str, Any]]:
 
 # Cập nhật thông tin booking sau khi application đã xác nhận với khách hàng.
 async def update_booking(booking_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    return await _request("PATCH", f"/api/bookings/{booking_id}", json=payload)
+    return cast(
+        dict[str, Any],
+        await _request("PATCH", f"/api/bookings/{booking_id}", json=payload),
+    )
 
 
 # Hủy booking bằng PATCH public API thay vì gọi endpoint quản trị.

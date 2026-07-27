@@ -38,7 +38,8 @@ Chatbot không truy cập trực tiếp vào các bảng booking. Những dữ l
 > service Chatbot độc lập. Backend chỉ còn tầng dữ liệu giao dịch (PostgreSQL).
 
 > **Trạng thái dự án:** Backend đã hoàn chỉnh (API booking + kiến trúc phân lớp, RAG/POS đã xóa).
-> Chatbot hoàn thiện pipeline RAG + intent routing. Giao diện web đang phát triển.
+> Chatbot đã hoàn thiện pipeline RAG + intent routing. Web Admin đã triển khai dashboard,
+> lịch booking và các màn hình quản lý; giao diện booking dành cho khách hàng vẫn đang phát triển.
 
 ---
 
@@ -72,7 +73,8 @@ Chatbot không truy cập trực tiếp vào các bảng booking. Những dữ l
 - Admin dashboard
 - Quản lý shop, course, therapist và therapist shift
 
-> Web Application hiện vẫn đang trong quá trình phát triển.
+> Web Admin đã có dashboard, timeline booking và các màn hình quản lý cốt lõi.
+> Quy trình booking dành cho khách hàng vẫn đang trong quá trình phát triển.
 
 ---
 
@@ -302,10 +304,6 @@ SUPABASE_SERVICE_KEY=
 SUPABASE_ANON_KEY=
 DATABASE_URL=
 
-# Groq (tùy chọn)
-GROQ_API_KEY=
-GROQ_MODEL=mixtral-8x7b-32768
-
 # Auth — Supabase Auth JWT verification (asymmetric / JWKS)
 SUPABASE_JWKS_URL=https://<project>.supabase.co/auth/v1/keys
 JWT_ALGORITHM=ES256
@@ -460,7 +458,7 @@ Vui lòng báo cáo lỗ hổng bảo mật qua kênh riêng, không tạo publi
 - [x] RAG pipeline với Qdrant
 - [x] Intent routing và confirmation-gated booking tools
 - [ ] Giao diện đặt lịch cho khách hàng
-- [ ] Admin dashboard
+- [x] Admin dashboard và các màn hình quản lý cốt lõi
 - [ ] CI pipeline với GitHub Actions
 - [ ] Coverage reporting
 - [ ] Structured logging và monitoring
