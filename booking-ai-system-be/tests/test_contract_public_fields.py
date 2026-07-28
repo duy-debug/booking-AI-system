@@ -51,6 +51,8 @@ class TestPublicShopContract:
         assert r.status_code == 201
         keys = set(r.json()["data"].keys())
         assert keys.isdisjoint(PUBLIC_BOOKING_FORBIDDEN), f"Public booking detail contains forbidden fields: {keys & PUBLIC_BOOKING_FORBIDDEN}"
+        assert r.json()["data"]["shop_name"]
+        assert r.json()["data"]["reservations"][0]["therapist_name"]
 
     def test_list_public_bookings_no_internal_fields(self, client: TestClient, test_data: dict):
         r = client.get("/api/bookings", params={"phone": test_data["phone"]})

@@ -105,6 +105,7 @@ class ReservationResponse(BaseModel):
     reservation_id: UUID
     person_index: int
     therapist_id: UUID
+    therapist_name: str
     start_time: time
     end_time: time
     status: str
@@ -159,6 +160,7 @@ class PublicBookingResponse(BaseModel):
 
     booking_id: UUID
     shop_id: UUID
+    shop_name: str
     customer_id: UUID
     booking_date: date
     start_time: time

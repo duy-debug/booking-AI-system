@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { sendChat, streamChat } from "./chat-api";
+import { sendChat, streamChat, transcribeAudio } from "./chat-api";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -104,5 +104,24 @@ describe("streamChat", () => {
     })).rejects.toMatchObject({
       problem: { code: "DEPENDENCY_UNAVAILABLE" },
     });
+  });
+});
+
+describe("transcribeAudio", () => {
+  it("uploads the recording and returns Vietnamese text", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ text: "Tôi muốn đặt lịch ngày mai." }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(transcribeAudio(new Blob(["audio"], { type: "audio/webm" })))
+      .resolves.toBe("Tôi muốn đặt lịch ngày mai.");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/audio/transcriptions",
+      expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
+    );
   });
 });

@@ -127,23 +127,26 @@ function ManageForm({ ui, disabled, onSelect }: Props) {
     onSelect(isUpdate ? "Đã nhập lịch hẹn mới" : "Yêu cầu hủy lịch", { entity: "booking_manage", value });
   }
   return (
-    <form className="structured-form" onSubmit={submit}>
-      {!existing.booking_id && <>
-        <label><span>Mã booking</span><input value={bookingId} onChange={(e) => setBookingId(e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required disabled={disabled}/></label>
-        <label><span>Điện thoại</span><input value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))} placeholder="0901234567" pattern="0[0-9]{9,10}" required disabled={disabled}/></label>
-      </>}
-      {isUpdate && <>
-        <div className="form-note">Bạn có thể đổi ngày, giờ hoặc cả hai.</div>
-        <div className="form-row">
-          <label><span>Ngày mới</span><input type="date" value={date} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setDate(e.target.value)} disabled={disabled}/></label>
-          <label><span>Giờ mới</span><input type="time" value={time} onChange={(e) => setTime(e.target.value)} disabled={disabled}/></label>
-        </div>
-      </>}
-      {!isUpdate && <label><span>Lý do hủy (không bắt buộc)</span><textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} disabled={disabled}/></label>}
-      <button className={isUpdate ? "primary-action" : "danger-action"} disabled={disabled || (isUpdate && !!existing.booking_id && !date && !time)}>
-        {isUpdate ? "Kiểm tra lịch mới" : "Tiếp tục hủy lịch"}
-      </button>
-    </form>
+    <div className="manage-booking-stack">
+      {Boolean(existing.booking_id) && <BookingDetailCard booking={existing} title="Booking hiện tại" showCode={false} />}
+      <form className="structured-form" onSubmit={submit}>
+        {!existing.booking_id && <>
+          <label><span>Mã booking</span><input value={bookingId} onChange={(e) => setBookingId(e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required disabled={disabled}/></label>
+          <label><span>Điện thoại</span><input value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))} placeholder="0901234567" pattern="0[0-9]{9,10}" required disabled={disabled}/></label>
+        </>}
+        {isUpdate && <>
+          <div className="form-note">Bạn có thể đổi ngày, giờ hoặc cả hai.</div>
+          <div className="form-row">
+            <label><span>Ngày mới</span><input type="date" value={date} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setDate(e.target.value)} disabled={disabled}/></label>
+            <label><span>Giờ mới</span><input type="time" value={time} onChange={(e) => setTime(e.target.value)} disabled={disabled}/></label>
+          </div>
+        </>}
+        {!isUpdate && <label><span>Lý do hủy (không bắt buộc)</span><textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} disabled={disabled}/></label>}
+        <button className={isUpdate ? "primary-action" : "danger-action"} disabled={disabled || (isUpdate && !!existing.booking_id && !date && !time)}>
+          {isUpdate ? "Kiểm tra lịch mới" : "Tiếp tục hủy lịch"}
+        </button>
+      </form>
+    </div>
   );
 }
 
@@ -166,24 +169,19 @@ function Summary({ ui, disabled, onSelect }: Props) {
   const data = ui.data;
   const booking = (data.booking || data) as Record<string, unknown>;
   const changes = (data.changes || {}) as Record<string, unknown>;
-  const rows = [
-    ["Cửa hàng", booking.shop_name || booking.shop_id],
-    ["Dịch vụ", booking.main_course_name],
-    ["Ngày", changes.booking_date || booking.booking_date],
-    ["Thời gian", changes.start_time || booking.start_time],
-    ["Số khách", booking.number_of_people],
-    ["Khách hàng", booking.customer_name],
-    ["Điện thoại", booking.customer_phone],
-  ].filter(([, value]) => value !== undefined && value !== null && value !== "");
   const confirmation = ui.options[0];
   return (
-    <div className="summary-card">
-      <div className="summary-head"><span><CalendarIcon /></span><div><small>XÁC NHẬN THÔNG TIN</small><strong>Chi tiết lịch hẹn</strong></div></div>
-      <dl>{rows.map(([label, value]) => <div key={String(label)}><dt>{String(label)}</dt><dd>{String(value)}</dd></div>)}</dl>
-      {confirmation && <button type="button" className={ui.type === "booking_cancel_summary" ? "danger-action" : "primary-action"} disabled={disabled} onClick={() => onSelect(
-        confirmation.label,
-        { entity: "confirmation_token", value: confirmation.id, label: confirmation.label },
-      )}><CheckIcon /> {confirmation.label}</button>}
+    <div className="booking-confirmation">
+      <BookingDetailCard
+        booking={booking}
+        changes={changes}
+        title={ui.type === "booking_cancel_summary" ? "Booking sẽ hủy" : ui.type === "booking_update_summary" ? "Booking sau thay đổi" : "Chi tiết lịch hẹn"}
+        showCode={ui.type !== "booking_cancel_summary" && ui.type !== "booking_update_summary"}
+      />
+      {confirmation && <div className="booking-confirm-action"><button type="button" className={ui.type === "booking_cancel_summary" ? "danger-action" : "primary-action"} disabled={disabled} onClick={() => onSelect(
+          confirmation.label,
+          { entity: "confirmation_token", value: confirmation.id, label: confirmation.label },
+        )}><CheckIcon /> {ui.type === "booking_cancel_summary" ? "Xác nhận hủy booking" : "Xác nhận thay đổi"}</button></div>}
     </div>
   );
 }
@@ -199,6 +197,106 @@ function BookingResult({ ui }: { ui: UiBlock }) {
   );
 }
 
+const statusLabels: Record<string, string> = {
+  confirmed: "Đã xác nhận",
+  pending: "Chờ xác nhận",
+  cancelled: "Đã hủy",
+  completed: "Đã hoàn thành",
+  assigned: "Đã phân công",
+};
+
+function formatTime(value: unknown) {
+  return typeof value === "string" ? value.slice(0, 5) : String(value || "—");
+}
+
+function formatPrice(value: unknown) {
+  const amount = Number(value);
+  return Number.isFinite(amount)
+    ? new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(amount)
+    : String(value || "");
+}
+
+function BookingDetailCard({
+  booking,
+  changes = {},
+  title = "Chi tiết lịch hẹn",
+  showCode = true,
+}: {
+  booking: Record<string, unknown>;
+  changes?: Record<string, unknown>;
+  title?: string;
+  showCode?: boolean;
+}) {
+  const reservations = Array.isArray(booking.reservations)
+    ? booking.reservations as Array<Record<string, unknown>>
+    : [];
+  const status = String(booking.status || "");
+  const effectiveTime = changes.start_time
+    ? formatTime(changes.start_time)
+    : `${formatTime(booking.start_time)} – ${formatTime(booking.end_time)}`;
+  const rows = [
+    ["Ngày hẹn", changes.booking_date || booking.booking_date],
+    ["Thời gian", effectiveTime],
+    ["Số khách", booking.number_of_people],
+    ["Tổng thời lượng", booking.total_duration_minutes ? `${booking.total_duration_minutes} phút` : null],
+    ["Cửa hàng", booking.shop_name || "Chưa cập nhật"],
+    ["Yêu cầu kỹ thuật viên", booking.therapist_request_type],
+  ].filter(([, value]) => value !== undefined && value !== null && value !== "");
+
+  return (
+    <section className="booking-detail-card">
+      <div className="booking-detail-head">
+        <span><CalendarIcon /></span>
+        <div><small>THÔNG TIN BOOKING</small><strong>{title}</strong></div>
+        <b className={`booking-status status-${status}`}>{statusLabels[status] || status || "Không xác định"}</b>
+      </div>
+      {showCode && <div className="booking-code">
+        <span>Mã booking</span><code>{String(booking.booking_id || "—")}</code>
+      </div>}
+      <dl className="booking-detail-grid">
+        {rows.map(([label, value]) => <div key={String(label)}><dt>{String(label)}</dt><dd>{String(value)}</dd></div>)}
+      </dl>
+      {reservations.length > 0 && (
+        <div className="reservation-list">
+          <h4>Dịch vụ đã đặt</h4>
+          {reservations.map((reservation, index) => {
+            const courses = Array.isArray(reservation.courses)
+              ? reservation.courses as Array<Record<string, unknown>>
+              : [];
+            return (
+              <div className="reservation-person" key={String(reservation.reservation_id || index)}>
+                <div className="reservation-person-head">
+                  <strong>Khách {String(reservation.person_index || index + 1)}</strong>
+                  <span>{formatTime(reservation.start_time)} – {formatTime(reservation.end_time)}</span>
+                </div>
+                {courses.map((course, courseIndex) => (
+                  <div className="reserved-course" key={String(course.course_id || courseIndex)}>
+                    <span>
+                      <strong>{String(course.course_name_snapshot || "Dịch vụ")}</strong>
+                      <small>{String(course.duration_snapshot || "—")} phút · {course.course_role === "addon" ? "Dịch vụ thêm" : "Dịch vụ chính"}</small>
+                    </span>
+                    <b>{formatPrice(course.price_snapshot)}</b>
+                  </div>
+                ))}
+                {Boolean(reservation.therapist_name) && (
+                  <small className="therapist-reference">Kỹ thuật viên: {String(reservation.therapist_name)}</small>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {status === "cancelled" && Boolean(booking.cancel_reason) && (
+        <div className="booking-cancel-note">Lý do hủy: {String(booking.cancel_reason)}</div>
+      )}
+    </section>
+  );
+}
+
+function BookingDetail({ ui }: { ui: UiBlock }) {
+  return <BookingDetailCard booking={ui.data as Record<string, unknown>} />;
+}
+
 export function UiRenderer(props: Props) {
   const { ui } = props;
   if (entityByType[ui.type]) return <OptionList {...props} />;
@@ -208,6 +306,16 @@ export function UiRenderer(props: Props) {
   if (ui.type === "booking_lookup_form") return <LookupForm {...props} />;
   if (ui.type === "booking_update_form" || ui.type === "booking_cancel_form") return <ManageForm {...props} />;
   if (ui.type === "booking_summary" || ui.type === "booking_update_summary" || ui.type === "booking_cancel_summary" || ui.type === "confirmation") return <Summary {...props} />;
-  if (ui.type === "booking_result" || ui.type === "booking_detail") return <BookingResult ui={ui} />;
+  if (ui.type === "booking_result") {
+    const operation = String(ui.data.operation || "");
+    return ui.data.booking_date
+      ? <BookingDetailCard
+          booking={ui.data}
+          title={operation === "cancel_booking" ? "Booking đã hủy" : operation === "update_booking" ? "Booking đã cập nhật" : "Chi tiết booking"}
+          showCode={!operation}
+        />
+      : <BookingResult ui={ui} />;
+  }
+  if (ui.type === "booking_detail") return <BookingDetail ui={ui} />;
   return null;
 }

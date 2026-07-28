@@ -12,6 +12,7 @@ dependencies = [
     "qdrant-client>=1.12",
     "httpx>=0.28",
     "redis>=5.2",
+    "python-multipart>=0.0.20",
 ]
 
 [project.optional-dependencies]

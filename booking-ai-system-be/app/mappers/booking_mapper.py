@@ -18,6 +18,7 @@ def reservation_to_response(reservation: Reservation) -> ReservationResponse:
         "reservation_id": reservation.reservation_id,
         "person_index": reservation.person_index,
         "therapist_id": reservation.therapist_id,
+        "therapist_name": reservation.therapist.name,
         "start_time": reservation.start_time,
         "end_time": reservation.end_time,
         "status": reservation.status,
@@ -40,6 +41,7 @@ def booking_to_public_response(booking: Booking) -> PublicBookingResponse:
     return PublicBookingResponse.model_validate({
         "booking_id": booking.booking_id,
         "shop_id": booking.shop_id,
+        "shop_name": booking.shop.name,
         "customer_id": booking.customer_id,
         "booking_date": booking.booking_date,
         "start_time": booking.start_time,

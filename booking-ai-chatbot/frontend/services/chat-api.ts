@@ -6,6 +6,20 @@ export class ChatApiError extends Error {
   }
 }
 
+export async function transcribeAudio(audio: Blob): Promise<string> {
+  const form = new FormData();
+  const extension = audio.type.includes("ogg") ? "ogg" : audio.type.includes("mp4") ? "m4a" : "webm";
+  form.append("file", audio, `recording.${extension}`);
+  const response = await fetch("/api/audio/transcriptions", {
+    method: "POST",
+    headers: { "X-Correlation-ID": crypto.randomUUID() },
+    body: form,
+  });
+  const body = await response.json() as { text?: string } | ProblemDetails;
+  if (!response.ok) throw new ChatApiError(body as ProblemDetails);
+  return (body as { text: string }).text;
+}
+
 export async function sendChat(input: {
   conversationId: string;
   query?: string;

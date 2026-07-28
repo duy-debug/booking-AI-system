@@ -84,6 +84,7 @@ async def test_cancel_requires_owner_lookup_and_confirmation() -> None:
         {"entity": "confirmation_token", "value": token},
     )
     assert confirmed["ui"]["type"] == "booking_result"
+    assert confirmed["ui"]["data"]["operation"] == "cancel_booking"
     gateway.update_booking.assert_awaited_once_with(
         BOOKING_ID,
         {"status": "cancelled", "cancel_reason": "Đổi kế hoạch"},
@@ -111,7 +112,7 @@ async def test_update_requires_change_then_confirms_exact_payload() -> None:
     assert result["ui"]["type"] == "booking_update_summary"
     gateway.update_booking.assert_not_called()
     token = result["ui"]["data"]["confirmation_token"]
-    await flow.handle(
+    confirmed = await flow.handle(
         "c2",
         nlu(Intent.UPDATE_BOOKING),
         {"entity": "confirmation_token", "value": token},
@@ -119,6 +120,7 @@ async def test_update_requires_change_then_confirms_exact_payload() -> None:
     gateway.update_booking.assert_awaited_once_with(
         BOOKING_ID, {"booking_date": new_date, "start_time": "14:30"}
     )
+    assert confirmed["ui"]["data"]["operation"] == "update_booking"
 
 
 @pytest.mark.asyncio

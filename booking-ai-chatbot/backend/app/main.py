@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from redis.exceptions import RedisError
 
+from app.api.audio import router as audio_router
 from app.api.chat import legacy_router
 from app.api.chat import router as chat_router
 from app.api.schemas import ApplicationInfoResponse, HealthResponse
@@ -119,6 +120,7 @@ async def handle_unexpected_error(_request: Request, exc: Exception) -> JSONResp
 
 app.include_router(chat_router)
 app.include_router(legacy_router)
+app.include_router(audio_router)
 app.include_router(knowledge_router)
 
 

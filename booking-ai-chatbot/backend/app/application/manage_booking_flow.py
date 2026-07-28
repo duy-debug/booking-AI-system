@@ -147,7 +147,7 @@ class ManageBookingFlow:
             "ui": {
                 "type": "booking_result",
                 "options": [],
-                "data": result,
+                "data": {**result, "operation": self._action},
             },
         }
 

@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(False, validation_alias="CHATBOT_DEBUG")
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_TRANSCRIPTION_MODEL: str = "whisper-large-v3-turbo"
     GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
     EMBED_MODEL_NAME: str = "all-MiniLM-L6-v2"
     EMBED_DIM: int = 384
@@ -35,6 +36,7 @@ class Settings(BaseSettings):
     RATE_LIMIT_WINDOW_SECONDS: int = 60
     CONTRACT_VERSION: str = "1.0"
     SSE_TOKEN_DELAY_MS: int = Field(14, ge=0, le=100)
+    MAX_AUDIO_UPLOAD_BYTES: int = Field(10 * 1024 * 1024, ge=1024)
 
     # Chuyển chuỗi origin từ biến môi trường thành danh sách dùng cho CORS middleware.
     @property
