@@ -1,55 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { sendChat, streamChat, transcribeAudio } from "./chat-api";
+import { streamChat, transcribeAudio } from "./chat-api";
 
 afterEach(() => vi.restoreAllMocks());
-
-describe("sendChat", () => {
-  it("sends the versioned chat payload through the BFF", async () => {
-    const response = {
-      contract_version: "1.0",
-      answer: "Xin chào",
-      intent: "general",
-      conversation_id: "conversation-1",
-      ui: null,
-    };
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify(response), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-
-    await expect(sendChat({
-      conversationId: "conversation-1",
-      query: "xin chào",
-    })).resolves.toEqual(response);
-
-    expect(fetchMock).toHaveBeenCalledWith("/api/chat", expect.objectContaining({
-      method: "POST",
-      body: JSON.stringify({
-        conversation_id: "conversation-1",
-        query: "xin chào",
-      }),
-    }));
-  });
-
-  it("maps Problem Details to ChatApiError", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({
-        status: 429,
-        code: "RATE_LIMIT_EXCEEDED",
-        detail: "Thử lại sau",
-      }), { status: 429 }),
-    );
-
-    await expect(sendChat({
-      conversationId: "conversation-1",
-      query: "hello",
-    })).rejects.toMatchObject({
-      problem: { code: "RATE_LIMIT_EXCEEDED" },
-    });
-  });
-});
 
 describe("streamChat", () => {
   it("parses token and done SSE events", async () => {
@@ -104,6 +56,90 @@ describe("streamChat", () => {
     })).rejects.toMatchObject({
       problem: { code: "DEPENDENCY_UNAVAILABLE" },
     });
+  });
+
+  it("supports the standard unnamed message event", async () => {
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(
+          "data: {\"delta\":\"Xin chào\"}\n\n"
+          + "event: done\ndata: {\"contract_version\":\"1.0\",\"answer\":\"Xin chào\",\"intent\":\"general\",\"conversation_id\":\"c\"}\n\n",
+        ));
+        controller.close();
+      },
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200 }));
+    const deltas: string[] = [];
+
+    await streamChat(
+      { conversationId: "c", query: "hello" },
+      { onToken: (delta) => deltas.push(delta) },
+    );
+
+    expect(deltas).toEqual(["Xin chào"]);
+  });
+
+  it("rejects a stream closed before done", async () => {
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(
+          "event: token\ndata: {\"delta\":\"partial\"}\n\n",
+        ));
+        controller.close();
+      },
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200 }));
+
+    await expect(streamChat({ conversationId: "c", query: "hello" }))
+      .rejects.toThrow("without a done event");
+  });
+
+  it("does not call onDone twice for duplicate done events", async () => {
+    const done = "{\"contract_version\":\"1.0\",\"answer\":\"ok\",\"intent\":\"general\",\"conversation_id\":\"c\"}";
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(
+          `event: done\ndata: ${done}\n\nevent: done\ndata: ${done}\n\n`,
+        ));
+        controller.close();
+      },
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200 }));
+    const onDone = vi.fn();
+
+    await streamChat({ conversationId: "c", query: "hello" }, { onDone });
+
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces malformed SSE JSON", async () => {
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("event: token\ndata: {bad-json}\n\n"));
+        controller.close();
+      },
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200 }));
+
+    await expect(streamChat({ conversationId: "c", query: "hello" }))
+      .rejects.toBeInstanceOf(SyntaxError);
+  });
+
+  it("propagates AbortController cancellation", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => new Promise(
+      (_resolve, reject) => init?.signal?.addEventListener("abort", () => {
+        reject(new DOMException("Aborted", "AbortError"));
+      }),
+    ));
+    const controller = new AbortController();
+    const request = streamChat({
+      conversationId: "c",
+      query: "hello",
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
   });
 });
 

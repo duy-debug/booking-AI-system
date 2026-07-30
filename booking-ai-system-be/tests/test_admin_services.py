@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import AppError
-from app.db.session import SessionLocal
+from app.db.session import engine
 from app.services.shop_service import ShopService
 from app.services.course_service import CourseService
 from app.services.therapist_service import TherapistService
@@ -34,11 +34,23 @@ TAG = f"as{uuid.uuid4().hex[:4]}"
 
 @pytest.fixture
 def db():
-    session = SessionLocal()
+    # Bao toàn bộ test trong transaction ngoài. Các service vẫn có thể gọi
+    # commit(), nhưng SQLAlchemy chỉ commit savepoint; teardown rollback
+    # transaction ngoài để không làm bẩn database dùng cho phát triển.
+    connection = engine.connect()
+    transaction = connection.begin()
+    session = Session(
+        bind=connection,
+        autoflush=False,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
     try:
         yield session
     finally:
         session.close()
+        transaction.rollback()
+        connection.close()
 
 
 # ── ShopService ──────────────────────────────────────────────────────────────

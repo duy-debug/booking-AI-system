@@ -9,3 +9,6 @@ dist/
 build/
 *.egg-info/
 .pytest_cache/
+logs/
+*.log
+.rebuild-backups/

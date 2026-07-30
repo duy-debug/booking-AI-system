@@ -20,31 +20,6 @@ export async function transcribeAudio(audio: Blob): Promise<string> {
   return (body as { text: string }).text;
 }
 
-export async function sendChat(input: {
-  conversationId: string;
-  query?: string;
-  selection?: ChatSelection;
-}): Promise<ChatResponse> {
-  const response = await fetch("/api/chat", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Correlation-ID": crypto.randomUUID(),
-    },
-    body: JSON.stringify({
-      conversation_id: input.conversationId,
-      query: input.query,
-      selection: input.selection,
-    }),
-  });
-
-  const body = (await response.json()) as ChatResponse | ProblemDetails;
-  if (!response.ok) {
-    throw new ChatApiError(body as ProblemDetails);
-  }
-  return body as ChatResponse;
-}
-
 interface ChatStreamCallbacks {
   onStart?: (data: { contract_version: "1.0"; conversation_id: string }) => void;
   onToken?: (delta: string) => void;
@@ -67,7 +42,7 @@ function dispatchSseEvent(
   const data = JSON.parse(dataLines.join("\n")) as Record<string, unknown>;
   if (event === "start") {
     callbacks.onStart?.(data as { contract_version: "1.0"; conversation_id: string });
-  } else if (event === "token") {
+  } else if (event === "token" || (event === "message" && "delta" in data)) {
     callbacks.onToken?.(String(data.delta ?? ""));
   } else if (event === "ui") {
     callbacks.onUi?.(data.ui as NonNullable<ChatResponse["ui"]>);
@@ -124,7 +99,9 @@ export async function streamChat(
     while (boundary >= 0) {
       const block = buffer.slice(0, boundary);
       buffer = buffer.slice(boundary + 2);
-      if (block.trim()) {
+      // done là terminal event. Bỏ qua mọi block phía sau để callback/state
+      // không bị áp dụng hai lần khi proxy hoặc upstream phát event lặp.
+      if (block.trim() && !completed) {
         completed = dispatchSseEvent(block, callbacks) ?? completed;
       }
       boundary = buffer.indexOf("\n\n");

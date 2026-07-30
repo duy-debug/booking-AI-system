@@ -1,6 +1,7 @@
 "use client";
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { CHAT_SESSION_KEY } from "@/services/chat-session";
 
 interface Props {
   children: ReactNode;
@@ -22,6 +23,7 @@ export class AppErrorBoundary extends Component<Props, State> {
   }
 
   private recover = () => {
+    localStorage.removeItem(CHAT_SESSION_KEY);
     localStorage.removeItem("booking-chat-conversation");
     window.location.reload();
   };

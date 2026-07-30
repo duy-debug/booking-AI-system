@@ -2,15 +2,13 @@
 
 import { useState } from "react";
 import { BotIcon, CheckIcon, CopyIcon, RefreshIcon, ThumbsDownIcon, ThumbsUpIcon } from "@/components/common/Icons";
-import { UiRenderer } from "@/components/chat/UiRenderer";
-import type { ChatMessage, ChatSelection } from "@/types/chat";
+import type { ChatMessage } from "@/types/chat";
 
 interface Props {
   message: ChatMessage;
   latest: boolean;
   loading: boolean;
   streaming: boolean;
-  onSelect: (text: string, selection: ChatSelection) => void;
   onRegenerate: () => void;
 }
 
@@ -36,7 +34,7 @@ function MessageBody({ text }: { text: string }) {
   });
 }
 
-export function MessageItem({ message, latest, loading, streaming, onSelect, onRegenerate }: Props) {
+export function MessageItem({ message, latest, loading, streaming, onRegenerate }: Props) {
   const [copied, setCopied] = useState(false);
   const [reaction, setReaction] = useState<"up" | "down" | null>(null);
 
@@ -51,9 +49,6 @@ export function MessageItem({ message, latest, loading, streaming, onSelect, onR
       {message.role === "assistant" && <span className="message-avatar"><BotIcon /></span>}
       <div className="message-content">
         <div className={`bubble ${streaming && latest ? "streaming" : ""}`}><MessageBody text={message.text} /></div>
-        {message.response?.ui && (
-          <UiRenderer ui={message.response.ui} disabled={loading || !latest} onSelect={onSelect} />
-        )}
         <div className="message-meta">
           <time>{timeLabel(message.createdAt)}</time>
           {message.role === "user" ? (

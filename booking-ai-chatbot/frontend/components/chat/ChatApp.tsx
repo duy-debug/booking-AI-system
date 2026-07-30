@@ -6,16 +6,10 @@ import { MessageComposer } from "@/components/chat/MessageComposer";
 import { MessageItem } from "@/components/chat/MessageItem";
 import { BotIcon } from "@/components/common/Icons";
 import { ChatApiError, streamChat } from "@/services/chat-api";
-import type { ChatMessage, ChatSelection } from "@/types/chat";
+import { loadConversationId, saveConversationSession } from "@/services/chat-session";
+import type { ChatMessage } from "@/types/chat";
 
-const WELCOME_TEXT = "Xin chào Nguyễn An! Mình là Kori, trợ lý wellness của Komorebi. Mình có thể giúp bạn đặt lịch, tra cứu, đổi hoặc hủy lịch hẹn. Hôm nay bạn cần mình hỗ trợ gì?";
-
-const quickActions = [
-  { label: "Đặt lịch mới", description: "Chọn chi nhánh và dịch vụ", prompt: "Tôi muốn đặt lịch" },
-  { label: "Tra cứu booking", description: "Kiểm tra lịch hẹn đã đặt", prompt: "Tôi muốn tra cứu booking" },
-  { label: "Đổi lịch hẹn", description: "Thay đổi ngày hoặc thời gian", prompt: "Tôi muốn đổi lịch" },
-  { label: "Hủy lịch", description: "Hủy một booking hiện có", prompt: "Tôi muốn hủy lịch" },
-];
+const WELCOME_TEXT = "Xin chào! Mình là Kori, trợ lý wellness của Komorebi. Mình có thể giúp bạn đặt lịch, tra cứu, đổi hoặc hủy lịch hẹn. Hôm nay bạn cần mình hỗ trợ gì?";
 
 const makeConversationId = () => crypto.randomUUID();
 const makeWelcome = (): ChatMessage => ({
@@ -36,10 +30,12 @@ export function ChatApp() {
   const [dark, setDark] = useState(false);
   const messageScrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const inFlightRef = useRef(false);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
-      const storedConversation = localStorage.getItem("booking-chat-conversation");
+      const storedConversation = loadConversationId(localStorage);
+      localStorage.removeItem("booking-chat-conversation");
       const storedTheme = localStorage.getItem("booking-chat-theme");
       const nextConversation = storedConversation || makeConversationId();
       setConversationId(nextConversation);
@@ -55,7 +51,7 @@ export function ChatApp() {
   }, [dark]);
 
   useEffect(() => {
-    if (conversationId) localStorage.setItem("booking-chat-conversation", conversationId);
+    if (conversationId) saveConversationSession(localStorage, conversationId);
   }, [conversationId]);
 
   useEffect(() => {
@@ -68,8 +64,10 @@ export function ChatApp() {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  async function interact(userText: string, selection?: ChatSelection) {
-    if (!conversationId || loading) return;
+  async function interact(userText: string) {
+    if (!conversationId || inFlightRef.current) return;
+    inFlightRef.current = true;
+    saveConversationSession(localStorage, conversationId);
     const assistantMessageId = crypto.randomUUID();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -87,8 +85,7 @@ export function ChatApp() {
       await streamChat(
         {
           conversationId,
-          query: selection ? undefined : userText,
-          selection,
+          query: userText,
           signal: controller.signal,
         },
         {
@@ -121,8 +118,11 @@ export function ChatApp() {
           : "Không thể kết nối đến trợ lý. Vui lòng thử lại.");
       }
     } finally {
-      if (abortRef.current === controller) abortRef.current = null;
-      setLoading(false);
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+        inFlightRef.current = false;
+        setLoading(false);
+      }
     }
   }
 
@@ -135,6 +135,9 @@ export function ChatApp() {
 
   function resetChat() {
     abortRef.current?.abort();
+    abortRef.current = null;
+    inFlightRef.current = false;
+    setLoading(false);
     const next = makeConversationId();
     setConversationId(next);
     setMessages([makeWelcome()]);
@@ -174,7 +177,6 @@ export function ChatApp() {
                 latest={index === messages.length - 1}
                 loading={loading}
                 streaming={loading && streamingStarted}
-                onSelect={(text, selection) => void interact(text, selection)}
                 onRegenerate={regenerate}
               />
             ))}
@@ -193,16 +195,6 @@ export function ChatApp() {
               </div>
             )}
 
-            {messages.length === 1 && (
-              <div className="quick-actions">
-                {quickActions.map((action) => (
-                  <button type="button" key={action.prompt} onClick={() => void interact(action.prompt)} disabled={loading}>
-                    <span><strong>{action.label}</strong><small>{action.description}</small></span>
-                    <b>→</b>
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
           <div className="scroll-anchor" />
         </div>

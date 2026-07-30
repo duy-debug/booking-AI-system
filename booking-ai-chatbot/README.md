@@ -81,14 +81,14 @@ component hoặc logic hiển thị.
 flowchart TD
     API[Chat API] --> Guard[Input and Policy Guard]
     Guard --> Orchestrator[Conversation Orchestrator]
-    Orchestrator --> NLU[Structured NLU]
-    NLU --> Router{Intent Router}
+    Orchestrator --> NLU[extract_intent]
+    NLU --> Dispatch{Deterministic Handler Dispatch}
 
-    Router -->|Thông tin động| Info[Information Handler]
-    Router -->|Đặt, đổi, hủy| Booking[Booking Workflow]
-    Router -->|FAQ, chính sách| FAQ[FAQ Handler]
-    Router -->|Chào hỏi| General[General Handler]
-    Router -->|Không rõ| Clarify[Clarification Handler]
+    Dispatch -->|Thông tin động| Info[Information Handler]
+    Dispatch -->|Đặt, đổi, hủy| Booking[Booking Workflow]
+    Dispatch -->|FAQ, chính sách| FAQ[FAQ Handler]
+    Dispatch -->|Chào hỏi| General[General Handler]
+    Dispatch -->|Không rõ| Clarify[Clarification Handler]
 
     Info --> ReadTools[Read-only Tools]
     Booking --> FSM[State Machine]
@@ -126,13 +126,13 @@ Các quy tắc:
 ## 4. Luồng xử lý tin nhắn
 
 ```text
-POST /api/chat
+POST /api/v1/chat
         ↓
 Input Guard
         ↓
 Structured NLU
         ↓
-Intent Router
+Native tool `extract_intent`
         ↓
 Handler phù hợp
         ↓
@@ -156,6 +156,29 @@ NLU chỉ trả dữ liệu có cấu trúc:
 ```
 
 NLU không tự chọn URL và không trực tiếp tạo booking.
+
+### Dialog intent trong workflow đang hoạt động
+
+Khi Redis cho biết hội thoại đang ở giữa một booking workflow, NLU dùng native
+function calling với tool `extract_intent` để hiểu từng lượt theo state:
+
+```text
+select_store | select_date | select_time | select_course | select_people
+select_therapist | select_options | change_info | confirm | deny
+provide_phone | ask_question | unknown
+```
+
+`DialogController` chuẩn hóa intent/entity và chọn business intent theo state.
+Python workflow vẫn là thành phần duy nhất được chuyển state và gọi tool nghiệp
+vụ. Nếu provider hoặc tool schema lỗi, hệ thống tự quay về rule-based NLU.
+
+```text
+app/dialog/
+├── models.py       # Typed intent/entity/tool output
+├── prompt.py       # Quy tắc extract_intent
+├── extractor.py    # Native function-calling adapter
+└── controller.py   # Chuẩn hóa về NLUResult, không thực thi mutation
+```
 
 Frontend gửi một câu nói:
 
@@ -292,6 +315,48 @@ Chạy test:
 cd booking-ai-chatbot\backend
 python -m pytest -q
 ```
+
+### Trace log
+
+Backend ghi structured JSON đồng thời ra terminal và rotating file
+`backend/logs/chatbot.log`. Mỗi lượt có các event chính:
+
+```text
+USER_MESSAGE_RECEIVED
+INTENT_EXTRACTION_STARTED
+INTENT_EXTRACTED
+INTENT_REJECTED
+ENTITY_UPDATED
+QUESTION_ROUTED
+RAG_SEARCH_STARTED
+RAG_SEARCH_COMPLETED
+API_REQUESTED
+API_SUCCEEDED
+API_FAILED
+CONFIRMATION_REQUESTED
+CONFIRMATION_REJECTED
+STATE_TRANSITION
+BOOKING_CREATED
+ASSISTANT_RESPONSE_SENT
+http_request_completed
+```
+
+Tìm toàn bộ log của một hội thoại trong PowerShell:
+
+```powershell
+Get-Content .\logs\chatbot.log |
+  Select-String '"conversation_id":"<conversation-id>"'
+```
+
+Theo dõi log theo thời gian thực:
+
+```powershell
+Get-Content .\logs\chatbot.log -Wait -Tail 50
+```
+
+Log có `correlation_id`, `conversation_id`, handler target, intent, dialog
+intent, UI type và thời gian request. Phone, token và API key được che trước
+khi ghi.
 
 ## 9. Biến môi trường Backend
 
