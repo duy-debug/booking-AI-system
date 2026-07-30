@@ -1,382 +1,399 @@
 # Booking AI Chatbot
 
-Hệ thống chatbot hỗ trợ khách hàng tìm hiểu dịch vụ và đặt, đổi, hủy lịch bằng
-hội thoại.
+Chatbot hỗ trợ khách hàng tìm hiểu dịch vụ và thực hiện các thao tác đặt, tra cứu,
+đổi hoặc hủy lịch massage thông qua Booking Backend.
 
-Chatbot là một hệ thống độc lập với Booking Backend:
+Repository hiện đang ở giai đoạn **thiết kế skeleton Clean Architecture**. Backend
+chatbot mới chỉ có cấu trúc thư mục và module docstring, chưa triển khai business
+logic hoặc tích hợp dịch vụ thật.
 
-- Chatbot không truy cập trực tiếp PostgreSQL.
-- Chatbot không sở hữu business rule booking.
-- Booking Backend là source of truth.
-- Dữ liệu động và mutation đều đi qua Public Booking API.
-- Qdrant chỉ lưu FAQ, chính sách và tài liệu tri thức.
+## Trạng thái hiện tại
 
-## 1. Kiến trúc tổng thể
+Đã hoàn thành:
 
-```mermaid
-flowchart LR
-    Customer[Khách hàng] --> ChatFE[Chatbot Frontend]
-    ChatFE -->|HTTP JSON| ChatBE[Chatbot Backend]
+- Cấu trúc package theo Clean Architecture.
+- Ranh giới giữa transport, dialog, application, domain và infrastructure.
+- Vị trí dành cho các application port.
+- Vị trí dành cho adapter OpenRouter, Booking API và Qdrant.
+- Skeleton unit test và integration test.
+- `BookingContext` được thiết kế để lưu trạng thái tạm thời trong process memory.
 
-    ChatBE --> Groq[Groq LLM]
-    ChatBE --> Qdrant[(Qdrant)]
-    ChatBE <--> Redis[(Redis)]
-    ChatBE -->|Public Booking API| BookingBE[Booking Backend]
+Chưa triển khai:
 
-    BookingBE --> DB[(PostgreSQL)]
-```
+- FastAPI router và SSE runtime.
+- Dialog controller và state machine.
+- Application handler.
+- `BookingGateway`, `KnowledgeGateway` và `LLMGateway`.
+- OpenRouter, Qdrant và HTTP Booking API adapter.
+- Booking flow và change handler.
+- RAG, tool calling và confirmation workflow.
+- Business rule và test logic.
 
-| Thành phần | Công nghệ | Trách nhiệm |
-|---|---|---|
-| Chatbot Frontend | Next.js, React, TypeScript | Hiển thị hội thoại và lựa chọn booking |
-| Chatbot Backend | FastAPI, Python | NLU, điều phối hội thoại, RAG và tool calling |
-| Booking Backend | FastAPI, SQLAlchemy | Business rule, transaction và dữ liệu booking |
-| Redis | Redis | Conversation state và pending confirmation |
-| Qdrant | Qdrant | FAQ, chính sách và knowledge chunks |
-| LLM | Groq | Structured NLU và diễn đạt câu trả lời đã xác minh |
+Backend hiện tại **chưa thể chạy** bằng Uvicorn. Việc triển khai logic chỉ bắt đầu
+sau khi cấu trúc được xác nhận.
 
-## 2. Cấu trúc repository
+## Mục tiêu kiến trúc
 
-```text
-booking-ai-chatbot/
-├── frontend/                       # Giao diện khách hàng
-│   ├── app/                        # Next.js App Router
-│   ├── components/
-│   │   ├── chat/                   # Message list, input, streaming
-│   │   ├── booking/                # Shop, course, slot, summary
-│   │   └── common/
-│   ├── services/                   # Typed HTTP client gọi Chatbot Backend
-│   ├── stores/                     # UI state và conversation ID
-│   ├── schemas/                    # Zod validation
-│   └── types/
-│
-├── backend/                        # Chatbot Backend
-│   ├── app/
-│   │   ├── api/                    # FastAPI router và Pydantic schema
-│   │   ├── application/            # Orchestrator, NLU, router, workflow
-│   │   ├── domain/                 # Intent, entity, state, pending action
-│   │   ├── handlers/               # Information, booking, FAQ, general
-│   │   ├── policies/               # Input guard và tool allowlist
-│   │   ├── tools/                  # Read-only tools và mutation tools
-│   │   ├── integrations/           # Booking API, Redis, Groq, Qdrant
-│   │   ├── rag/                    # Ingestion, embedding, retrieval
-│   │   ├── core/                   # Config và exception
-│   │   └── main.py                 # Composition root
-│   ├── docs/                       # Tài liệu nguồn để seed Qdrant
-│   ├── tests/
-│   ├── pyproject.toml
-│   ├── Dockerfile
-│   └── .env.example
-│
-└── README.md
-```
+Kiến trúc được thiết kế để:
 
-Giao diện chatbot trong `frontend/` đã triển khai Next.js App Router, responsive
-chat shell, BFF proxy và renderer theo `ui.type`. Backend Python không chứa React
-component hoặc logic hiển thị.
+- Thay FastAPI bằng Django hoặc framework khác mà không sửa business logic.
+- Thay OpenRouter bằng OpenAI hoặc provider khác mà không sửa application logic.
+- Thay Qdrant bằng Milvus mà không sửa FAQ logic.
+- Thay HTTP Booking API bằng gRPC hoặc mock mà không sửa handler.
+- Giữ domain độc lập với framework, SDK và cơ sở dữ liệu.
+- Đảm bảo dependency luôn hướng từ tầng ngoài vào tầng trong.
 
-## 3. Kiến trúc Chatbot Backend
+## Sơ đồ kiến trúc dự kiến
 
 ```mermaid
-flowchart TD
-    API[Chat API] --> Guard[Input and Policy Guard]
-    Guard --> Orchestrator[Conversation Orchestrator]
-    Orchestrator --> NLU[extract_intent]
-    NLU --> Dispatch{Deterministic Handler Dispatch}
+flowchart TB
+  subgraph Transport["Tầng Vận Chuyển"]
+    User["Người dùng\n(Chat trên Web)"]
+    FE["Next.js Chat UI\n(Text + SSE)"]
+    API["Chat API\n(FastAPI adapter)"]
+  end
+ 
+  subgraph Dialog["Tầng Điều Khiển Hội Thoại"]
+    TB["ToolBridge\n(Tool wiring + guards)"]
+    DC["DialogController\n(Turn orchestrator)"]
+    SM["StateMachine\n(JSON tree matcher)"]
+    DT["booking-flow.json\nchange-handlers.json"]
+    IB["InstructionBuilder\n(Template rendering)"]
+  end
+ 
+  subgraph Sidecar["Sidecar Managers"]
+    CM["ConfirmationManager\n(Xác nhận hành động)"]
+    FAQM["FAQManager\n(Q&A ngoài luồng booking)"]
+  end
+ 
+  subgraph Application["Tầng Ứng Dụng"]
+    H["handlers\n(9 action handlers)"]
+    BP["BookingGateway\n(Port interface)"]
+    KP["KnowledgeGateway\n(Port interface)"]
+    LP["LLMGateway\n(Port interface)"]
+  end
+ 
+  subgraph Domain["Tầng Domain"]
+    B["Booking\n(Domain model)"]
+    BC["BookingContext\n(In-memory booking state)"]
+    BS["BookingState\n(Dialog state)"]
+    BR["BookingRules\n(Rule validation)"]
+  end
+ 
+  subgraph Infrastructure["Tầng Hạ Tầng"]
+    OR["OpenRouterLLMGateway\n(LLM adapter)"]
+    HTTP["HttpBookingGateway\n(Booking API adapter)"]
+    QD["QdrantKnowledgeGateway\n(Vector DB adapter)"]
+    MC["MemoryCache\n(In-memory cache)"]
+  end
+ 
+  subgraph External["Hệ thống ngoài"]
+    BookingAPI["Booking Backend API\n(Booking system)"]
+    Qdrant["Qdrant VectorDB\n(FAQ search)"]
+    PostgreSQL["PostgreSQL\n(Booking data)"]
+    LLM["OpenRouter or LLM Provider"]
+  end
+ 
+  User <-->|"Chat message"| FE
+  FE -->|"POST chat or SSE"| API
+  API -->|"user message"| LP
+  LP -.->|"implemented by"| OR
+  OR -->|"LLM request"| LLM
+  LLM -->|"tool_call: extract_intent\ntool_call: confirm_action"| OR
+  OR -->|"tool call"| TB
+  TB -->|"handleTurn()"| DC
 
-    Dispatch -->|Thông tin động| Info[Information Handler]
-    Dispatch -->|Đặt, đổi, hủy| Booking[Booking Workflow]
-    Dispatch -->|FAQ, chính sách| FAQ[FAQ Handler]
-    Dispatch -->|Chào hỏi| General[General Handler]
-    Dispatch -->|Không rõ| Clarify[Clarification Handler]
+  DC <-->|"transition()\ncheckAutoTransition()"| SM
+  SM -->|"reads"| DT
+  DC -->|"execute()"| H
+  H -->|"uses"| B
+  H -->|"read or write"| BC
+  H -->|"uses state"| BS
+  H -->|"validate()"| BR
 
-    Info --> ReadTools[Read-only Tools]
-    Booking --> FSM[State Machine]
-    FSM --> Confirm[Confirmation Gate]
-    Confirm --> MutationTools[Mutation Tools]
+  H -->|"uses"| BP
+  BP -.->|"implemented by"| HTTP
+  HTTP -->|"HTTP calls"| BookingAPI
+  BookingAPI -->|"read or write"| PostgreSQL
 
-    ReadTools --> BookingAPI[Public Booking API]
-    MutationTools --> BookingAPI
-    FAQ --> Qdrant[(Qdrant)]
-    FSM --> Redis[(Redis)]
+  DC -->|"build()"| IB
+  IB -->|"instruction"| LP
+
+  DC <-->|"handle()"| CM
+  DC <-->|"handle()"| FAQM
+  FAQM -->|"uses"| KP
+  KP -.->|"implemented by"| QD
+  QD -->|"vector search"| Qdrant
+
+  MC -->|"cache data"| BC
+  OR -->|"Tạo câu trả lời"| API
+  API -->|"SSE stream"| FE
 ```
 
-Luồng phụ thuộc:
+Sơ đồ trên mô tả kiến trúc mục tiêu, không khẳng định các component đã được triển
+khai.
+
+## Dependency direction
 
 ```text
-API
-└── Application
-    ├── Domain
-    ├── Handlers
-    ├── Policies
-    └── Tools
-        └── Integrations
+Transport ─────┐
+Dialog ────────┼──> Application ───> Domain
+Sidecar ───────┘          │
+                          └──> Application Ports
+                                      ▲
+                                      │ implements
+                              Infrastructure
 ```
 
-Các quy tắc:
+Quy tắc:
 
-1. `api` chỉ nhận request, gọi application và trả response.
-2. `application` điều phối use case, không chứa HTTP hoặc database code.
-3. `domain` không phụ thuộc FastAPI, Redis, Qdrant hoặc HTTPX.
-4. `handlers` xử lý từng nhóm intent.
-5. `tools` là danh sách năng lực chatbot được phép sử dụng.
-6. `integrations` giao tiếp với hệ thống bên ngoài.
-7. Transaction và kiểm tra xung đột luôn thuộc Booking Backend.
+1. `domain` không import bất kỳ layer nào khác.
+2. `application` chỉ phụ thuộc `domain` và `application/ports`.
+3. Handler không import FastAPI, HTTPX hoặc adapter cụ thể.
+4. `infrastructure` triển khai interface do application sở hữu.
+5. `transport` chỉ chuyển đổi request/response và gọi `DialogController`.
+6. `dependencies.py` là composition root duy nhất biết implementation cụ thể.
+7. `main.py` chỉ khởi tạo framework application và đăng ký router.
+8. Chatbot không truy cập trực tiếp PostgreSQL của Booking Backend.
 
-## 4. Luồng xử lý tin nhắn
+## Cấu trúc backend
 
 ```text
-POST /api/v1/chat
-        ↓
-Input Guard
-        ↓
-Structured NLU
-        ↓
-Native tool `extract_intent`
-        ↓
-Handler phù hợp
-        ↓
-Tool hoặc RAG
-        ↓
-Chat response
+backend/
+├── app/
+│   ├── main.py
+│   ├── dependencies.py
+│   │
+│   ├── transport/
+│   │   ├── __init__.py
+│   │   ├── chat_api.py
+│   │   ├── schemas.py
+│   │   └── sse.py
+│   │
+│   ├── dialog/
+│   │   ├── __init__.py
+│   │   ├── tool_bridge.py
+│   │   ├── dialog_controller.py
+│   │   ├── state_machine.py
+│   │   ├── instruction_builder.py
+│   │   └── flows/
+│   │       ├── booking-flow.json
+│   │       └── change-handlers.json
+│   │
+│   ├── application/
+│   │   ├── __init__.py
+│   │   ├── handlers/
+│   │   │   ├── search_shop_handler.py
+│   │   │   ├── search_service_handler.py
+│   │   │   ├── check_availability_handler.py
+│   │   │   ├── create_booking_handler.py
+│   │   │   ├── lookup_booking_handler.py
+│   │   │   ├── reschedule_booking_handler.py
+│   │   │   ├── cancel_booking_handler.py
+│   │   │   ├── collect_customer_handler.py
+│   │   │   └── complete_booking_handler.py
+│   │   └── ports/
+│   │       ├── booking_gateway.py
+│   │       ├── knowledge_gateway.py
+│   │       └── llm_gateway.py
+│   │
+│   ├── domain/
+│   │   ├── booking.py
+│   │   ├── booking_context.py
+│   │   ├── booking_state.py
+│   │   ├── booking_rules.py
+│   │   └── exceptions.py
+│   │
+│   ├── sidecar/
+│   │   ├── confirmation_manager.py
+│   │   └── faq_manager.py
+│   │
+│   ├── infrastructure/
+│   │   ├── llm/openrouter_llm_gateway.py
+│   │   ├── booking_api/http_booking_gateway.py
+│   │   ├── vector_db/qdrant_knowledge_gateway.py
+│   │   └── cache/memory_cache.py
+│   │
+│   └── core/
+│       ├── config.py
+│       └── logging.py
+│
+├── tests/
+│   ├── unit/
+│   │   ├── domain/
+│   │   ├── application/
+│   │   └── dialog/
+│   └── integration/
+│       ├── test_chat_api.py
+│       ├── test_booking_gateway.py
+│       └── test_llm_gateway.py
+│
+├── .env.example
+├── pyproject.toml
+└── Dockerfile
 ```
 
-NLU chỉ trả dữ liệu có cấu trúc:
+## Trách nhiệm từng layer
 
-```json
-{
-  "intent": "create_booking",
-  "resource": "booking",
-  "operation": "create",
-  "entities": {
-    "booking_date": "2026-07-25",
-    "start_time": "14:30"
-  }
-}
-```
+### `transport`
 
-NLU không tự chọn URL và không trực tiếp tạo booking.
+Adapter của framework web:
 
-### Dialog intent trong workflow đang hoạt động
+- Nhận HTTP request.
+- Validate transport schema.
+- Gọi `DialogController`.
+- Chuyển kết quả thành JSON hoặc SSE.
 
-Khi Redis cho biết hội thoại đang ở giữa một booking workflow, NLU dùng native
-function calling với tool `extract_intent` để hiểu từng lượt theo state:
+Không chứa business rule hoặc gọi trực tiếp Booking API.
+
+### `dialog`
+
+Điều khiển một lượt hội thoại:
+
+- Đọc flow JSON.
+- Xác định state transition.
+- Xây instruction.
+- Chuyển tool call đến application handler.
+
+Dialog không tự triển khai nghiệp vụ booking.
+
+### `application`
+
+Chứa các use case của chatbot:
+
+- Tìm cửa hàng và dịch vụ.
+- Kiểm tra availability.
+- Tạo, tra cứu, đổi và hủy booking.
+- Thu thập khách hàng.
+- Hoàn tất booking.
+
+Application chỉ giao tiếp với hệ thống ngoài thông qua port.
+
+### `application/ports`
+
+Sở hữu abstraction:
+
+- `BookingGateway`.
+- `KnowledgeGateway`.
+- `LLMGateway`.
+
+Provider hoặc giao thức cụ thể không xuất hiện trong interface nghiệp vụ.
+
+### `domain`
+
+Chứa mô hình và quy tắc booking thuần Python:
+
+- Booking entity.
+- Booking context tạm thời.
+- Booking state.
+- Booking rule.
+- Domain exception.
+
+Domain không biết FastAPI, OpenRouter, Qdrant, HTTP hoặc PostgreSQL.
+
+### `sidecar`
+
+Xử lý các luồng phụ:
+
+- Xác nhận trước mutation.
+- FAQ ngoài booking workflow.
+
+Sidecar không sở hữu Booking Backend business rule.
+
+### `infrastructure`
+
+Chứa adapter cụ thể:
+
+- OpenRouter triển khai `LLMGateway`.
+- HTTP triển khai `BookingGateway`.
+- Qdrant triển khai `KnowledgeGateway`.
+- Process memory làm cache tạm thời.
+
+Đổi provider chỉ yêu cầu thay adapter và composition wiring.
+
+### `dependencies.py`
+
+Composition root duy nhất khởi tạo:
+
+- Infrastructure gateway.
+- Application handler.
+- Sidecar manager.
+- Tool bridge.
+- Dialog controller.
+
+Các layer bên trong không tự khởi tạo concrete adapter.
+
+## Ranh giới với Booking Backend
+
+Chatbot:
+
+- Không có PostgreSQL riêng.
+- Không truy cập database booking trực tiếp.
+- Không sở hữu transaction hoặc availability rule cuối cùng.
+- Không tự xác nhận booking đã thành công.
+
+Booking Backend:
+
+- Là source of truth.
+- Quản lý PostgreSQL.
+- Kiểm tra availability trong transaction.
+- Thực hiện create, reschedule và cancel.
+- Trả kết quả chính thức cho chatbot.
+
+## Process memory
+
+Thiết kế hiện tại không sử dụng Redis hoặc SessionManager.
+
+`BookingContext` dự kiến chỉ giữ dữ liệu booking tạm thời trong process memory.
+Điều này phù hợp giai đoạn học tập và single-process development, nhưng có các giới
+hạn:
+
+- Mất state khi restart.
+- Không chia sẻ state giữa nhiều worker.
+- Không phù hợp horizontal scaling.
+
+Chưa triển khai `BookingContext` hoặc `MemoryCache` ở trạng thái skeleton hiện tại.
+
+## Nguyên tắc phát triển tiếp theo
+
+Thứ tự dự kiến:
+
+1. Domain model và domain rule.
+2. Application port bằng `Protocol`.
+3. Application handler với gateway mock.
+4. State machine và dialog controller.
+5. Memory cache và BookingContext.
+6. HTTP Booking Gateway.
+7. LLM Gateway và OpenRouter adapter.
+8. FAQ Manager và Qdrant adapter.
+9. FastAPI transport và SSE.
+10. Composition root trong `dependencies.py`.
+
+Mỗi bước cần có unit test trước khi nối infrastructure thật.
+
+## Kiểm tra skeleton
+
+Hiện tại:
 
 ```text
-select_store | select_date | select_time | select_course | select_people
-select_therapist | select_options | change_info | confirm | deny
-provide_phone | ask_question | unknown
+Python files: 57
+File có nội dung ngoài module docstring: 0
+Import statement: 0
+Package thiếu __init__.py: 0
+JSON flow không hợp lệ: 0
 ```
 
-`DialogController` chuẩn hóa intent/entity và chọn business intent theo state.
-Python workflow vẫn là thành phần duy nhất được chuyển state và gọi tool nghiệp
-vụ. Nếu provider hoặc tool schema lỗi, hệ thống tự quay về rule-based NLU.
+Do chưa có import hoặc implementation, skeleton hiện chưa phát sinh dependency vi
+phạm Clean Architecture.
 
-```text
-app/dialog/
-├── models.py       # Typed intent/entity/tool output
-├── prompt.py       # Quy tắc extract_intent
-├── extractor.py    # Native function-calling adapter
-└── controller.py   # Chuẩn hóa về NLUResult, không thực thi mutation
-```
+## Lưu ý chạy ứng dụng
 
-Frontend gửi một câu nói:
-
-```json
-{
-  "conversation_id": "conversation-001",
-  "query": "Tôi muốn đặt lịch"
-}
-```
-
-Khi khách click một option, frontend gửi lựa chọn có cấu trúc thay vì gửi label:
-
-```json
-{
-  "conversation_id": "conversation-001",
-  "selection": {
-    "entity": "shop_id",
-    "value": "shop-uuid"
-  }
-}
-```
-
-Response cung cấp UI contract để frontend chọn component cần render:
-
-```json
-{
-  "conversation_id": "conversation-001",
-  "intent": "create_booking",
-  "answer": "Bạn muốn đặt tại cửa hàng nào?",
-  "missing_entities": ["shop_id"],
-  "ui": {
-    "type": "shop_options",
-    "options": [
-      {
-        "id": "shop-uuid",
-        "label": "東京中央店",
-        "description": "東京都中央区",
-        "metadata": {}
-      }
-    ],
-    "data": {}
-  }
-}
-```
-
-## 5. Luồng tạo booking
-
-```text
-Thu thập shop, course, add-on, số người, ngày và giờ
-        ↓
-Read-only tool kiểm tra eligibility và availability
-        ↓
-Booking một người chọn auto, therapist cụ thể hoặc giới tính
-Booking nhóm luôn dùng auto assignment
-        ↓
-Thu thập thông tin khách hàng
-        ↓
-Hiển thị booking summary
-        ↓
-Khách hàng xác nhận
-        ↓
-Mutation tool gọi Booking Backend với Idempotency-Key
-        ↓
-Booking Backend kiểm tra lại trong transaction
-        ↓
-Trả kết quả chính thức
-```
-
-Availability từ bước đầu chỉ là pre-check. Booking Backend phải kiểm tra lại tại
-thời điểm ghi dữ liệu.
-
-Confirmation token:
-
-- Gắn với `conversation_id`.
-- Gắn với action và bản chụp payload.
-- Có thời hạn.
-- Chỉ dùng một lần.
-- Chỉ bị xóa sau khi mutation thành công.
-
-Conversation state được lưu trong Redis bằng optimistic concurrency. Hai request
-cùng sửa một phiên sẽ không được phép âm thầm ghi đè state của nhau.
-
-## 6. Ranh giới Frontend
-
-Frontend được phép:
-
-- Gửi tin nhắn đến Chatbot Backend.
-- Nhận JSON hoặc SSE stream.
-- Hiển thị shop, course, slot và booking summary.
-- Gửi lựa chọn hoặc confirmation của khách hàng.
-- Giữ UI state và `conversation_id`.
-
-Frontend không được:
-
-- Gọi trực tiếp API tạo, đổi hoặc hủy của Booking Backend.
-- Tự tính availability.
-- Tự phân công therapist.
-- Tự kiểm tra business rule.
-- Lưu service key hoặc admin token.
-
-## 7. Ranh giới dữ liệu và bảo mật
-
-- Giá, shop, course, slot và booking lấy từ Booking Backend.
-- FAQ và chính sách lấy từ Qdrant.
-- Chatbot khách hàng không đăng ký tool quản trị.
-- Mutation yêu cầu xác thực khách hàng và confirmation.
-- Chatbot Backend và Booking Backend đều cần rate limit.
-- Log phải che số điện thoại, OTP, token và API key.
-- Mỗi request nên có `X-Correlation-ID`.
-
-## 8. Chạy Chatbot Backend
+Backend skeleton chưa có biến FastAPI `app`, router hoặc dependency wiring. Vì vậy
+lệnh sau chưa được hỗ trợ:
 
 ```powershell
-cd booking-ai-chatbot\backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-Copy-Item .env.example .env
-uvicorn app.main:app --reload --port 8001
+python -m uvicorn app.main:app --reload --port 8001
 ```
 
-Các endpoint:
-
-```text
-Health:  http://localhost:8001/health
-Swagger: http://localhost:8001/docs
-Chat:    POST http://localhost:8001/api/v1/chat
-Ready:   GET  http://localhost:8001/ready
-```
-
-Chạy test:
-
-```powershell
-cd booking-ai-chatbot\backend
-python -m pytest -q
-```
-
-### Trace log
-
-Backend ghi structured JSON đồng thời ra terminal và rotating file
-`backend/logs/chatbot.log`. Mỗi lượt có các event chính:
-
-```text
-USER_MESSAGE_RECEIVED
-INTENT_EXTRACTION_STARTED
-INTENT_EXTRACTED
-INTENT_REJECTED
-ENTITY_UPDATED
-QUESTION_ROUTED
-RAG_SEARCH_STARTED
-RAG_SEARCH_COMPLETED
-API_REQUESTED
-API_SUCCEEDED
-API_FAILED
-CONFIRMATION_REQUESTED
-CONFIRMATION_REJECTED
-STATE_TRANSITION
-BOOKING_CREATED
-ASSISTANT_RESPONSE_SENT
-http_request_completed
-```
-
-Tìm toàn bộ log của một hội thoại trong PowerShell:
-
-```powershell
-Get-Content .\logs\chatbot.log |
-  Select-String '"conversation_id":"<conversation-id>"'
-```
-
-Theo dõi log theo thời gian thực:
-
-```powershell
-Get-Content .\logs\chatbot.log -Wait -Tail 50
-```
-
-Log có `correlation_id`, `conversation_id`, handler target, intent, dialog
-intent, UI type và thời gian request. Phone, token và API key được che trước
-khi ghi.
-
-## 9. Biến môi trường Backend
-
-```env
-GROQ_API_KEY=
-GROQ_MODEL=llama-3.3-70b-versatile
-GROQ_BASE_URL=https://api.groq.com/openai/v1
-
-QDRANT_HOST=localhost
-QDRANT_PORT=6333
-QDRANT_COLLECTION=kb_chunks
-
-REDIS_URL=redis://localhost:6379/0
-CONVERSATION_TTL_SECONDS=1800
-BUSINESS_TIMEZONE=Asia/Tokyo
-
-BOOKING_API_URL=http://localhost:8000
-BOOKING_API_SERVICE_KEY=
-
-ADMIN_API_KEY=change-me-in-production
-CHATBOT_DEBUG=false
-CORS_ORIGINS=http://localhost:3000
-```
+Chỉ chạy lại backend sau khi cấu trúc được xác nhận và transport layer được triển
+khai.
