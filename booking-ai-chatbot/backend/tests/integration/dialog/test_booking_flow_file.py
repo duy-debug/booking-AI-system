@@ -83,6 +83,16 @@ def _all_declared_actions(flow: FlowDefinition) -> tuple[str, ...]:
     return tuple(actions)
 
 
+def _all_failures(flow: FlowDefinition) -> tuple[FlowFailure, ...]:
+    failures: list[FlowFailure] = []
+    for state in flow.states.values():
+        for transition in state.transitions:
+            failures.extend(transition.on_fail)
+        for auto_transition in state.auto_transitions:
+            failures.extend(auto_transition.on_fail)
+    return tuple(failures)
+
+
 def test_flow_loads_all_booking_states(flow: FlowDefinition) -> None:
     assert flow.version == "2.0"
     assert flow.name == "booking-flow"
@@ -456,6 +466,8 @@ def test_booking_execution_owns_create_booking_action(flow: FlowDefinition) -> N
     executing = flow.states[BookingState.BOOKING_EXECUTING]
 
     assert "create_booking" not in confirmation.actions
+    assert "run_final_check" not in confirmation.actions
+    assert confirmation.on_fail == ()
     assert confirmation.target is BookingState.BOOKING_EXECUTING
     assert confirmation.target is not BookingState.COMPLETED
     assert executing.on_enter.actions == ("create_booking",)
@@ -490,12 +502,94 @@ def test_tool_bridge_audits_declared_actions_without_reading_json(
     declared_actions = _all_declared_actions(flow)
     unregistered = bridge.find_unregistered_actions(declared_actions)
 
-    assert len(set(declared_actions)) == 37
+    assert len(set(declared_actions)) == 34
     assert {
         "load_time_slots",
         "handle_phone_collection",
         "mark_phone_confirmed",
         "create_booking",
     }.isdisjoint(unregistered)
-    assert "run_final_check" in unregistered
+    assert "run_final_check" not in declared_actions
     assert "complete_booking" in unregistered
+
+
+def test_flow_failure_metadata_is_safe_and_resolvable(
+    flow: FlowDefinition,
+) -> None:
+    failures = _all_failures(flow)
+
+    assert failures
+    assert all(failure.target in flow.states for failure in failures)
+    assert all(
+        failure.instruction_template is None
+        or bool(failure.instruction_template.strip())
+        for failure in failures
+    )
+    assert all(
+        not {"create_booking", "retry_booking"}.intersection(failure.actions)
+        for failure in failures
+    )
+
+    for state in flow.states.values():
+        for transition in state.transitions:
+            codes = tuple(failure.condition for failure in transition.on_fail)
+            assert len(codes) == len(set(codes))
+        for auto_transition in state.auto_transitions:
+            codes = tuple(
+                failure.condition for failure in auto_transition.on_fail
+            )
+            assert len(codes) == len(set(codes))
+
+
+def test_real_flow_resolves_exact_failure_without_mutation(
+    flow: FlowDefinition,
+) -> None:
+    context = BookingContext(
+        conversation_id="failure-conversation",
+        state=BookingState.SELECTING_TIME,
+    )
+    transition = _transition(flow, BookingState.SELECTING_TIME, "select_time")
+    machine = StateMachine(flow)
+
+    failure = machine.resolve_failure(transition, "slot_unavailable")
+
+    assert failure is not None
+    assert failure.target is BookingState.SELECTING_TIME
+    assert failure.instruction_template == "slot_unavailable"
+    assert context.state is BookingState.SELECTING_TIME
+
+
+def test_declared_failure_codes_are_audited_against_mapper(
+    flow: FlowDefinition,
+) -> None:
+    declared = {failure.condition for failure in _all_failures(flow)}
+    mapped = set(ToolBridge().mapped_failure_codes())
+
+    assert {
+        "invalid_phone",
+        "customer_ng_blocked",
+        "customer_verification_mismatch",
+        "booking_api_error",
+        "slot_api_error",
+        "slot_unavailable",
+        "service_duration_mismatch",
+    }.issubset(declared)
+    assert {
+        "invalid_phone",
+        "customer_ng_blocked",
+        "customer_verification_mismatch",
+        "booking_api_error",
+        "slot_api_error",
+        "service_duration_mismatch",
+    }.issubset(mapped)
+    assert "course_not_found" in declared - mapped
+    assert "booking_conflict" in mapped - declared
+
+
+def test_booking_on_enter_failure_routing_is_not_in_schema(
+    flow: FlowDefinition,
+) -> None:
+    executing = flow.states[BookingState.BOOKING_EXECUTING]
+
+    assert executing.on_enter.actions == ("create_booking",)
+    assert not hasattr(executing.on_enter, "on_fail")

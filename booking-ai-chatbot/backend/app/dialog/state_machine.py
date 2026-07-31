@@ -9,17 +9,15 @@ from app.dialog.flow_loader import (
     FlowAutoTransition,
     FlowCondition,
     FlowDefinition,
+    FlowFailure,
     FlowState,
     FlowTransition,
+    InvalidFlowConditionError,
     PhoneSplitConfig,
 )
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.domain.exceptions import InvalidBookingStateError
-
-
-class InvalidFlowConditionError(ValueError):
-    """Raised when a flow condition has an invalid configuration."""
 
 
 class StateMachine:
@@ -228,6 +226,49 @@ class StateMachine:
     ) -> None:
         """Commit only the resolved target state."""
         context.state = transition.target
+
+    def resolve_failure(
+        self,
+        transition: FlowTransition | FlowAutoTransition,
+        failure_code: str,
+    ) -> FlowFailure | None:
+        """Resolve an exact failure code before canonical fallback routes."""
+        exact = next(
+            (
+                failure
+                for failure in transition.on_fail
+                if failure.condition == failure_code
+            ),
+            None,
+        )
+        if exact is not None:
+            return exact
+        wildcard = next(
+            (
+                failure
+                for failure in transition.on_fail
+                if failure.condition == "*"
+            ),
+            None,
+        )
+        if wildcard is not None:
+            return wildcard
+        return next(
+            (
+                failure
+                for failure in transition.on_fail
+                if failure.condition == "default"
+            ),
+            None,
+        )
+
+    def apply_failure(
+        self,
+        context: BookingContext,
+        failure: FlowFailure,
+    ) -> None:
+        """Commit only a resolved failure target."""
+        context.state = failure.target
 
     def transition(
         self,

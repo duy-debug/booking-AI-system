@@ -1,6 +1,7 @@
 """Load and validate declarative booking dialog flow definitions."""
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -8,6 +9,8 @@ from typing import cast
 from app.domain.booking_state import BookingState
 
 SUPPORTED_OPERATORS = frozenset({"eq", "not_null", "null", "gte", "lte", "in", "and", "or"})
+_ACTION_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+_FORBIDDEN_FAILURE_ACTIONS = frozenset({"create_booking", "retry_booking"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +97,10 @@ class FlowDefinition:
 
 class InvalidFlowDefinitionError(ValueError):
     """Raised when a booking flow definition is invalid."""
+
+
+class InvalidFlowConditionError(ValueError):
+    """Raised when a flow condition has an invalid runtime configuration."""
 
 
 class FlowLoader:
@@ -259,9 +266,12 @@ def _actions(raw: object, location: str) -> tuple[str, ...]:
         raise InvalidFlowDefinitionError(f"Actions for {location} must be a list.")
     result: list[str] = []
     for action in raw:
-        if not isinstance(action, str) or action == "":
+        if (
+            not isinstance(action, str)
+            or not _ACTION_NAME_PATTERN.fullmatch(action)
+        ):
             raise InvalidFlowDefinitionError(
-                f"Actions for {location} must contain non-empty strings."
+                f"Actions for {location} must contain snake_case identifiers."
             )
         if action in result:
             raise InvalidFlowDefinitionError(f"Duplicate action '{action}' for {location}.")
@@ -299,15 +309,40 @@ def _failures(
         return ()
     items = raw if isinstance(raw, list) else [raw]
     result: list[FlowFailure] = []
+    seen_conditions: set[str] = set()
+    fallback_condition: str | None = None
     for item in items:
         value = _object(item, f"Failure in state '{state}' must be an object.")
         condition = _required_string(value, "condition", "Failure condition")
+        if condition.strip() != condition:
+            raise InvalidFlowDefinitionError(
+                "Failure condition must not contain surrounding whitespace."
+            )
+        if condition in seen_conditions:
+            raise InvalidFlowDefinitionError(
+                f"Duplicate failure condition '{condition}' in state '{state}'."
+            )
+        if condition in {"*", "default"}:
+            if fallback_condition is not None:
+                raise InvalidFlowDefinitionError(
+                    "Failure routes may define only one fallback condition."
+                )
+            fallback_condition = condition
+        seen_conditions.add(condition)
         target = _target(value.get("target"), condition, state, declared)
         actions = _actions(value.get("actions", []), f"failure '{condition}'")
+        if _FORBIDDEN_FAILURE_ACTIONS.intersection(actions):
+            raise InvalidFlowDefinitionError(
+                "Failure actions must not create or retry a booking."
+            )
         template = _optional_string(
             value.get("instruction_template"),
             f"Failure '{condition}' instruction_template",
         )
+        if template == "":
+            raise InvalidFlowDefinitionError(
+                f"Failure '{condition}' instruction_template must not be empty."
+            )
         result.append(FlowFailure(condition, target, actions, template))
     return tuple(result)
 

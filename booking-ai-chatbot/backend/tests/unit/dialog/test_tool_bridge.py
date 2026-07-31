@@ -8,6 +8,10 @@ from uuid import UUID
 
 import pytest
 
+from app.application.exceptions import (
+    CustomerVerificationMismatchError,
+    SlotConflictError,
+)
 from app.application.handlers.check_availability_handler import (
     CheckAvailabilityHandler,
 )
@@ -18,12 +22,14 @@ from app.application.ports.booking_gateway import (
     CreateBookingResult,
     CustomerVerificationResult,
 )
+from app.dialog.flow_loader import FlowFailure, InvalidFlowConditionError
 from app.dialog.tool_bridge import (
     ActionCallable,
     ActionExecutionContext,
     ActionExecutionError,
     ActionResult,
     DuplicateActionError,
+    FailureDescriptor,
     InvalidActionInputError,
     InvalidActionNameError,
     InvalidActionSequenceError,
@@ -33,6 +39,11 @@ from app.dialog.tool_bridge import (
 from app.domain.booking import Booking, Customer, Service, Shop
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
+from app.domain.exceptions import (
+    BookingContextNotReadyError,
+    CustomerNotAllowedError,
+    InvalidBookingDataError,
+)
 
 SHOP = Shop(
     UUID("11111111-1111-1111-1111-111111111111"),
@@ -102,6 +113,17 @@ def test_duplicate_action_is_rejected_without_override() -> None:
 def test_unknown_action_is_rejected() -> None:
     with pytest.raises(UnknownActionError):
         ToolBridge().get_action("missing_action")
+
+
+@pytest.mark.asyncio
+async def test_unknown_executed_action_is_wrapped_for_failure_mapping() -> None:
+    bridge = ToolBridge()
+
+    with pytest.raises(ActionExecutionError) as exc_info:
+        await bridge.execute_actions(("missing_action",), execution_context())
+
+    assert isinstance(exc_info.value.__cause__, UnknownActionError)
+    assert bridge.get_failure_code(exc_info.value) == "unknown_action_error"
 
 
 @pytest.mark.parametrize(
@@ -600,3 +622,221 @@ def test_injected_handlers_register_only_available_bindings() -> None:
             "retry_booking",
         )
     ) == ()
+
+
+def wrapped_error(
+    action_name: str,
+    cause: Exception,
+) -> ActionExecutionError:
+    return ActionExecutionError(action_name, (), cause)
+
+
+@pytest.mark.parametrize(
+    ("action_name", "cause", "expected"),
+    [
+        ("create_booking", SlotConflictError(), "booking_conflict"),
+        (
+            "handle_phone_collection",
+            InvalidBookingDataError("sensitive message"),
+            "invalid_phone",
+        ),
+        (
+            "load_time_slots",
+            BookingContextNotReadyError(),
+            "booking_data_incomplete",
+        ),
+        (
+            "handle_phone_collection",
+            CustomerNotAllowedError(),
+            "customer_ng_blocked",
+        ),
+        (
+            "handle_phone_collection",
+            CustomerVerificationMismatchError(),
+            "customer_verification_mismatch",
+        ),
+        ("custom_action", UnknownActionError(), "unknown_action_error"),
+        (
+            "custom_action",
+            InvalidActionInputError(),
+            "booking_data_incomplete",
+        ),
+        (
+            "custom_action",
+            InvalidActionSequenceError(),
+            "action_sequence_invalid",
+        ),
+        (
+            "custom_action",
+            InvalidFlowConditionError(),
+            "flow_configuration_error",
+        ),
+        ("custom_action", RuntimeError("invalid phone"), "action_execution_error"),
+        ("load_time_slots", RuntimeError("gateway failed"), "slot_api_error"),
+        ("create_booking", RuntimeError("gateway failed"), "booking_api_error"),
+        (
+            "handle_phone_collection",
+            RuntimeError("gateway failed"),
+            "booking_api_error",
+        ),
+    ],
+)
+def test_failure_code_mapping_is_type_based_and_action_aware(
+    action_name: str,
+    cause: Exception,
+    expected: str,
+) -> None:
+    bridge = ToolBridge()
+
+    assert bridge.get_failure_code(wrapped_error(action_name, cause)) == expected
+
+
+def test_failure_mapping_unwraps_only_explicit_action_wrappers() -> None:
+    root = SlotConflictError()
+    nested = wrapped_error("inner", root)
+    outer = wrapped_error("create_booking", nested)
+
+    descriptor = ToolBridge().describe_failure(outer)
+
+    assert descriptor == FailureDescriptor(
+        code="booking_conflict",
+        action_name="create_booking",
+        cause=root,
+    )
+    assert descriptor.cause is root
+
+
+def test_custom_failure_code_provider_receives_root_exception() -> None:
+    received: list[Exception] = []
+
+    def provider(error: Exception) -> str:
+        received.append(error)
+        return "custom_failure"
+
+    cause = RuntimeError("private details")
+    bridge = ToolBridge(failure_code_provider=provider)
+
+    assert (
+        bridge.get_failure_code(wrapped_error("custom_action", cause))
+        == "custom_failure"
+    )
+    assert received == [cause]
+
+
+@pytest.mark.asyncio
+async def test_failure_actions_execute_in_order_without_applying_target() -> None:
+    calls: list[str] = []
+    bridge = ToolBridge()
+    booking_context = BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.SELECTING_SERVICE,
+        booking_date=date(2099, 8, 1),
+    )
+
+    async def suggest(context: ActionExecutionContext) -> ActionResult:
+        assert context.booking_context.booking_date is None
+        calls.append("suggest_nearest_time")
+        return ActionResult("suggest_nearest_time")
+
+    bridge.register_action("suggest_nearest_time", suggest)
+    failure = FlowFailure(
+        "no_slots_available",
+        BookingState.SELECTING_DATE,
+        ("clear_date", "suggest_nearest_time"),
+        "no_slots_available",
+    )
+
+    report = await bridge.execute_failure_actions(
+        failure,
+        execution_context(booking_context=booking_context),
+    )
+
+    assert report.executed_action_names == (
+        "clear_date",
+        "suggest_nearest_time",
+    )
+    assert calls == ["suggest_nearest_time"]
+    assert booking_context.booking_date is None
+    assert booking_context.state is BookingState.SELECTING_SERVICE
+
+
+@pytest.mark.asyncio
+async def test_failed_failure_action_stops_and_rolls_back_local_context() -> None:
+    calls: list[str] = []
+    bridge = ToolBridge()
+    booking_context = BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.SELECTING_TIME,
+        phone="original",
+    )
+
+    async def first(context: ActionExecutionContext) -> ActionResult:
+        calls.append("first_recovery")
+        context.booking_context.phone = "mutated"
+        return ActionResult("first_recovery")
+
+    async def second(context: ActionExecutionContext) -> ActionResult:
+        calls.append("second_recovery")
+        raise RuntimeError("recovery failed")
+
+    async def third(context: ActionExecutionContext) -> ActionResult:
+        calls.append("third_recovery")
+        return ActionResult("third_recovery")
+
+    bridge.register_action("first_recovery", first)
+    bridge.register_action("second_recovery", second)
+    bridge.register_action("third_recovery", third)
+    failure = FlowFailure(
+        "slot_unavailable",
+        BookingState.SELECTING_TIME,
+        ("first_recovery", "second_recovery", "third_recovery"),
+    )
+
+    with pytest.raises(ActionExecutionError) as exc_info:
+        await bridge.execute_failure_actions(
+            failure,
+            execution_context(booking_context=booking_context),
+        )
+
+    assert calls == ["first_recovery", "second_recovery"]
+    assert exc_info.value.executed_actions == ("first_recovery",)
+    assert booking_context.phone == "original"
+    assert booking_context.state is BookingState.SELECTING_TIME
+
+
+@pytest.mark.asyncio
+async def test_empty_failure_actions_return_empty_report() -> None:
+    report = await ToolBridge().execute_failure_actions(
+        FlowFailure("failure", BookingState.SELECTING_TIME),
+        execution_context(),
+    )
+
+    assert report.results == ()
+
+
+@pytest.mark.parametrize("side_effect", ["create_booking", "retry_booking"])
+@pytest.mark.asyncio
+async def test_failure_actions_reject_booking_side_effect_before_execution(
+    side_effect: str,
+) -> None:
+    calls: list[str] = []
+    bridge = ToolBridge()
+
+    async def first(context: ActionExecutionContext) -> ActionResult:
+        calls.append("first_recovery")
+        return ActionResult("first_recovery")
+
+    bridge.register_action("first_recovery", first)
+    failure = FlowFailure(
+        "failure",
+        BookingState.BOOKING_FAILED,
+        ("first_recovery", side_effect),
+    )
+
+    with pytest.raises(InvalidActionSequenceError):
+        await bridge.execute_failure_actions(
+            failure,
+            execution_context(idempotency_key="stable-key"),
+        )
+
+    assert calls == []

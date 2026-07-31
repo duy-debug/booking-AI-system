@@ -5,14 +5,23 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, fields
 from datetime import date, time
-from typing import TypeAlias, TypeVar
+from typing import Protocol, TypeAlias, TypeVar
 
+from app.application.exceptions import (
+    CustomerVerificationMismatchError,
+    InvalidIdempotencyKeyError,
+    SlotConflictError,
+)
 from app.application.handlers.check_availability_handler import (
     CheckAvailabilityHandler,
 )
 from app.application.handlers.collect_customer_handler import CollectCustomerHandler
 from app.application.handlers.confirm_phone_handler import ConfirmPhoneHandler
 from app.application.handlers.create_booking_handler import CreateBookingHandler
+from app.dialog.flow_loader import (
+    FlowFailure,
+    InvalidFlowConditionError,
+)
 from app.domain.booking import (
     CourseSelection,
     Shop,
@@ -21,6 +30,18 @@ from app.domain.booking import (
 )
 from app.domain.booking_context import BookingContext
 from app.domain.booking_rules import BookingRules
+from app.domain.booking_state import BookingState
+from app.domain.exceptions import (
+    BookingConflictError,
+    BookingContextNotReadyError,
+    CustomerNotAllowedError,
+    CustomerVerificationRequiredError,
+    InvalidBookingDataError,
+    InvalidCourseSelectionError,
+    InvalidDurationError,
+    PhoneNotConfirmedError,
+    TherapistNotAllowedForGroupError,
+)
 
 _ACTION_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _EXTERNAL_SIDE_EFFECT_ACTIONS = frozenset({"create_booking", "retry_booking"})
@@ -60,6 +81,14 @@ class ActionExecutionReport:
     def executed_action_names(self) -> tuple[str, ...]:
         """Return successful action names in execution order."""
         return tuple(result.action_name for result in self.results)
+
+
+class FailureCodeProvider(Protocol):
+    """Maps a root exception to a stable public failure code."""
+
+    def __call__(self, error: Exception) -> str:
+        """Return a stable snake_case failure code."""
+        ...
 
 
 ActionCallable: TypeAlias = Callable[
@@ -107,6 +136,26 @@ class ActionExecutionError(ToolBridgeError):
         super().__init__(f"Action '{action_name}' failed: {cause}")
 
 
+@dataclass(frozen=True, slots=True)
+class FailureDescriptor:
+    """Describes a mapped action failure without changing dialog state."""
+
+    code: str
+    action_name: str
+    cause: Exception
+
+
+@dataclass(frozen=True, slots=True)
+class FailureExecutionResult:
+    """Contains prepared failure metadata without rendering or state commit."""
+
+    failure_code: str
+    target: BookingState
+    instruction_template: str | None
+    action_report: ActionExecutionReport
+    original_error: ActionExecutionError
+
+
 def _require_payload_value(
     context: ActionExecutionContext,
     key: str,
@@ -137,12 +186,14 @@ class ToolBridge:
         collect_customer_handler: CollectCustomerHandler | None = None,
         confirm_phone_handler: ConfirmPhoneHandler | None = None,
         create_booking_handler: CreateBookingHandler | None = None,
+        failure_code_provider: FailureCodeProvider | None = None,
     ) -> None:
         self._actions: dict[str, ActionCallable] = {}
         self._check_availability_handler = check_availability_handler
         self._collect_customer_handler = collect_customer_handler
         self._confirm_phone_handler = confirm_phone_handler
         self._create_booking_handler = create_booking_handler
+        self._failure_code_provider = failure_code_provider
         self._register_domain_actions()
         self._register_injected_handler_actions()
 
@@ -189,6 +240,63 @@ class ToolBridge:
                     missing.append(name)
         return tuple(missing)
 
+    def get_failure_code(self, error: ActionExecutionError) -> str:
+        """Map an action execution failure to a stable public code."""
+        cause = self._unwrap_action_error(error)
+        if self._failure_code_provider is not None:
+            code = self._failure_code_provider(cause)
+            if not _ACTION_NAME_PATTERN.fullmatch(code):
+                raise InvalidActionInputError(
+                    "Failure code provider must return a snake_case identifier."
+                )
+            return code
+        return self._default_failure_code(error.action_name, cause)
+
+    def describe_failure(self, error: ActionExecutionError) -> FailureDescriptor:
+        """Return mapped failure metadata while preserving the original error."""
+        return FailureDescriptor(
+            code=self.get_failure_code(error),
+            action_name=error.action_name,
+            cause=self._unwrap_action_error(error),
+        )
+
+    def mapped_failure_codes(self) -> tuple[str, ...]:
+        """Return all stable codes the default mapper can produce."""
+        return (
+            "invalid_phone",
+            "booking_data_incomplete",
+            "customer_ng_blocked",
+            "combo_not_bookable",
+            "duration_not_multiple_15",
+            "service_duration_mismatch",
+            "therapist_unavailable",
+            "booking_conflict",
+            "customer_verification_mismatch",
+            "unknown_action_error",
+            "action_sequence_invalid",
+            "flow_configuration_error",
+            "slot_api_error",
+            "booking_api_error",
+            "action_execution_error",
+        )
+
+    async def execute_failure_actions(
+        self,
+        failure: FlowFailure,
+        context: ActionExecutionContext,
+    ) -> ActionExecutionReport:
+        """Execute recovery actions without applying the failure target."""
+        forbidden = tuple(
+            action
+            for action in failure.actions
+            if action in _EXTERNAL_SIDE_EFFECT_ACTIONS
+        )
+        if forbidden:
+            raise InvalidActionSequenceError(
+                "Failure actions must not create or retry a booking."
+            )
+        return await self.execute_actions(failure.actions, context)
+
     async def execute_action(
         self,
         action_name: str,
@@ -197,10 +305,13 @@ class ToolBridge:
         """Execute one action and restore local context if it fails."""
         normalized_name = self._normalize_action_name(action_name)
         self._validate_idempotency(normalized_name, context)
-        action = self.get_action(normalized_name)
         snapshot = self._snapshot_booking_context(context.booking_context)
         try:
+            action = self.get_action(normalized_name)
             return await self._invoke_action(normalized_name, action, context)
+        except UnknownActionError as error:
+            self._restore_booking_context(context.booking_context, snapshot)
+            raise ActionExecutionError(normalized_name, (), error) from error
         except ActionExecutionError:
             self._restore_booking_context(context.booking_context, snapshot)
             raise
@@ -215,12 +326,15 @@ class ToolBridge:
         self._validate_action_sequence(names)
         for name in names:
             self._validate_idempotency(name, context)
-        resolved_actions = tuple((name, self.get_action(name)) for name in names)
 
         snapshot = self._snapshot_booking_context(context.booking_context)
         results: list[ActionResult] = []
         try:
-            for name, action in resolved_actions:
+            for name in names:
+                try:
+                    action = self.get_action(name)
+                except UnknownActionError as error:
+                    raise ActionExecutionError(name, (), error) from error
                 results.append(await self._invoke_action(name, action, context))
         except ActionExecutionError as error:
             self._restore_booking_context(context.booking_context, snapshot)
@@ -244,6 +358,75 @@ class ToolBridge:
                 "Action name must be non-empty snake_case and start with a letter."
             )
         return normalized_name
+
+    @staticmethod
+    def _unwrap_action_error(error: Exception) -> Exception:
+        current = error
+        seen: set[int] = set()
+        for _ in range(16):
+            if not isinstance(current, ActionExecutionError):
+                return current
+            if id(current) in seen:
+                return current
+            seen.add(id(current))
+            cause = current.cause
+            if cause is current:
+                return current
+            current = cause
+        return current
+
+    @staticmethod
+    def _default_failure_code(
+        action_name: str,
+        error: Exception,
+    ) -> str:
+        if isinstance(error, UnknownActionError):
+            return "unknown_action_error"
+        if isinstance(error, InvalidActionSequenceError):
+            return "action_sequence_invalid"
+        if isinstance(error, InvalidFlowConditionError):
+            return "flow_configuration_error"
+        if isinstance(error, SlotConflictError | BookingConflictError):
+            return "booking_conflict"
+        if isinstance(error, CustomerVerificationMismatchError):
+            return "customer_verification_mismatch"
+        if isinstance(error, CustomerNotAllowedError):
+            return "customer_ng_blocked"
+        if isinstance(error, BookingContextNotReadyError):
+            return "booking_data_incomplete"
+        if isinstance(
+            error,
+            (
+                PhoneNotConfirmedError,
+                CustomerVerificationRequiredError,
+                InvalidIdempotencyKeyError,
+                InvalidActionInputError,
+            ),
+        ):
+            if action_name in {"handle_phone_collection", "validate_phone"}:
+                return "invalid_phone"
+            return "booking_data_incomplete"
+        if isinstance(error, InvalidDurationError):
+            if action_name == "handle_duration_selection":
+                return "duration_not_multiple_15"
+            return "service_duration_mismatch"
+        if isinstance(error, InvalidCourseSelectionError):
+            return "combo_not_bookable"
+        if isinstance(error, TherapistNotAllowedForGroupError):
+            return "therapist_unavailable"
+        if isinstance(error, InvalidBookingDataError):
+            if action_name in {"handle_phone_collection", "validate_phone"}:
+                return "invalid_phone"
+            return "booking_data_incomplete"
+        if action_name == "load_time_slots":
+            return "slot_api_error"
+        if action_name in {
+            "create_booking",
+            "retry_booking",
+            "handle_phone_collection",
+        }:
+            return "booking_api_error"
+        return "action_execution_error"
 
     @staticmethod
     def _validate_action_sequence(action_names: tuple[str, ...]) -> None:

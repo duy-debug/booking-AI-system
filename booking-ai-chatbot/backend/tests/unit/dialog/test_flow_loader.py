@@ -230,3 +230,76 @@ def test_file_and_json_errors_are_propagated(tmp_path: Path) -> None:
     invalid.write_text("{invalid", encoding="utf-8")
     with pytest.raises(json.JSONDecodeError):
         FlowLoader.load(invalid)
+
+
+def test_duplicate_failure_codes_are_rejected(tmp_path: Path) -> None:
+    payload = _flow()
+    idle = cast(dict[str, object], _states(payload)["idle"])
+    transitions = cast(list[dict[str, object]], idle["transitions"])
+    transitions[0]["on_fail"] = [
+        {"condition": "invalid", "target": "idle"},
+        {"condition": "invalid", "target": "idle"},
+    ]
+
+    with pytest.raises(InvalidFlowDefinitionError, match="Duplicate failure"):
+        FlowLoader.load(_write(tmp_path, payload))
+
+
+def test_failure_routes_allow_only_one_fallback_convention(tmp_path: Path) -> None:
+    payload = _flow()
+    idle = cast(dict[str, object], _states(payload)["idle"])
+    transitions = cast(list[dict[str, object]], idle["transitions"])
+    transitions[0]["on_fail"] = [
+        {"condition": "*", "target": "idle"},
+        {"condition": "default", "target": "idle"},
+    ]
+
+    with pytest.raises(InvalidFlowDefinitionError, match="one fallback"):
+        FlowLoader.load(_write(tmp_path, payload))
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        {"condition": " ", "target": "idle"},
+        {
+            "condition": "invalid",
+            "target": "idle",
+            "instruction_template": "",
+        },
+        {
+            "condition": "invalid",
+            "target": "idle",
+            "actions": ["Invalid-Action"],
+        },
+    ],
+)
+def test_invalid_failure_metadata_is_rejected(
+    tmp_path: Path,
+    failure: dict[str, object],
+) -> None:
+    payload = _flow()
+    idle = cast(dict[str, object], _states(payload)["idle"])
+    transitions = cast(list[dict[str, object]], idle["transitions"])
+    transitions[0]["on_fail"] = failure
+
+    with pytest.raises(InvalidFlowDefinitionError):
+        FlowLoader.load(_write(tmp_path, payload))
+
+
+@pytest.mark.parametrize("action", ["create_booking", "retry_booking"])
+def test_booking_side_effect_is_forbidden_in_failure_actions(
+    tmp_path: Path,
+    action: str,
+) -> None:
+    payload = _flow()
+    idle = cast(dict[str, object], _states(payload)["idle"])
+    transitions = cast(list[dict[str, object]], idle["transitions"])
+    transitions[0]["on_fail"] = {
+        "condition": "failure",
+        "target": "idle",
+        "actions": [action],
+    }
+
+    with pytest.raises(InvalidFlowDefinitionError, match="must not create"):
+        FlowLoader.load(_write(tmp_path, payload))

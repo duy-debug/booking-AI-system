@@ -490,11 +490,28 @@
           "intent": "provide_phone",
           "target": "verifying_phone",
           "actions": ["handle_phone_collection", "validate_phone"],
-          "on_fail": {
-            "condition": "invalid_phone",
-            "target": "collecting_phone",
-            "instruction_template": "phone_invalid"
-          }
+          "on_fail": [
+            {
+              "condition": "invalid_phone",
+              "target": "collecting_phone",
+              "instruction_template": "phone_invalid"
+            },
+            {
+              "condition": "customer_ng_blocked",
+              "target": "collecting_phone",
+              "instruction_template": "customer_not_allowed"
+            },
+            {
+              "condition": "customer_verification_mismatch",
+              "target": "collecting_phone",
+              "instruction_template": "customer_verification_failed"
+            },
+            {
+              "condition": "booking_api_error",
+              "target": "collecting_phone",
+              "instruction_template": "customer_verification_unavailable"
+            }
+          ]
         },
         {
           "intent": "change_info",
@@ -584,20 +601,7 @@
       "transitions": [
         {
           "intent": "confirm",
-          "target": "booking_executing",
-          "actions": ["run_final_check"],
-          "on_fail": [
-            {
-              "condition": "missing_required_field",
-              "target": "awaiting_confirmation",
-              "actions": ["booking_data_incomplete"]
-            },
-            {
-              "condition": "slot_unavailable",
-              "target": "selecting_time",
-              "actions": ["reload_time_slots", "slot_unavailable"]
-            }
-          ]
+          "target": "booking_executing"
         },
         {
           "intent": "deny",

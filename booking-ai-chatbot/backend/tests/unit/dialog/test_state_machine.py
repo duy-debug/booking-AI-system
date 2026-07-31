@@ -10,6 +10,7 @@ from app.dialog.flow_loader import (
     FlowAutoTransition,
     FlowCondition,
     FlowDefinition,
+    FlowFailure,
     FlowOnEnter,
     FlowState,
     FlowTransition,
@@ -558,3 +559,107 @@ def test_get_configuration_helpers_and_unknown_state() -> None:
     )
     with pytest.raises(InvalidBookingStateError):
         machine.get_state_definition(BookingState.COMPLETED)
+
+
+def test_resolve_failure_prefers_exact_code_before_fallback() -> None:
+    exact = FlowFailure(
+        "slot_unavailable",
+        BookingState.SELECTING_TIME,
+        ("suggest_nearest_time",),
+        "slot_unavailable",
+    )
+    fallback = FlowFailure(
+        "*",
+        BookingState.SELECTING_SERVICE,
+        instruction_template="ask_service",
+    )
+    transition = FlowTransition(
+        "select_time",
+        BookingState.SELECTING_THERAPIST,
+        on_fail=(fallback, exact),
+    )
+
+    resolved = StateMachine(make_flow()).resolve_failure(
+        transition,
+        "slot_unavailable",
+    )
+
+    assert resolved is exact
+    assert resolved.actions == ("suggest_nearest_time",)
+    assert resolved.instruction_template == "slot_unavailable"
+
+
+def test_resolve_failure_uses_wildcard_then_default_fallback() -> None:
+    wildcard = FlowFailure("*", BookingState.SELECTING_TIME)
+    default = FlowFailure("default", BookingState.SELECTING_SERVICE)
+    machine = StateMachine(make_flow())
+
+    assert machine.resolve_failure(
+        FlowTransition(
+            "select_time",
+            BookingState.SELECTING_THERAPIST,
+            on_fail=(default, wildcard),
+        ),
+        "unmapped",
+    ) is wildcard
+    assert machine.resolve_failure(
+        FlowTransition(
+            "select_time",
+            BookingState.SELECTING_THERAPIST,
+            on_fail=(default,),
+        ),
+        "unmapped",
+    ) is default
+
+
+def test_resolve_failure_returns_none_without_match_or_fallback() -> None:
+    transition = FlowTransition(
+        "select_time",
+        BookingState.SELECTING_THERAPIST,
+        on_fail=(
+            FlowFailure("slot_unavailable", BookingState.SELECTING_TIME),
+        ),
+    )
+
+    assert (
+        StateMachine(make_flow()).resolve_failure(transition, "booking_api_error")
+        is None
+    )
+
+
+def test_resolve_failure_does_not_mutate_until_apply_failure() -> None:
+    context = make_context(state=BookingState.SELECTING_SERVICE)
+    failure = FlowFailure(
+        "service_duration_mismatch",
+        BookingState.SELECTING_DURATION,
+    )
+    transition = FlowTransition(
+        "select_course",
+        BookingState.SELECTING_TIME,
+        on_fail=(failure,),
+    )
+    machine = StateMachine(make_flow())
+
+    resolved = machine.resolve_failure(
+        transition,
+        "service_duration_mismatch",
+    )
+
+    assert resolved is failure
+    assert context.state is BookingState.SELECTING_SERVICE
+    machine.apply_failure(context, resolved)
+    assert context.state is BookingState.SELECTING_DURATION
+
+
+def test_failure_code_is_not_evaluated_as_flow_condition() -> None:
+    failure = FlowFailure("gte", BookingState.SELECTING_TIME)
+    transition = FlowTransition(
+        "select_time",
+        BookingState.SELECTING_THERAPIST,
+        on_fail=(failure,),
+    )
+
+    assert (
+        StateMachine(make_flow()).resolve_failure(transition, "gte")
+        is failure
+    )
