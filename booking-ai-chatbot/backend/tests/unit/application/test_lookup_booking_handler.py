@@ -2,6 +2,7 @@
 
 from datetime import date, time
 from decimal import Decimal
+from typing import cast
 from uuid import UUID
 
 import pytest
@@ -99,8 +100,7 @@ class FakeBookingGateway:
 
 
 def make_handler(fake: FakeBookingGateway) -> LookupBookingHandler:
-    gateway: BookingGateway = fake
-    return LookupBookingHandler(gateway)
+    return LookupBookingHandler(cast(BookingGateway, fake))
 
 
 def make_existing_context() -> BookingContext:

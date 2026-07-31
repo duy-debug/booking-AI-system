@@ -4,8 +4,18 @@ import re
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
+from app.domain.booking import TherapistPreferenceType
 from app.domain.booking_context import BookingContext
-from app.domain.exceptions import InvalidBookingDataError
+from app.domain.exceptions import (
+    BookingContextNotReadyError,
+    CustomerNotAllowedError,
+    CustomerVerificationRequiredError,
+    InvalidBookingDataError,
+    InvalidCustomerCountError,
+    InvalidDurationError,
+    PhoneNotConfirmedError,
+    TherapistNotAllowedForGroupError,
+)
 
 
 class BookingRules:
@@ -23,9 +33,11 @@ class BookingRules:
 
     @staticmethod
     def validate_service_duration(duration_minutes: int) -> None:
-        """Validate that a service duration is greater than zero."""
-        if duration_minutes <= 0:
-            raise InvalidBookingDataError("Service duration must be greater than zero.")
+        """Validate a positive duration divisible by 15 minutes."""
+        if duration_minutes <= 0 or duration_minutes % 15 != 0:
+            raise InvalidDurationError(
+                "Service duration must be positive and divisible by 15."
+            )
 
     @classmethod
     def validate_booking_datetime(
@@ -54,20 +66,51 @@ class BookingRules:
     def validate_create_context(cls, context: BookingContext) -> None:
         """Validate a complete context before creating a booking."""
         shop = context.shop
-        service = context.service
         customer = context.customer
         booking_date = context.booking_date
         start_time = context.start_time
 
         if (
             shop is None
-            or service is None
             or customer is None
             or booking_date is None
             or start_time is None
         ):
-            raise InvalidBookingDataError("Booking context is incomplete.")
+            raise BookingContextNotReadyError("Booking context is incomplete.")
+
+        if context.num_customer is None or not 1 <= context.num_customer <= 3:
+            raise InvalidCustomerCountError(
+                "Number of customers must be between one and three."
+            )
+        if context.duration_minutes is None:
+            raise InvalidDurationError("Booking duration is required.")
+        cls.validate_service_duration(context.duration_minutes)
+
+        course_selection = context.course_selection
+        if course_selection is None:
+            raise BookingContextNotReadyError("A main course is required.")
+
+        if (
+            context.num_customer >= 2
+            and context.therapist_preference is not None
+            and context.therapist_preference.preference_type
+            is not TherapistPreferenceType.NONE
+        ):
+            raise TherapistNotAllowedForGroupError(
+                "Group bookings cannot specify a therapist preference."
+            )
+
+        if context.phone is None:
+            raise BookingContextNotReadyError("A phone number is required.")
+        cls.validate_phone(context.phone)
+        if not context.phone_confirmed:
+            raise PhoneNotConfirmedError("The phone number must be confirmed.")
+        if not context.ng_list_checked:
+            raise CustomerVerificationRequiredError(
+                "Customer verification must complete before booking."
+            )
+        if context.is_ng_customer:
+            raise CustomerNotAllowedError("This customer is not allowed to book.")
 
         cls.validate_phone(customer.phone)
-        cls.validate_service_duration(service.duration_minutes)
         cls.validate_booking_datetime(booking_date, start_time)

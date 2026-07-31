@@ -1,1 +1,734 @@
-{}
+{
+  "version": "2.0",
+  "name": "booking-flow",
+  "description": "Detailed booking conversation flow.",
+  "initial_state": "idle",
+  "states": {
+    "idle": {
+      "description": "Waiting for a booking request.",
+      "on_enter": {
+        "instruction_template": "greeting"
+      },
+      "transitions": [
+        {
+          "intent": "start_booking",
+          "target": "selecting_shop",
+          "actions": ["search_shop"]
+        },
+        {
+          "intent": "ask_question",
+          "target": "idle",
+          "actions": ["answer_question"]
+        },
+        {
+          "intent": "unknown",
+          "target": "idle",
+          "actions": ["ask_to_clarify"]
+        },
+        {
+          "intent": "*",
+          "target": "idle",
+          "actions": ["log_unhandled", "ask_to_clarify"]
+        }
+      ]
+    },
+    "selecting_shop": {
+      "description": "Waiting for a store selection.",
+      "on_enter": {
+        "instruction_template": "ask_shop"
+      },
+      "transitions": [
+        {
+          "intent": "select_store",
+          "target": "selecting_date",
+          "actions": ["handle_store_selection", "load_service_catalog"]
+        },
+        {
+          "intent": "change_info",
+          "target": "selecting_shop",
+          "actions": ["defer_change_info"]
+        },
+        {
+          "intent": "ask_question",
+          "target": "selecting_shop",
+          "actions": ["answer_question"]
+        },
+        {
+          "intent": "unknown",
+          "target": "selecting_shop",
+          "actions": ["ask_to_clarify"]
+        },
+        {
+          "intent": "cancel_flow",
+          "target": "cancelled",
+          "actions": []
+        },
+        {
+          "intent": "*",
+          "target": "selecting_shop",
+          "actions": ["log_unhandled", "ask_to_clarify"]
+        }
+      ]
+    },
+    "selecting_date": {
+      "description": "Waiting for a booking date.",
+      "on_enter": {
+        "instruction_template": "ask_date"
+      },
+      "transitions": [
+        {
+          "intent": "select_date",
+          "target": "selecting_people",
+          "actions": ["handle_date_selection", "early_availability_check"],
+          "on_fail": [
+            {
+              "condition": "date_in_past",
+              "target": "selecting_date",
+              "actions": ["ask_date"]
+            },
+            {
+              "condition": "date_missing",
+              "target": "selecting_date",
+              "actions": ["ask_date"]
+            },
+            {
+              "condition": "no_slots_on_date",
+              "target": "selecting_date",
+              "actions": ["no_slots_available"]
+            }
+          ]
+        },
+        {
+          "intent": "change_info",
+          "target": "selecting_date",
+          "actions": ["defer_change_info"]
+        },
+        {
+          "intent": "ask_question",
+          "target": "selecting_date",
+          "actions": ["answer_question"]
+        },
+        {
+          "intent": "unknown",
+          "target": "selecting_date",
+          "actions": ["ask_to_clarify"]
+        },
+        {
+          "intent": "cancel_flow",
+          "target": "cancelled",
+          "actions": []
+        },
+        {
+          "intent": "*",
+          "target": "selecting_date",
+          "actions": ["log_unhandled", "ask_to_clarify"]
+        }
+      ]
+    },
+    "selecting_people": {
+      "description": "Waiting for the number of customers.",
+      "on_enter": {
+        "instruction_template": "ask_people"
+      },
+      "transitions": [
+        {
+          "intent": "select_people",
+          "target": "selecting_duration",
+          "actions": ["handle_people_selection"],
+          "on_fail": [
+            {
+              "condition": "num_customer_invalid",
+              "target": "selecting_people",
+              "actions": ["ask_people"]
+            },
+            {
+              "condition": "num_customer_too_many",
+              "target": "selecting_people",
+              "actions": ["people_too_many"]
+            }
+          ]
+        },
+        {
+          "intent": "deny",
+          "target": "selecting_date",
+          "actions": []
+        },
+        {
+          "intent": "change_info",
+          "target": "selecting_people",
+          "actions": ["defer_change_info"]
+        },
+        {
+          "intent": "ask_question",
+          "target": "selecting_people",
+          "actions": ["answer_question"]
+        },
+        {
+          "intent": "unknown",
+          "target": "selecting_people",
+          "actions": ["ask_to_clarify"]
+        },
+        {
+          "intent": "cancel_flow",
+          "target": "cancelled",
+          "actions": []
+        },
+        {
+          "intent": "*",
+          "target": "selecting_people",
+          "actions": ["log_unhandled", "ask_to_clarify"]
+        }
+      ]
+    },
+    "selecting_duration": {
+      "description": "Waiting for a total duration or course.",
+      "on_enter": {
+        "instruction_template": "ask_duration"
+      },
+      "transitions": [
+        {
+          "intent": "select_duration",
+          "target": "selecting_service",
+          "actions": ["handle_duration_selection"],
+          "on_fail": {
+            "condition": "duration_not_multiple_15",
+            "target": "selecting_duration",
+            "actions": ["duration_invalid"]
+          }
+        },
+        {
+          "intent": "select_course",
+          "target": "selecting_service",
+          "actions": ["handle_service_selection", "infer_duration_from_service"],
+          "on_fail": {
+            "condition": "service_not_found",
+            "target": "selecting_duration",
+            "actions": ["ask_service"]
+          }
+        },
+        {
+          "intent": "deny",
+          "target": "selecting_people",
+          "actions": []
+        },
+        {
+          "intent": "change_info",
+          "target": "selecting_duration",
+          "actions": ["defer_change_info"]
+        },
+        {
+          "intent": "ask_question",
+          "target": "selecting_duration",
+          "actions": ["answer_question"]
+        },
+        {
+          "intent": "unknown",
+          "target": "selecting_duration",
+          "actions": ["ask_to_clarify"]
+        },
+        {
+          "intent": "cancel_flow",
+          "target": "cancelled",
+          "actions": []
+        },
+        {
+          "intent": "*",
+          "target": "selecting_duration",
+          "actions": ["log_unhandled", "ask_to_clarify"]
+        }
+      ]
+    },
+    "selecting_service": {
+      "description": "Waiting for a service or course.",
+      "on_enter": {
+        "instruction_template": "ask_service"
+      },
+      "transitions": [
+        {
+          "intent": "select_course",
+          "target": "selecting_time",
+          "actions": ["handle_service_selection", "load_time_slots"],
+          "on_fail": [
+            {
+              "condition": "service_not_found",
+              "target": "selecting_service",
+              "actions": ["ask_service"]
+            },
+            {
+              "condition": "service_duration_mismatch",
+              "target": "selecting_duration",
+              "actions": ["duration_invalid"]
+            },
+            {
+              "condition": "no_slots_available",
+              "target": "selecting_date",
+              "actions": ["clear_date", "no_slots_available"]
+            }
+          ]
+        },
+        {
+          "intent": "select_duration",
+          "target": "selecting_duration",
+          "actions": []
+        },
+        {
+          "intent": "select_people",
+          "target": "selecting_people",
+          "actions": []
+        },
+        {
+          "intent": "change_info",
+          "target": "selecting_service",
+          "actions": ["defer_change_info"]
+        },
+        {
+          "intent": "ask_question",
+          "target": "selecting_service",
+          "actions": ["answer_question"]
+        },
+        {
+          "intent": "unknown",
+          "target": "selecting_service",
+          "actions": ["ask_to_clarify"]
+        },
+        {
+          "intent": "cancel_flow",
+          "target": "cancelled",
+          "actions": []
+        },
+        {
+          "intent": "*",
+          "target": "selecting_service",
+          "actions": ["log_unhandled", "ask_to_clarify"]
+        }
+      ]
+    },
+    "selecting_time": {
+      "description": "Waiting for an available start time.",
+      "on_enter": {
+        "instruction_template": "suggest_time_slots"
+      },
+      "transitions": [
+        {
+          "intent": "select_time",
+          "target": "selecting_therapist",
+          "actions": ["handle_time_selection"],
+          "on_fail": [
+            {
+              "condition": "slot_unavailable",
+              "target": "selecting_time",
+              "actions": ["suggest_nearest_time", "slot_unavailable"]
+            },
+            {
+              "condition": "slot_api_error",
+              "target": "selecting_time",
+              "actions": ["slot_api_error"]
+            }
+          ]
+        },
+        {
+          "intent": "select_course",
+          "target": "selecting_service",
+          "actions": []
+        },
+        {
+          "intent": "select_people",
+          "target": "selecting_people",
+          "actions": []
+        },
+        {
+          "intent": "deny",
+          "target": "selecting_service",
+          "actions": []
+        },
+        {
+          "intent": "change_info",
+          "target": "selecting_time",
+          "actions": ["defer_change_info"]
+        },
+        {
+          "intent": "ask_question",
+          "target": "selecting_time",
+          "actions": ["answer_question"]
+        },
+        {
+          "intent": "unknown",
+          "target": "selecting_time",
+          "actions": ["ask_to_clarify"]
+        },
+        {
+          "intent": "cancel_flow",
+          "target": "cancelled",
+          "actions": []
+        },
+        {
+          "intent": "*",
+          "target": "selecting_time",
+          "actions": ["log_unhandled", "ask_to_clarify"]
+        }
+      ]
+    },
+    "selecting_therapist": {
+      "description": "Waiting for an optional therapist preference.",
+      "on_enter": {
+        "instruction_template": "ask_therapist"
+      },
+      "transitions": [
+        {
+          "intent": "select_therapist",
+          "target": "selecting_options",
+          "conditions": [
+            {
+              "field": "num_customer",
+              "op": "eq",
+              "value": 1
+            }
+          ],
+          "actions": ["handle_therapist_selection"],
+          "on_fail": [
+            {
+              "condition": "therapist_unavailable",
+              "target": "selecting_therapist",
+              "actions": ["therapist_unavailable"]
+            },
+            {
+              "condition": "therapist_not_found",
+              "target": "selecting_therapist",
+              "actions": ["ask_therapist"]
+            }
+          ]
+        },
+        {
+          "intent": "deny",
+          "target": "selecting_options",
+          "actions": ["skip_therapist"]
+        },
+        {
+          "intent": "select_time",
+          "target": "selecting_time",
+          "actions": []
+        },
+        {
+          "intent": "change_info",
+          "target": "selecting_therapist",
+          "actions": ["defer_change_info"]
+        },
+        {
+          "intent": "ask_question",
+          "target": "selecting_therapist",
+          "actions": ["answer_question"]
+        },
+        {
+          "intent": "unknown",
+          "target": "selecting_therapist",
+          "actions": ["ask_to_clarify"]
+        },
+        {
+          "intent": "cancel_flow",
+          "target": "cancelled",
+          "actions": []
+        },
+        {
+          "intent": "*",
+          "target": "selecting_therapist",
+          "actions": ["log_unhandled", "ask_to_clarify"]
+        }
+      ],
+      "auto_transition": {
+        "condition": {
+          "field": "num_customer",
+          "op": "gte",
+          "value": 2
+        },
+        "target": "selecting_options",
+        "actions": ["skip_therapist_for_group"]
+      }
+    },
+    "selecting_options": {
+      "description": "Waiting for optional booking options.",
+      "on_enter": {
+        "instruction_template": "ask_options"
+      },
+      "transitions": [
+        {
+          "intent": "select_options",
+          "target": "collecting_phone",
+          "actions": ["handle_options_selection"]
+        },
+        {
+          "intent": "confirm",
+          "target": "collecting_phone",
+          "actions": ["keep_current_options"]
+        },
+        {
+          "intent": "deny",
+          "target": "collecting_phone",
+          "actions": ["skip_options"]
+        },
+        {
+          "intent": "change_info",
+          "target": "selecting_options",
+          "actions": ["defer_change_info"]
+        },
+        {
+          "intent": "ask_question",
+          "target": "selecting_options",
+          "actions": ["answer_question"]
+        },
+        {
+          "intent": "unknown",
+          "target": "selecting_options",
+          "actions": ["ask_to_clarify"]
+        },
+        {
+          "intent": "cancel_flow",
+          "target": "cancelled",
+          "actions": []
+        },
+        {
+          "intent": "*",
+          "target": "selecting_options",
+          "actions": ["log_unhandled", "ask_to_clarify"]
+        }
+      ]
+    },
+    "collecting_phone": {
+      "description": "Waiting for a customer phone number.",
+      "on_enter": {
+        "instruction_template": "ask_phone"
+      },
+      "transitions": [
+        {
+          "intent": "provide_phone",
+          "target": "verifying_phone",
+          "actions": ["handle_phone_collection", "validate_phone"],
+          "on_fail": {
+            "condition": "invalid_phone",
+            "target": "collecting_phone",
+            "actions": ["phone_invalid"]
+          }
+        },
+        {
+          "intent": "change_info",
+          "target": "collecting_phone",
+          "actions": ["defer_change_info"]
+        },
+        {
+          "intent": "ask_question",
+          "target": "collecting_phone",
+          "actions": ["answer_question"]
+        },
+        {
+          "intent": "unknown",
+          "target": "collecting_phone",
+          "actions": ["ask_to_clarify"]
+        },
+        {
+          "intent": "cancel_flow",
+          "target": "cancelled",
+          "actions": []
+        },
+        {
+          "intent": "*",
+          "target": "collecting_phone",
+          "actions": ["log_unhandled", "ask_to_clarify"]
+        }
+      ],
+      "phone_split_mode": {
+        "segment_count": 3,
+        "max_full_resets": 3,
+        "silence_timeout_ms": 5000
+      }
+    },
+    "verifying_phone": {
+      "description": "Waiting for phone number confirmation.",
+      "on_enter": {
+        "instruction_template": "readback_phone"
+      },
+      "transitions": [
+        {
+          "intent": "confirm",
+          "target": "awaiting_confirmation",
+          "actions": ["mark_phone_confirmed"]
+        },
+        {
+          "intent": "phone_verified",
+          "target": "awaiting_confirmation",
+          "actions": ["mark_phone_confirmed"]
+        },
+        {
+          "intent": "deny",
+          "target": "collecting_phone",
+          "actions": ["clear_phone_confirmation"]
+        },
+        {
+          "intent": "provide_phone",
+          "target": "verifying_phone",
+          "actions": ["handle_phone_collection", "validate_phone"]
+        },
+        {
+          "intent": "change_info",
+          "target": "verifying_phone",
+          "actions": ["defer_change_info"]
+        },
+        {
+          "intent": "ask_question",
+          "target": "verifying_phone",
+          "actions": ["answer_question"]
+        },
+        {
+          "intent": "unknown",
+          "target": "verifying_phone",
+          "actions": ["ask_to_clarify"]
+        },
+        {
+          "intent": "cancel_flow",
+          "target": "cancelled",
+          "actions": []
+        },
+        {
+          "intent": "*",
+          "target": "verifying_phone",
+          "actions": ["log_unhandled", "ask_to_clarify"]
+        }
+      ]
+    },
+    "awaiting_confirmation": {
+      "description": "Waiting for final booking confirmation.",
+      "on_enter": {
+        "instruction_template": "final_confirmation"
+      },
+      "transitions": [
+        {
+          "intent": "confirm",
+          "target": "booking_executing",
+          "actions": ["run_final_check"],
+          "on_fail": [
+            {
+              "condition": "missing_required_field",
+              "target": "awaiting_confirmation",
+              "actions": ["booking_data_incomplete"]
+            },
+            {
+              "condition": "slot_unavailable",
+              "target": "selecting_time",
+              "actions": ["reload_time_slots", "slot_unavailable"]
+            }
+          ]
+        },
+        {
+          "intent": "deny",
+          "target": "cancelled",
+          "actions": []
+        },
+        {
+          "intent": "change_info",
+          "target": "awaiting_confirmation",
+          "actions": ["defer_change_info"]
+        },
+        {
+          "intent": "ask_question",
+          "target": "awaiting_confirmation",
+          "actions": ["answer_question"]
+        },
+        {
+          "intent": "unknown",
+          "target": "awaiting_confirmation",
+          "actions": ["ask_to_clarify"]
+        },
+        {
+          "intent": "cancel_flow",
+          "target": "cancelled",
+          "actions": []
+        },
+        {
+          "intent": "*",
+          "target": "awaiting_confirmation",
+          "actions": ["log_unhandled", "ask_to_clarify"]
+        }
+      ]
+    },
+    "booking_executing": {
+      "description": "Creating the booking through the backend.",
+      "on_enter": {
+        "instruction_template": "booking_processing",
+        "actions": ["create_booking"]
+      },
+      "transitions": [
+        {
+          "intent": "booking_succeeded",
+          "target": "completed",
+          "actions": ["complete_booking"]
+        },
+        {
+          "intent": "booking_failed",
+          "target": "booking_failed",
+          "actions": ["handle_booking_failure"]
+        }
+      ],
+      "auto_transition": {
+        "condition": {
+          "field": "booking",
+          "op": "not_null"
+        },
+        "target": "completed",
+        "actions": ["complete_booking"],
+        "on_fail": {
+          "condition": "booking_api_error",
+          "target": "booking_failed",
+          "actions": ["handle_booking_failure"],
+          "instruction_template": "booking_failed"
+        }
+      }
+    },
+    "completed": {
+      "description": "Booking was created successfully.",
+      "on_enter": {
+        "instruction_template": "booking_complete"
+      },
+      "transitions": [],
+      "terminal": true
+    },
+    "booking_failed": {
+      "description": "Booking creation failed.",
+      "on_enter": {
+        "instruction_template": "booking_failed"
+      },
+      "transitions": [
+        {
+          "intent": "confirm",
+          "target": "booking_executing",
+          "actions": ["retry_booking"]
+        },
+        {
+          "intent": "select_time",
+          "target": "selecting_time",
+          "actions": ["reload_time_slots"]
+        },
+        {
+          "intent": "deny",
+          "target": "cancelled",
+          "actions": []
+        },
+        {
+          "intent": "unknown",
+          "target": "booking_failed",
+          "actions": ["ask_to_clarify"]
+        },
+        {
+          "intent": "*",
+          "target": "booking_failed",
+          "actions": ["log_unhandled", "ask_to_clarify"]
+        }
+      ]
+    },
+    "cancelled": {
+      "description": "The booking flow was cancelled.",
+      "on_enter": {
+        "instruction_template": "booking_cancelled"
+      },
+      "transitions": [],
+      "terminal": true
+    }
+  }
+}

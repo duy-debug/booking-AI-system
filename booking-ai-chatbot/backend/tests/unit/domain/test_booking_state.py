@@ -4,15 +4,22 @@ import pytest
 
 from app.domain.booking_state import BookingState
 
-
 EXPECTED_STATES = {
     BookingState.IDLE: "idle",
     BookingState.SELECTING_SHOP: "selecting_shop",
+    BookingState.SELECTING_DATE: "selecting_date",
+    BookingState.SELECTING_PEOPLE: "selecting_people",
+    BookingState.SELECTING_DURATION: "selecting_duration",
     BookingState.SELECTING_SERVICE: "selecting_service",
-    BookingState.SELECTING_DATETIME: "selecting_datetime",
-    BookingState.COLLECTING_CUSTOMER: "collecting_customer",
+    BookingState.SELECTING_TIME: "selecting_time",
+    BookingState.SELECTING_THERAPIST: "selecting_therapist",
+    BookingState.SELECTING_OPTIONS: "selecting_options",
+    BookingState.COLLECTING_PHONE: "collecting_phone",
+    BookingState.VERIFYING_PHONE: "verifying_phone",
     BookingState.AWAITING_CONFIRMATION: "awaiting_confirmation",
+    BookingState.BOOKING_EXECUTING: "booking_executing",
     BookingState.COMPLETED: "completed",
+    BookingState.BOOKING_FAILED: "booking_failed",
     BookingState.CANCELLED: "cancelled",
 }
 
@@ -37,7 +44,7 @@ def test_invalid_string_raises_value_error() -> None:
 
 
 def test_booking_state_has_expected_number_of_members() -> None:
-    assert len(BookingState) == 8
+    assert len(BookingState) == 16
 
 
 def test_booking_state_values_are_unique() -> None:

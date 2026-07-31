@@ -1,6 +1,7 @@
 """Tests for the shop search application handler."""
 
 from datetime import date, time
+from typing import cast
 from uuid import UUID
 
 import pytest
@@ -77,8 +78,7 @@ class FakeBookingGateway:
 
 
 def make_handler(fake: FakeBookingGateway) -> SearchShopHandler:
-    gateway: BookingGateway = fake
-    return SearchShopHandler(gateway)
+    return SearchShopHandler(cast(BookingGateway, fake))
 
 
 @pytest.mark.asyncio

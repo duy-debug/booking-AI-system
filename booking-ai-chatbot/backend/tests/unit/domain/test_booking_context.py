@@ -6,10 +6,24 @@ from uuid import UUID
 
 import pytest
 
-from app.domain.booking import Customer, Service, Shop
+from app.domain.booking import (
+    BookingOption,
+    CourseSelection,
+    CourseType,
+    Customer,
+    Service,
+    Shop,
+    TherapistPreference,
+    TherapistPreferenceType,
+)
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
-
+from app.domain.exceptions import (
+    InvalidBookingDataError,
+    InvalidCustomerCountError,
+    InvalidDurationError,
+    TherapistNotAllowedForGroupError,
+)
 
 SHOP = Shop(
     shop_id=UUID("11111111-1111-1111-1111-111111111111"),
@@ -23,6 +37,17 @@ SERVICE = Service(
 )
 CUSTOMER = Customer(phone="0901234567", name="Nguyen An")
 BOOKING_ID = UUID("33333333-3333-3333-3333-333333333333")
+ADDON = Service(
+    service_id=UUID("44444444-4444-4444-4444-444444444444"),
+    name="Essential oil",
+    duration_minutes=15,
+    price=Decimal("100000.00"),
+    course_type=CourseType.ADDON,
+)
+OTHER_SHOP = Shop(
+    shop_id=UUID("55555555-5555-5555-5555-555555555555"),
+    name="Riverside Spa",
+)
 
 
 def make_ready_context() -> BookingContext:
@@ -34,6 +59,11 @@ def make_ready_context() -> BookingContext:
         customer=CUSTOMER,
         booking_date=date(2026, 8, 1),
         start_time=time(10, 30),
+        num_customer=1,
+        duration_minutes=60,
+        phone="0901234567",
+        phone_confirmed=True,
+        ng_list_checked=True,
     )
 
 
@@ -52,6 +82,20 @@ def test_booking_fields_default_to_none() -> None:
     assert context.booking_date is None
     assert context.start_time is None
     assert context.booking_id is None
+    assert context.num_customer is None
+    assert context.duration_minutes is None
+    assert context.therapist_preference is None
+    assert context.therapist_verified is False
+    assert context.options == ()
+    assert context.addons == ()
+    assert context.available_slots is None
+    assert context.phone is None
+    assert context.phone_confirmed is False
+    assert context.member_rank is None
+    assert context.ng_list_checked is False
+    assert context.is_ng_customer is False
+    assert context.booking is None
+    assert context.reservation_code is None
     assert context.pending_action is None
 
 
@@ -80,6 +124,20 @@ def test_reset_clears_temporary_booking_data() -> None:
     assert context.booking_date is None
     assert context.start_time is None
     assert context.booking_id is None
+    assert context.num_customer is None
+    assert context.duration_minutes is None
+    assert context.therapist_preference is None
+    assert context.therapist_verified is False
+    assert context.options == ()
+    assert context.addons == ()
+    assert context.available_slots is None
+    assert context.phone is None
+    assert context.phone_confirmed is False
+    assert context.member_rank is None
+    assert context.ng_list_checked is False
+    assert context.is_ng_customer is False
+    assert context.booking is None
+    assert context.reservation_code is None
     assert context.pending_action is None
 
 
@@ -95,10 +153,10 @@ def test_context_data_is_mutable() -> None:
     context = BookingContext(conversation_id="conversation-1")
 
     context.shop = SHOP
-    context.state = BookingState.SELECTING_SERVICE
+    context.state = BookingState.SELECTING_DATE
 
     assert context.shop is SHOP
-    assert context.state is BookingState.SELECTING_SERVICE
+    assert context.state is BookingState.SELECTING_DATE
 
 
 def test_slots_prevent_adding_undeclared_attributes() -> None:
@@ -107,3 +165,286 @@ def test_slots_prevent_adding_undeclared_attributes() -> None:
     assert not hasattr(context, "__dict__")
     with pytest.raises(AttributeError):
         context.unexpected = "value"  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("value", [0, -1, 4])
+def test_set_num_customer_rejects_invalid_value(value: int) -> None:
+    context = BookingContext(conversation_id="conversation-1", num_customer=1)
+
+    with pytest.raises(InvalidCustomerCountError):
+        context.set_num_customer(value)
+
+    assert context.num_customer == 1
+
+
+@pytest.mark.parametrize("value", [0, -15, 20, 50])
+def test_set_duration_rejects_invalid_value(value: int) -> None:
+    context = BookingContext(conversation_id="conversation-1")
+
+    with pytest.raises(InvalidDurationError):
+        context.set_duration(value)
+
+
+def test_context_phone_confirmation_lifecycle() -> None:
+    context = BookingContext(conversation_id="conversation-1")
+
+    context.set_phone("0901234567")
+    assert context.phone == "0901234567"
+    assert context.phone_confirmed is False
+
+    context.confirm_phone()
+    assert context.phone_confirmed is True
+
+    context.clear_phone()
+    assert context.phone is None
+    assert context.phone_confirmed is False
+
+
+def test_confirm_phone_requires_phone() -> None:
+    context = BookingContext(conversation_id="conversation-1")
+
+    with pytest.raises(InvalidBookingDataError):
+        context.confirm_phone()
+
+
+def test_context_sets_immutable_options_and_invalidates_therapist() -> None:
+    context = BookingContext(conversation_id="conversation-1")
+    preference = TherapistPreference(TherapistPreferenceType.FEMALE)
+    option = BookingOption(option_id="oil", name="Essential oil")
+
+    context.set_therapist_preference(preference)
+    context.set_options((option,))
+
+    assert context.therapist_preference is None
+    assert context.options == (option,)
+    assert isinstance(context.options, tuple)
+
+
+def test_context_rejects_duplicate_options() -> None:
+    context = BookingContext(conversation_id="conversation-1")
+
+    with pytest.raises(InvalidBookingDataError):
+        context.set_options(
+            (
+                BookingOption(option_id="oil", name="Oil"),
+                BookingOption(option_id="oil", name="Duplicate"),
+            )
+        )
+
+
+@pytest.mark.parametrize("value", [1, 2, 3])
+def test_set_num_customer_accepts_supported_values(value: int) -> None:
+    context = BookingContext(conversation_id="conversation-1")
+
+    context.set_num_customer(value)
+
+    assert context.num_customer == value
+
+
+def test_changing_to_group_clears_therapist_time_and_slots() -> None:
+    for group_size in (2, 3):
+        context = make_ready_context()
+        context.therapist_preference = TherapistPreference(
+            TherapistPreferenceType.PERSONAL,
+            therapist_name="Mai",
+        )
+        context.therapist_verified = True
+        context.available_slots = (time(10, 30),)
+
+        context.set_num_customer(group_size)
+
+        assert context.num_customer == group_size
+        assert context.therapist_preference is None
+        assert context.therapist_verified is False
+        assert context.start_time is None
+        assert context.available_slots is None
+
+
+def test_group_rejects_new_therapist_preference() -> None:
+    context = BookingContext(conversation_id="conversation-1", num_customer=2)
+
+    with pytest.raises(TherapistNotAllowedForGroupError):
+        context.set_therapist_preference(
+            TherapistPreference(TherapistPreferenceType.FEMALE)
+        )
+
+
+@pytest.mark.parametrize("duration", [30, 45, 60, 75])
+def test_set_duration_accepts_supported_values(duration: int) -> None:
+    context = BookingContext(conversation_id="conversation-1")
+
+    context.set_duration(duration)
+
+    assert context.duration_minutes == duration
+
+
+def test_set_phone_resets_all_customer_verification() -> None:
+    context = make_ready_context()
+    context.member_rank = "gold"
+    context.is_ng_customer = True
+
+    context.set_phone("0912345678")
+
+    assert context.phone == "0912345678"
+    assert context.phone_confirmed is False
+    assert context.member_rank is None
+    assert context.ng_list_checked is False
+    assert context.is_ng_customer is False
+
+
+def test_set_customer_verification_stores_external_result() -> None:
+    context = BookingContext(conversation_id="conversation-1", phone="0901234567")
+
+    context.set_customer_verification(member_rank="gold", is_ng_customer=False)
+
+    assert context.member_rank == "gold"
+    assert context.ng_list_checked is True
+    assert context.is_ng_customer is False
+
+
+def test_customer_verification_requires_phone() -> None:
+    context = BookingContext(conversation_id="conversation-1")
+
+    with pytest.raises(InvalidBookingDataError):
+        context.set_customer_verification(member_rank=None, is_ng_customer=False)
+
+
+def test_changing_shop_keeps_date_and_clears_dependent_data() -> None:
+    context = make_ready_context()
+    context.addons = (ADDON,)
+    context.available_slots = (time(10, 30),)
+    context.therapist_preference = TherapistPreference(
+        TherapistPreferenceType.FEMALE
+    )
+
+    context.set_shop(OTHER_SHOP)
+
+    assert context.shop is OTHER_SHOP
+    assert context.booking_date == date(2026, 8, 1)
+    assert_course_and_availability_cleared(context)
+
+
+def test_changing_date_clears_course_and_availability() -> None:
+    context = make_ready_context()
+    context.addons = (ADDON,)
+    context.available_slots = (time(10, 30),)
+    context.therapist_preference = TherapistPreference(
+        TherapistPreferenceType.FEMALE
+    )
+
+    context.set_booking_date(date(2026, 8, 2))
+
+    assert context.booking_date == date(2026, 8, 2)
+    assert_course_and_availability_cleared(context)
+
+
+def test_changing_duration_clears_course_and_availability() -> None:
+    context = make_ready_context()
+    context.addons = (ADDON,)
+    context.available_slots = (time(10, 30),)
+    context.therapist_preference = TherapistPreference(
+        TherapistPreferenceType.FEMALE
+    )
+
+    context.set_duration(75)
+
+    assert context.duration_minutes == 75
+    assert_course_and_availability_cleared(context)
+
+
+def test_changing_course_clears_slots_time_and_therapist() -> None:
+    context = make_ready_context()
+    context.available_slots = (time(10, 30),)
+    context.therapist_preference = TherapistPreference(
+        TherapistPreferenceType.FEMALE
+    )
+
+    context.set_course_selection(CourseSelection(SERVICE, (ADDON,)))
+
+    assert context.service is SERVICE
+    assert context.addons == (ADDON,)
+    assert context.available_slots is None
+    assert context.start_time is None
+    assert context.therapist_preference is None
+    assert context.therapist_verified is False
+
+
+def test_changing_time_requires_therapist_revalidation() -> None:
+    context = make_ready_context()
+    preference = TherapistPreference(TherapistPreferenceType.FEMALE)
+    context.therapist_preference = preference
+    context.therapist_verified = True
+
+    context.set_start_time(time(11, 0))
+
+    assert context.start_time == time(11, 0)
+    assert context.therapist_preference is preference
+    assert context.therapist_verified is False
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    [
+        "shop",
+        "booking_date",
+        "num_customer",
+        "duration_minutes",
+        "service",
+        "start_time",
+        "phone",
+    ],
+)
+def test_readiness_rejects_each_missing_required_field(missing_field: str) -> None:
+    context = make_ready_context()
+    setattr(context, missing_field, None)
+
+    assert context.is_ready_to_create() is False
+
+
+def test_readiness_requires_phone_confirmation() -> None:
+    context = make_ready_context()
+    context.phone_confirmed = False
+
+    assert context.is_ready_to_create() is False
+
+
+def test_readiness_requires_ng_verification() -> None:
+    context = make_ready_context()
+    context.ng_list_checked = False
+
+    assert context.is_ready_to_create() is False
+
+
+def test_readiness_rejects_ng_customer() -> None:
+    context = make_ready_context()
+    context.is_ng_customer = True
+
+    assert context.is_ready_to_create() is False
+
+
+@pytest.mark.parametrize("group_size", [2, 3])
+def test_group_without_therapist_is_ready(group_size: int) -> None:
+    context = make_ready_context()
+    context.num_customer = group_size
+
+    assert context.is_ready_to_create() is True
+
+
+def test_group_with_therapist_is_not_ready() -> None:
+    context = make_ready_context()
+    context.num_customer = 2
+    context.therapist_preference = TherapistPreference(
+        TherapistPreferenceType.FEMALE
+    )
+
+    assert context.is_ready_to_create() is False
+
+
+def assert_course_and_availability_cleared(context: BookingContext) -> None:
+    assert context.service is None
+    assert context.addons == ()
+    assert context.options == ()
+    assert context.available_slots is None
+    assert context.start_time is None
+    assert context.therapist_preference is None
+    assert context.therapist_verified is False

@@ -2,6 +2,7 @@
 
 from datetime import date, time
 from decimal import Decimal
+from typing import cast
 from uuid import UUID
 
 import pytest
@@ -112,8 +113,7 @@ def make_context() -> BookingContext:
 
 
 def make_handler(fake: FakeBookingGateway) -> CancelBookingHandler:
-    gateway: BookingGateway = fake
-    return CancelBookingHandler(gateway)
+    return CancelBookingHandler(cast(BookingGateway, fake))
 
 
 def context_values(context: BookingContext) -> tuple[object, ...]:

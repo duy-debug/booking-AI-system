@@ -1,6 +1,7 @@
-"""Tests for the availability check application handler."""
+"""Tests for mapping a booking context to an availability request."""
 
 from datetime import date, time
+from decimal import Decimal
 from uuid import UUID
 
 import pytest
@@ -8,30 +9,62 @@ import pytest
 from app.application.handlers.check_availability_handler import (
     CheckAvailabilityHandler,
 )
-from app.application.ports.booking_gateway import BookingGateway
-from app.domain.booking import Booking, Customer, Service, Shop
-from app.domain.exceptions import InvalidBookingDataError
+from app.application.ports.booking_gateway import (
+    AvailabilityRequest,
+    BookingGateway,
+    CreateBookingRequest,
+    CreateBookingResult,
+    CustomerVerificationResult,
+    FinalAvailabilityRequest,
+    FinalAvailabilityResult,
+)
+from app.domain.booking import (
+    Booking,
+    CourseType,
+    Service,
+    Shop,
+    TherapistPreference,
+    TherapistPreferenceType,
+)
+from app.domain.booking_context import BookingContext
+from app.domain.booking_state import BookingState
+from app.domain.exceptions import (
+    BookingContextNotReadyError,
+    InvalidBookingDataError,
+    InvalidCourseSelectionError,
+    TherapistNotAllowedForGroupError,
+)
 
 SHOP_ID = UUID("11111111-1111-1111-1111-111111111111")
-SERVICE_ID = UUID("22222222-2222-2222-2222-222222222222")
+MAIN_ID = UUID("22222222-2222-2222-2222-222222222222")
+ADDON_ID = UUID("33333333-3333-3333-3333-333333333333")
 BOOKING_DATE = date(2026, 8, 1)
-AVAILABLE_TIME = time(10, 30)
+MAIN = Service(MAIN_ID, "Aromatherapy", 60, Decimal("500000.00"))
+ADDON = Service(
+    ADDON_ID,
+    "Essential oil",
+    15,
+    Decimal("100000.00"),
+    CourseType.ADDON,
+)
+SHOP = Shop(SHOP_ID, "Central Spa")
+SLOTS = (time(10, 30), time(11, 0))
 
 
 class FakeBookingGateway:
-    """Booking gateway fake that records availability checks."""
+    """Fake that records the exact availability request."""
 
     def __init__(
         self,
-        available_times: list[time],
-        error: InvalidBookingDataError | None = None,
+        slots: tuple[time, ...] = SLOTS,
+        error: Exception | None = None,
     ) -> None:
-        self.available_times = available_times
+        self.slots = slots
         self.error = error
-        self.check_availability_call_count = 0
-        self.received_shop_id: UUID | None = None
-        self.received_service_id: UUID | None = None
-        self.received_booking_date: date | None = None
+        self.availability_requests: list[AvailabilityRequest] = []
+        self.customer_verification_requests: list[str] = []
+        self.final_availability_requests: list[FinalAvailabilityRequest] = []
+        self.create_booking_requests: list[CreateBookingRequest] = []
 
     async def search_shops(self, query: str | None = None) -> list[Shop]:
         raise AssertionError("Unexpected search_shops call.")
@@ -39,32 +72,33 @@ class FakeBookingGateway:
     async def search_services(
         self,
         shop_id: UUID,
+        booking_date: date,
         query: str | None = None,
     ) -> list[Service]:
         raise AssertionError("Unexpected search_services call.")
 
-    async def check_availability(
+    async def get_available_slots(
         self,
-        shop_id: UUID,
-        service_id: UUID,
-        booking_date: date,
-    ) -> list[time]:
-        self.check_availability_call_count += 1
-        self.received_shop_id = shop_id
-        self.received_service_id = service_id
-        self.received_booking_date = booking_date
+        request: AvailabilityRequest,
+    ) -> tuple[time, ...]:
+        self.availability_requests.append(request)
         if self.error is not None:
             raise self.error
-        return self.available_times
+        return self.slots
+
+    async def verify_customer(self, phone: str) -> CustomerVerificationResult:
+        raise AssertionError("Unexpected verify_customer call.")
+
+    async def check_final_availability(
+        self,
+        request: FinalAvailabilityRequest,
+    ) -> FinalAvailabilityResult:
+        raise AssertionError("Unexpected final availability call.")
 
     async def create_booking(
         self,
-        shop_id: UUID,
-        service_id: UUID,
-        customer: Customer,
-        booking_date: date,
-        start_time: time,
-    ) -> Booking:
+        request: CreateBookingRequest,
+    ) -> CreateBookingResult:
         raise AssertionError("Unexpected create_booking call.")
 
     async def lookup_booking(self, booking_id: UUID) -> Booking:
@@ -82,56 +116,120 @@ class FakeBookingGateway:
         raise AssertionError("Unexpected cancel_booking call.")
 
 
+def make_context(
+    *,
+    num_customer: int = 1,
+    therapist: TherapistPreference | None = None,
+) -> BookingContext:
+    return BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.SELECTING_TIME,
+        shop=SHOP,
+        service=MAIN,
+        addons=(ADDON,),
+        booking_date=BOOKING_DATE,
+        num_customer=num_customer,
+        duration_minutes=75,
+        therapist_preference=therapist,
+    )
+
+
 def make_handler(fake: FakeBookingGateway) -> CheckAvailabilityHandler:
     gateway: BookingGateway = fake
     return CheckAvailabilityHandler(gateway)
 
 
 @pytest.mark.asyncio
-async def test_execute_calls_gateway_once_with_expected_arguments() -> None:
-    available_times = [AVAILABLE_TIME]
-    fake = FakeBookingGateway(available_times)
+async def test_execute_maps_complete_request_and_updates_slots_only() -> None:
+    preference = TherapistPreference(TherapistPreferenceType.FEMALE)
+    context = make_context(therapist=preference)
+    original_state = context.state
+    fake = FakeBookingGateway()
 
-    result = await make_handler(fake).execute(
-        SHOP_ID,
-        SERVICE_ID,
-        BOOKING_DATE,
-    )
+    result = await make_handler(fake).execute(context)
 
-    assert fake.check_availability_call_count == 1
-    assert fake.received_shop_id == SHOP_ID
-    assert fake.received_service_id == SERVICE_ID
-    assert fake.received_booking_date == BOOKING_DATE
-    assert result is available_times
-    assert result[0] is AVAILABLE_TIME
+    assert fake.availability_requests == [
+        AvailabilityRequest(
+            shop_id=SHOP_ID,
+            booking_date=BOOKING_DATE,
+            num_customer=1,
+            duration_minutes=75,
+            main_course_id=MAIN_ID,
+            addon_ids=(ADDON_ID,),
+            therapist_preference=preference,
+        )
+    ]
+    assert result is SLOTS
+    assert context.available_slots is SLOTS
+    assert context.start_time is None
+    assert context.state is original_state
+
+
+@pytest.mark.parametrize("group_size", [2, 3])
+@pytest.mark.asyncio
+async def test_group_request_has_no_specified_therapist(group_size: int) -> None:
+    context = make_context(num_customer=group_size)
+    fake = FakeBookingGateway()
+
+    await make_handler(fake).execute(context)
+
+    assert fake.availability_requests[0].therapist_preference is None
 
 
 @pytest.mark.asyncio
-async def test_execute_returns_same_empty_list_from_gateway() -> None:
-    available_times: list[time] = []
-    fake = FakeBookingGateway(available_times)
-
-    result = await make_handler(fake).execute(
-        SHOP_ID,
-        SERVICE_ID,
-        BOOKING_DATE,
+async def test_group_with_specified_therapist_is_rejected_before_gateway() -> None:
+    context = make_context(
+        num_customer=2,
+        therapist=TherapistPreference(TherapistPreferenceType.FEMALE),
     )
+    fake = FakeBookingGateway()
 
-    assert result is available_times
-    assert result == []
+    with pytest.raises(TherapistNotAllowedForGroupError):
+        await make_handler(fake).execute(context)
+
+    assert fake.availability_requests == []
+
+
+@pytest.mark.parametrize("missing_field", ["booking_date", "service"])
+@pytest.mark.asyncio
+async def test_missing_context_data_is_rejected_before_gateway(
+    missing_field: str,
+) -> None:
+    context = make_context()
+    setattr(context, missing_field, None)
+    fake = FakeBookingGateway()
+
+    with pytest.raises(BookingContextNotReadyError):
+        await make_handler(fake).execute(context)
+
+    assert fake.availability_requests == []
 
 
 @pytest.mark.asyncio
-async def test_execute_propagates_domain_exception() -> None:
-    error = InvalidBookingDataError("Invalid availability request.")
-    fake = FakeBookingGateway([], error=error)
+async def test_addon_cannot_be_used_as_main_course() -> None:
+    context = make_context()
+    context.service = ADDON
+    context.addons = ()
+    fake = FakeBookingGateway()
+
+    with pytest.raises(InvalidCourseSelectionError):
+        await make_handler(fake).execute(context)
+
+    assert fake.availability_requests == []
+
+
+@pytest.mark.asyncio
+async def test_gateway_error_does_not_mutate_existing_slots_or_state() -> None:
+    error = InvalidBookingDataError("POS unavailable.")
+    context = make_context()
+    old_slots = (time(9, 0),)
+    context.available_slots = old_slots
+    original_state = context.state
+    fake = FakeBookingGateway(error=error)
 
     with pytest.raises(InvalidBookingDataError) as exc_info:
-        await make_handler(fake).execute(
-            SHOP_ID,
-            SERVICE_ID,
-            BOOKING_DATE,
-        )
+        await make_handler(fake).execute(context)
 
     assert exc_info.value is error
-    assert fake.check_availability_call_count == 1
+    assert context.available_slots is old_slots
+    assert context.state is original_state

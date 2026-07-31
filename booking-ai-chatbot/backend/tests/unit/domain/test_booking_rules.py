@@ -7,10 +7,25 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.domain.booking import Customer, Service, Shop
+from app.domain.booking import (
+    Customer,
+    Service,
+    Shop,
+    TherapistPreference,
+    TherapistPreferenceType,
+)
 from app.domain.booking_context import BookingContext
 from app.domain.booking_rules import BookingRules
-from app.domain.exceptions import InvalidBookingDataError
+from app.domain.exceptions import (
+    BookingContextNotReadyError,
+    CustomerNotAllowedError,
+    CustomerVerificationRequiredError,
+    InvalidBookingDataError,
+    InvalidCustomerCountError,
+    InvalidDurationError,
+    PhoneNotConfirmedError,
+    TherapistNotAllowedForGroupError,
+)
 
 VIETNAM_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 FIXED_NOW = datetime(2026, 8, 1, 10, 0, tzinfo=VIETNAM_TIMEZONE)
@@ -35,6 +50,11 @@ def make_valid_context() -> BookingContext:
         customer=CUSTOMER,
         booking_date=date(2099, 1, 1),
         start_time=time(10, 30),
+        num_customer=1,
+        duration_minutes=60,
+        phone=CUSTOMER.phone,
+        phone_confirmed=True,
+        ng_list_checked=True,
     )
 
 
@@ -65,15 +85,16 @@ def test_validate_phone_rejects_invalid_values(phone: str) -> None:
         BookingRules.validate_phone(phone)
 
 
-def test_validate_service_duration_accepts_positive_value() -> None:
-    BookingRules.validate_service_duration(1)
+@pytest.mark.parametrize("duration_minutes", [30, 45, 60, 75, 90, 120])
+def test_validate_service_duration_accepts_valid_value(duration_minutes: int) -> None:
+    BookingRules.validate_service_duration(duration_minutes)
 
 
-@pytest.mark.parametrize("duration_minutes", [0, -1, -60])
-def test_validate_service_duration_rejects_non_positive_values(
+@pytest.mark.parametrize("duration_minutes", [0, -15, 20, 50])
+def test_validate_service_duration_rejects_invalid_values(
     duration_minutes: int,
 ) -> None:
-    with pytest.raises(InvalidBookingDataError):
+    with pytest.raises(InvalidDurationError):
         BookingRules.validate_service_duration(duration_minutes)
 
 
@@ -118,7 +139,7 @@ def test_validate_create_context_accepts_complete_valid_context() -> None:
 
 @pytest.mark.parametrize(
     "missing_field",
-    ["shop", "service", "customer", "booking_date", "start_time"],
+    ["shop", "customer", "booking_date", "start_time"],
 )
 def test_validate_create_context_rejects_missing_required_data(
     missing_field: str,
@@ -126,7 +147,61 @@ def test_validate_create_context_rejects_missing_required_data(
     context = make_valid_context()
     setattr(context, missing_field, None)
 
-    with pytest.raises(InvalidBookingDataError):
+    with pytest.raises(BookingContextNotReadyError):
+        BookingRules.validate_create_context(context)
+
+
+def test_validate_create_context_requires_main_course() -> None:
+    context = make_valid_context()
+    context.service = None
+
+    with pytest.raises(BookingContextNotReadyError):
+        BookingRules.validate_create_context(context)
+
+
+@pytest.mark.parametrize("num_customer", [0, -1, 4])
+def test_validate_create_context_rejects_customer_count(
+    num_customer: int,
+) -> None:
+    context = make_valid_context()
+    context.num_customer = num_customer
+
+    with pytest.raises(InvalidCustomerCountError):
+        BookingRules.validate_create_context(context)
+
+
+def test_validate_create_context_requires_confirmed_phone() -> None:
+    context = make_valid_context()
+    context.phone_confirmed = False
+
+    with pytest.raises(PhoneNotConfirmedError):
+        BookingRules.validate_create_context(context)
+
+
+def test_validate_create_context_requires_customer_verification() -> None:
+    context = make_valid_context()
+    context.ng_list_checked = False
+
+    with pytest.raises(CustomerVerificationRequiredError):
+        BookingRules.validate_create_context(context)
+
+
+def test_validate_create_context_rejects_ng_customer() -> None:
+    context = make_valid_context()
+    context.is_ng_customer = True
+
+    with pytest.raises(CustomerNotAllowedError):
+        BookingRules.validate_create_context(context)
+
+
+def test_validate_create_context_rejects_group_therapist() -> None:
+    context = make_valid_context()
+    context.num_customer = 2
+    context.therapist_preference = TherapistPreference(
+        TherapistPreferenceType.FEMALE
+    )
+
+    with pytest.raises(TherapistNotAllowedForGroupError):
         BookingRules.validate_create_context(context)
 
 
@@ -140,6 +215,12 @@ def test_validate_create_context_does_not_mutate_context() -> None:
         context.customer,
         context.booking_date,
         context.start_time,
+        context.num_customer,
+        context.duration_minutes,
+        context.phone,
+        context.phone_confirmed,
+        context.ng_list_checked,
+        context.is_ng_customer,
         context.booking_id,
         context.pending_action,
     )
@@ -154,6 +235,12 @@ def test_validate_create_context_does_not_mutate_context() -> None:
         context.customer,
         context.booking_date,
         context.start_time,
+        context.num_customer,
+        context.duration_minutes,
+        context.phone,
+        context.phone_confirmed,
+        context.ng_list_checked,
+        context.is_ng_customer,
         context.booking_id,
         context.pending_action,
     ) == original_values
