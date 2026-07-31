@@ -5,6 +5,12 @@ from typing import cast
 
 import pytest
 
+from app.application.handlers.check_availability_handler import (
+    CheckAvailabilityHandler,
+)
+from app.application.handlers.collect_customer_handler import CollectCustomerHandler
+from app.application.handlers.confirm_phone_handler import ConfirmPhoneHandler
+from app.application.handlers.create_booking_handler import CreateBookingHandler
 from app.dialog.flow_loader import (
     FlowDefinition,
     FlowFailure,
@@ -12,6 +18,7 @@ from app.dialog.flow_loader import (
     FlowTransition,
 )
 from app.dialog.state_machine import StateMachine
+from app.dialog.tool_bridge import ToolBridge
 from app.domain.booking import Booking
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
@@ -469,3 +476,26 @@ def test_removed_option_actions_are_not_used(flow: FlowDefinition) -> None:
             "ask_options",
         }
     )
+
+
+def test_tool_bridge_audits_declared_actions_without_reading_json(
+    flow: FlowDefinition,
+) -> None:
+    bridge = ToolBridge(
+        check_availability_handler=cast(CheckAvailabilityHandler, object()),
+        collect_customer_handler=cast(CollectCustomerHandler, object()),
+        confirm_phone_handler=cast(ConfirmPhoneHandler, object()),
+        create_booking_handler=cast(CreateBookingHandler, object()),
+    )
+    declared_actions = _all_declared_actions(flow)
+    unregistered = bridge.find_unregistered_actions(declared_actions)
+
+    assert len(set(declared_actions)) == 37
+    assert {
+        "load_time_slots",
+        "handle_phone_collection",
+        "mark_phone_confirmed",
+        "create_booking",
+    }.isdisjoint(unregistered)
+    assert "run_final_check" in unregistered
+    assert "complete_booking" in unregistered
