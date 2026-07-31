@@ -14,7 +14,6 @@ class BookingState(StrEnum):
     SELECTING_SERVICE = "selecting_service"
     SELECTING_TIME = "selecting_time"
     SELECTING_THERAPIST = "selecting_therapist"
-    SELECTING_OPTIONS = "selecting_options"
     COLLECTING_PHONE = "collecting_phone"
     VERIFYING_PHONE = "verifying_phone"
     AWAITING_CONFIRMATION = "awaiting_confirmation"

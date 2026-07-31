@@ -193,18 +193,30 @@
           "on_fail": {
             "condition": "duration_not_multiple_15",
             "target": "selecting_duration",
-            "actions": ["duration_invalid"]
+            "instruction_template": "duration_invalid"
           }
         },
         {
           "intent": "select_course",
           "target": "selecting_service",
           "actions": ["handle_service_selection", "infer_duration_from_service"],
-          "on_fail": {
-            "condition": "service_not_found",
-            "target": "selecting_duration",
-            "actions": ["ask_service"]
-          }
+          "on_fail": [
+            {
+              "condition": "duration_not_multiple_15",
+              "target": "selecting_duration",
+              "instruction_template": "duration_invalid"
+            },
+            {
+              "condition": "course_not_found",
+              "target": "selecting_duration",
+              "instruction_template": "ask_service"
+            },
+            {
+              "condition": "addon_without_main_course",
+              "target": "selecting_duration",
+              "instruction_template": "addon_needs_main"
+            }
+          ]
         },
         {
           "intent": "deny",
@@ -250,19 +262,42 @@
           "actions": ["handle_service_selection", "load_time_slots"],
           "on_fail": [
             {
-              "condition": "service_not_found",
+              "condition": "course_not_found",
               "target": "selecting_service",
-              "actions": ["ask_service"]
+              "instruction_template": "ask_service"
+            },
+            {
+              "condition": "main_course_missing",
+              "target": "selecting_service",
+              "instruction_template": "main_course_required"
+            },
+            {
+              "condition": "addon_without_main_course",
+              "target": "selecting_service",
+              "instruction_template": "addon_needs_main"
+            },
+            {
+              "condition": "combo_not_bookable",
+              "target": "selecting_service",
+              "actions": ["clear_course_for_reselect"],
+              "instruction_template": "combo_not_bookable_retry"
             },
             {
               "condition": "service_duration_mismatch",
               "target": "selecting_duration",
-              "actions": ["duration_invalid"]
+              "actions": ["clear_course_for_reselect"],
+              "instruction_template": "duration_invalid"
             },
             {
               "condition": "no_slots_available",
               "target": "selecting_date",
-              "actions": ["clear_date", "no_slots_available"]
+              "actions": ["clear_date"],
+              "instruction_template": "no_slots_available"
+            },
+            {
+              "condition": "slot_api_error",
+              "target": "selecting_service",
+              "instruction_template": "slot_api_error"
             }
           ]
         },
@@ -317,12 +352,13 @@
             {
               "condition": "slot_unavailable",
               "target": "selecting_time",
-              "actions": ["suggest_nearest_time", "slot_unavailable"]
+              "actions": ["suggest_nearest_time"],
+              "instruction_template": "slot_unavailable"
             },
             {
               "condition": "slot_api_error",
               "target": "selecting_time",
-              "actions": ["slot_api_error"]
+              "instruction_template": "slot_api_error"
             }
           ]
         },
@@ -376,7 +412,7 @@
       "transitions": [
         {
           "intent": "select_therapist",
-          "target": "selecting_options",
+          "target": "collecting_phone",
           "conditions": [
             {
               "field": "num_customer",
@@ -389,24 +425,24 @@
             {
               "condition": "therapist_unavailable",
               "target": "selecting_therapist",
-              "actions": ["therapist_unavailable"]
+              "instruction_template": "therapist_unavailable"
             },
             {
               "condition": "therapist_not_found",
               "target": "selecting_therapist",
-              "actions": ["ask_therapist"]
+              "instruction_template": "ask_therapist"
             }
           ]
         },
         {
           "intent": "deny",
-          "target": "selecting_options",
+          "target": "collecting_phone",
           "actions": ["skip_therapist"]
         },
         {
           "intent": "select_time",
           "target": "selecting_time",
-          "actions": []
+          "actions": ["handle_time_selection"]
         },
         {
           "intent": "change_info",
@@ -440,57 +476,9 @@
           "op": "gte",
           "value": 2
         },
-        "target": "selecting_options",
+        "target": "collecting_phone",
         "actions": ["skip_therapist_for_group"]
       }
-    },
-    "selecting_options": {
-      "description": "Waiting for optional booking options.",
-      "on_enter": {
-        "instruction_template": "ask_options"
-      },
-      "transitions": [
-        {
-          "intent": "select_options",
-          "target": "collecting_phone",
-          "actions": ["handle_options_selection"]
-        },
-        {
-          "intent": "confirm",
-          "target": "collecting_phone",
-          "actions": ["keep_current_options"]
-        },
-        {
-          "intent": "deny",
-          "target": "collecting_phone",
-          "actions": ["skip_options"]
-        },
-        {
-          "intent": "change_info",
-          "target": "selecting_options",
-          "actions": ["defer_change_info"]
-        },
-        {
-          "intent": "ask_question",
-          "target": "selecting_options",
-          "actions": ["answer_question"]
-        },
-        {
-          "intent": "unknown",
-          "target": "selecting_options",
-          "actions": ["ask_to_clarify"]
-        },
-        {
-          "intent": "cancel_flow",
-          "target": "cancelled",
-          "actions": []
-        },
-        {
-          "intent": "*",
-          "target": "selecting_options",
-          "actions": ["log_unhandled", "ask_to_clarify"]
-        }
-      ]
     },
     "collecting_phone": {
       "description": "Waiting for a customer phone number.",
@@ -505,7 +493,7 @@
           "on_fail": {
             "condition": "invalid_phone",
             "target": "collecting_phone",
-            "actions": ["phone_invalid"]
+            "instruction_template": "phone_invalid"
           }
         },
         {
@@ -548,11 +536,6 @@
       "transitions": [
         {
           "intent": "confirm",
-          "target": "awaiting_confirmation",
-          "actions": ["mark_phone_confirmed"]
-        },
-        {
-          "intent": "phone_verified",
           "target": "awaiting_confirmation",
           "actions": ["mark_phone_confirmed"]
         },
@@ -709,6 +692,11 @@
           "intent": "deny",
           "target": "cancelled",
           "actions": []
+        },
+        {
+          "intent": "ask_question",
+          "target": "booking_failed",
+          "actions": ["answer_question"]
         },
         {
           "intent": "unknown",

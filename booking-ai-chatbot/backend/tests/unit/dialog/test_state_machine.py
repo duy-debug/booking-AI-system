@@ -1,4 +1,8 @@
-"""Tests for resolving parsed declarative transitions."""
+"""Tests for conditional declarative transition resolution."""
+
+from datetime import time
+from decimal import Decimal
+from uuid import UUID
 
 import pytest
 
@@ -11,133 +15,546 @@ from app.dialog.flow_loader import (
     FlowTransition,
     PhoneSplitConfig,
 )
-from app.dialog.state_machine import StateMachine
+from app.dialog.state_machine import InvalidFlowConditionError, StateMachine
+from app.domain.booking import (
+    Service,
+    Shop,
+    TherapistPreference,
+    TherapistPreferenceType,
+)
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.domain.exceptions import InvalidBookingStateError
 
+SHOP = Shop(UUID("11111111-1111-1111-1111-111111111111"), "Central Spa")
+SERVICE = Service(
+    UUID("22222222-2222-2222-2222-222222222222"),
+    "Aromatherapy",
+    60,
+    Decimal("500000.00"),
+)
 
-def _flow() -> FlowDefinition:
-    exact_first = FlowTransition(
-        "select_store",
-        BookingState.SELECTING_DATE,
-        ("handle_store_selection",),
-        (FlowCondition(field="shop", op="not_null"),),
-    )
-    exact_second = FlowTransition(
-        "select_store",
-        BookingState.CANCELLED,
-        ("must_not_run",),
-    )
-    wildcard = FlowTransition("*", BookingState.SELECTING_SHOP, ("clarify",))
-    auto = FlowAutoTransition(
-        condition=FlowCondition(field="num_customer", op="gte", value=2),
-        target=BookingState.SELECTING_OPTIONS,
-        actions=("skip_therapist_for_group",),
-    )
+
+def make_context(
+    *,
+    state: BookingState = BookingState.IDLE,
+    **values: object,
+) -> BookingContext:
+    context = BookingContext(conversation_id="conversation-1", state=state)
+    for field, value in values.items():
+        setattr(context, field, value)
+    return context
+
+
+def make_flow(
+    *,
+    transitions: tuple[FlowTransition, ...] = (),
+    auto_transitions: tuple[FlowAutoTransition, ...] = (),
+    state: BookingState = BookingState.IDLE,
+    terminal: bool = False,
+) -> FlowDefinition:
     return FlowDefinition(
         version="2.0",
         name="test",
         description=None,
-        initial_state=BookingState.SELECTING_SHOP,
+        initial_state=state,
         states={
-            BookingState.SELECTING_SHOP: FlowState(
+            state: FlowState(
                 description=None,
-                on_enter=FlowOnEnter("ask_shop"),
-                transitions=(exact_first, exact_second, wildcard),
-            ),
-            BookingState.SELECTING_THERAPIST: FlowState(
-                description=None,
-                on_enter=FlowOnEnter("ask_therapist"),
-                transitions=(),
-                auto_transitions=(auto,),
+                on_enter=FlowOnEnter("instruction"),
+                transitions=transitions,
+                auto_transitions=auto_transitions,
                 phone_split_mode=PhoneSplitConfig(3, 3, 5000),
-            ),
-            BookingState.SELECTING_DATE: FlowState(
-                description=None,
-                on_enter=FlowOnEnter(),
-                transitions=(),
-            ),
+                terminal=terminal,
+            )
         },
     )
 
 
-def test_resolve_transition_returns_first_exact_match_without_evaluating_condition() -> None:
-    transition = StateMachine(_flow()).resolve_transition(
-        BookingState.SELECTING_SHOP,
-        "select_store",
+def machine_for_condition(condition: FlowCondition) -> StateMachine:
+    transition = FlowTransition(
+        "event",
+        BookingState.COMPLETED,
+        conditions=(condition,),
+    )
+    return StateMachine(make_flow(transitions=(transition,)))
+
+
+def evaluate(condition: FlowCondition, context: BookingContext) -> bool:
+    return machine_for_condition(condition)._evaluate_condition(condition, context)
+
+
+def test_resolve_field_supports_direct_and_nested_paths() -> None:
+    context = make_context(shop=SHOP, service=SERVICE)
+    machine = StateMachine(make_flow())
+
+    assert machine._resolve_field(context, "shop") is SHOP
+    assert machine._resolve_field(context, "shop.shop_id") == SHOP.shop_id
+    assert machine._resolve_field(context, "service.service_id") == SERVICE.service_id
+
+
+def test_resolve_field_returns_none_for_missing_or_none_intermediate() -> None:
+    context = make_context(shop=None)
+    machine = StateMachine(make_flow())
+
+    assert machine._resolve_field(context, "missing") is None
+    assert machine._resolve_field(context, "shop.shop_id") is None
+
+
+@pytest.mark.parametrize("field_path", ["", "shop..shop_id", "_private", "shop._id"])
+def test_resolve_field_rejects_invalid_or_private_paths(field_path: str) -> None:
+    with pytest.raises(InvalidFlowConditionError):
+        StateMachine(make_flow())._resolve_field(make_context(), field_path)
+
+
+@pytest.mark.parametrize(
+    ("condition", "context"),
+    [
+        (FlowCondition("pending_action", "eq", "change"), make_context(pending_action="change")),
+        (FlowCondition("num_customer", "eq", 2), make_context(num_customer=2)),
+        (FlowCondition("phone_confirmed", "eq", True), make_context(phone_confirmed=True)),
+        (
+            FlowCondition(
+                "therapist_preference.preference_type",
+                "eq",
+                "female",
+            ),
+            make_context(
+                therapist_preference=TherapistPreference(
+                    TherapistPreferenceType.FEMALE
+                )
+            ),
+        ),
+    ],
+)
+def test_eq_matches_strings_integers_booleans_and_enum_values(
+    condition: FlowCondition,
+    context: BookingContext,
+) -> None:
+    assert evaluate(condition, context) is True
+
+
+def test_eq_returns_false_for_mismatch_and_missing_field() -> None:
+    context = make_context(num_customer=1)
+
+    assert evaluate(FlowCondition("num_customer", "eq", 2), context) is False
+    assert evaluate(FlowCondition("missing", "eq", None), context) is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("phone_confirmed", False),
+        ("num_customer", 0),
+        ("pending_action", ""),
+        ("available_slots", ()),
+    ],
+)
+def test_not_null_does_not_use_truthiness(field: str, value: object) -> None:
+    context = make_context()
+    setattr(context, field, value)
+
+    assert evaluate(FlowCondition(field, "not_null"), context) is True
+    assert evaluate(FlowCondition(field, "null"), context) is False
+
+
+def test_null_and_not_null_handle_none() -> None:
+    context = make_context(phone=None)
+
+    assert evaluate(FlowCondition("phone", "null"), context) is True
+    assert evaluate(FlowCondition("phone", "not_null"), context) is False
+    assert evaluate(FlowCondition("missing", "null"), context) is True
+
+
+@pytest.mark.parametrize(
+    ("condition", "context", "expected"),
+    [
+        (FlowCondition("num_customer", "gte", 2), make_context(num_customer=3), True),
+        (FlowCondition("num_customer", "gte", 2), make_context(num_customer=2), True),
+        (FlowCondition("num_customer", "gte", 2), make_context(num_customer=1), False),
+        (FlowCondition("num_customer", "lte", 2), make_context(num_customer=1), True),
+        (FlowCondition("num_customer", "lte", 2), make_context(num_customer=2), True),
+        (FlowCondition("num_customer", "lte", 2), make_context(num_customer=3), False),
+        (FlowCondition("num_customer", "gte", 2), make_context(num_customer=None), False),
+        (
+            FlowCondition("pending_action", "gte", 2),
+            make_context(pending_action="invalid"),
+            False,
+        ),
+    ],
+)
+def test_ordering_operators_are_safe(
+    condition: FlowCondition,
+    context: BookingContext,
+    expected: bool,
+) -> None:
+    assert evaluate(condition, context) is expected
+
+
+def test_in_supports_value_collection_and_enum_normalization() -> None:
+    context = make_context(
+        state=BookingState.SELECTING_SHOP,
+        therapist_preference=TherapistPreference(TherapistPreferenceType.NONE),
     )
 
-    assert transition.target is BookingState.SELECTING_DATE
-    assert transition.conditions[0].op == "not_null"
-
-
-def test_resolve_transition_uses_wildcard() -> None:
-    transition = StateMachine(_flow()).resolve_transition(
-        BookingState.SELECTING_SHOP,
-        "unknown",
+    assert evaluate(
+        FlowCondition("state", "in", ("idle", "selecting_shop")),
+        context,
+    )
+    assert evaluate(
+        FlowCondition(
+            "therapist_preference.preference_type",
+            "in",
+            ["none", "female"],
+        ),
+        context,
+    )
+    assert not evaluate(
+        FlowCondition("state", "in", ("completed",)),
+        context,
     )
 
-    assert transition.intent == "*"
-    assert transition.target is BookingState.SELECTING_SHOP
+
+def test_in_supports_reference_collection() -> None:
+    selected = time(10, 30)
+    context = make_context(start_time=selected, available_slots=(selected, time(11, 0)))
+
+    assert evaluate(
+        FlowCondition("start_time", "in", ref="available_slots"),
+        context,
+    )
+
+
+@pytest.mark.parametrize(
+    ("ref", "value"),
+    [
+        ("missing", None),
+        ("available_slots", None),
+        ("pending_action", "not-a-collection"),
+    ],
+)
+def test_in_returns_false_for_invalid_runtime_reference(
+    ref: str,
+    value: object,
+) -> None:
+    context = make_context()
+    if ref != "missing":
+        setattr(context, ref, value)
+
+    assert evaluate(FlowCondition("start_time", "in", ref=ref), context) is False
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        FlowCondition("start_time", "in"),
+        FlowCondition("start_time", "in", (time(10, 30),), "available_slots"),
+    ],
+)
+def test_in_requires_exactly_one_collection_source(
+    condition: FlowCondition,
+) -> None:
+    with pytest.raises(InvalidFlowConditionError):
+        evaluate(condition, make_context(start_time=time(10, 30)))
+
+
+def test_nested_and_or_conditions() -> None:
+    has_group = FlowCondition("num_customer", "gte", 2)
+    phone_confirmed = FlowCondition("phone_confirmed", "eq", True)
+    is_allowed = FlowCondition("is_ng_customer", "eq", False)
+    context = make_context(
+        num_customer=2,
+        phone_confirmed=False,
+        is_ng_customer=False,
+    )
+
+    assert evaluate(
+        FlowCondition(
+            op="and",
+            conditions=(
+                has_group,
+                FlowCondition(
+                    op="or",
+                    conditions=(phone_confirmed, is_allowed),
+                ),
+            ),
+        ),
+        context,
+    )
+    assert not evaluate(
+        FlowCondition(
+            op="or",
+            conditions=(
+                FlowCondition(
+                    op="and",
+                    conditions=(has_group, phone_confirmed),
+                ),
+                FlowCondition("is_ng_customer", "eq", True),
+            ),
+        ),
+        context,
+    )
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        FlowCondition(op="and"),
+        FlowCondition(op="or"),
+        FlowCondition(field="phone", op="and", conditions=(FlowCondition("phone", "null"),)),
+        FlowCondition(field=None, op="eq", value=True),
+        FlowCondition(field="phone", op="unsupported"),
+    ],
+)
+def test_invalid_condition_configuration_is_rejected(
+    condition: FlowCondition,
+) -> None:
+    with pytest.raises(InvalidFlowConditionError):
+        evaluate(condition, make_context())
+
+
+def duplicate_intent_flow() -> FlowDefinition:
+    transitions = (
+        FlowTransition(
+            "deny",
+            BookingState.SELECTING_THERAPIST,
+            conditions=(FlowCondition("pending_action", "eq", "therapist"),),
+        ),
+        FlowTransition(
+            "deny",
+            BookingState.SELECTING_TIME,
+            conditions=(FlowCondition("pending_action", "eq", "time"),),
+        ),
+        FlowTransition("deny", BookingState.CANCELLED),
+        FlowTransition("*", BookingState.IDLE),
+    )
+    return make_flow(transitions=transitions)
+
+
+@pytest.mark.parametrize(
+    ("pending_action", "target"),
+    [
+        ("therapist", BookingState.SELECTING_THERAPIST),
+        ("time", BookingState.SELECTING_TIME),
+        ("other", BookingState.CANCELLED),
+    ],
+)
+def test_duplicate_intent_prefers_matching_condition_then_unconditional(
+    pending_action: str,
+    target: BookingState,
+) -> None:
+    context = make_context(pending_action=pending_action)
+
+    transition = StateMachine(duplicate_intent_flow()).resolve_transition(
+        context,
+        "deny",
+    )
+
+    assert transition.target is target
+
+
+def test_top_level_conditions_use_and_semantics() -> None:
+    conditional = FlowTransition(
+        "confirm",
+        BookingState.COMPLETED,
+        conditions=(
+            FlowCondition("phone_confirmed", "eq", True),
+            FlowCondition("ng_list_checked", "eq", True),
+        ),
+    )
+    fallback = FlowTransition("confirm", BookingState.CANCELLED)
+    machine = StateMachine(make_flow(transitions=(conditional, fallback)))
+
+    assert (
+        machine.resolve_transition(
+            make_context(phone_confirmed=True, ng_list_checked=False),
+            "confirm",
+        ).target
+        is BookingState.CANCELLED
+    )
+
+
+def test_exact_and_wildcard_resolution_order() -> None:
+    transitions = (
+        FlowTransition(
+            "confirm",
+            BookingState.COMPLETED,
+            conditions=(FlowCondition("phone_confirmed", "eq", True),),
+        ),
+        FlowTransition(
+            "*",
+            BookingState.SELECTING_TIME,
+            conditions=(FlowCondition("pending_action", "eq", "recover"),),
+        ),
+        FlowTransition("*", BookingState.IDLE),
+    )
+    machine = StateMachine(make_flow(transitions=transitions))
+
+    assert (
+        machine.resolve_transition(
+            make_context(phone_confirmed=True),
+            "confirm",
+        ).target
+        is BookingState.COMPLETED
+    )
+    assert (
+        machine.resolve_transition(
+            make_context(phone_confirmed=False, pending_action="recover"),
+            "confirm",
+        ).target
+        is BookingState.SELECTING_TIME
+    )
+    assert (
+        machine.resolve_transition(make_context(), "unknown").target
+        is BookingState.IDLE
+    )
 
 
 def test_missing_transition_raises() -> None:
     with pytest.raises(InvalidBookingStateError):
-        StateMachine(_flow()).resolve_transition(
-            BookingState.SELECTING_DATE,
-            "unknown",
-        )
+        StateMachine(make_flow()).resolve_transition(make_context(), "unknown")
 
 
-def test_transition_updates_only_state_and_returns_definition() -> None:
-    context = BookingContext(
-        conversation_id="conversation-1",
-        state=BookingState.SELECTING_SHOP,
+def test_auto_transition_returns_first_match_without_mutation_or_action_execution() -> None:
+    first = FlowAutoTransition(
+        FlowCondition("num_customer", "gte", 3),
+        BookingState.CANCELLED,
+        ("must_not_run",),
+    )
+    second = FlowAutoTransition(
+        FlowCondition("num_customer", "gte", 2),
+        BookingState.COLLECTING_PHONE,
+        ("skip_therapist_for_group",),
+    )
+    context = make_context(
+        state=BookingState.SELECTING_THERAPIST,
+        num_customer=2,
         pending_action="keep",
     )
+    machine = StateMachine(
+        make_flow(
+            state=BookingState.SELECTING_THERAPIST,
+            auto_transitions=(first, second),
+        )
+    )
 
-    transition = StateMachine(_flow()).transition(context, "select_store")
+    resolved = machine.resolve_auto_transition(context)
 
-    assert transition.actions == ("handle_store_selection",)
-    assert context.state is BookingState.SELECTING_DATE
+    assert resolved is second
+    assert resolved.actions == ("skip_therapist_for_group",)
+    assert context.state is BookingState.SELECTING_THERAPIST
     assert context.pending_action == "keep"
 
 
-def test_available_events_preserve_insertion_order() -> None:
-    assert StateMachine(_flow()).available_events(BookingState.SELECTING_SHOP) == (
-        "select_store",
-        "select_store",
-        "*",
+def test_auto_transition_returns_none_when_no_condition_matches() -> None:
+    auto = FlowAutoTransition(
+        FlowCondition("num_customer", "gte", 2),
+        BookingState.COLLECTING_PHONE,
+    )
+    machine = StateMachine(make_flow(auto_transitions=(auto,)))
+
+    assert machine.resolve_auto_transition(make_context(num_customer=1)) is None
+
+
+def test_auto_transition_uses_first_match_and_apply_commits_its_target() -> None:
+    first = FlowAutoTransition(
+        FlowCondition("num_customer", "gte", 2),
+        BookingState.COLLECTING_PHONE,
+    )
+    second = FlowAutoTransition(
+        FlowCondition("num_customer", "gte", 2),
+        BookingState.VERIFYING_PHONE,
+    )
+    machine = StateMachine(make_flow(auto_transitions=(first, second)))
+    context = make_context(num_customer=2)
+
+    resolved = machine.resolve_auto_transition(context)
+
+    assert resolved is first
+    assert context.state is BookingState.IDLE
+    machine.apply_transition(context, resolved)
+    assert context.state is BookingState.COLLECTING_PHONE
+
+
+def test_resolve_and_transition_alias_do_not_apply_until_explicit_commit() -> None:
+    configured = FlowTransition(
+        "start",
+        BookingState.SELECTING_SHOP,
+        ("search_shop",),
+    )
+    machine = StateMachine(make_flow(transitions=(configured,)))
+    context = make_context()
+
+    resolved = machine.resolve_transition(context, "start")
+    alias_result = machine.transition(context, "start")
+
+    assert resolved is configured
+    assert alias_result is configured
+    assert context.state is BookingState.IDLE
+    machine.apply_transition(context, resolved)
+    assert context.state is BookingState.SELECTING_SHOP
+
+
+def test_can_transition_respects_conditions_and_does_not_mutate() -> None:
+    configured = FlowTransition(
+        "confirm",
+        BookingState.COMPLETED,
+        conditions=(FlowCondition("phone_confirmed", "eq", True),),
+    )
+    machine = StateMachine(make_flow(transitions=(configured,)))
+    context = make_context(phone_confirmed=False)
+
+    assert machine.can_transition(context, "confirm") is False
+    assert context.state is BookingState.IDLE
+
+
+def test_can_transition_does_not_hide_invalid_condition_configuration() -> None:
+    configured = FlowTransition(
+        "confirm",
+        BookingState.COMPLETED,
+        conditions=(FlowCondition(op="and"),),
     )
 
-
-def test_can_transition_includes_wildcard() -> None:
-    machine = StateMachine(_flow())
-
-    assert machine.can_transition(BookingState.SELECTING_SHOP, "anything") is True
-    assert machine.can_transition(BookingState.SELECTING_DATE, "anything") is False
-
-
-def test_get_state_definition_and_auto_transitions() -> None:
-    machine = StateMachine(_flow())
-
-    state = machine.get_state_definition(BookingState.SELECTING_THERAPIST)
-    auto = machine.get_auto_transitions(BookingState.SELECTING_THERAPIST)
-
-    assert state.on_enter.instruction_template == "ask_therapist"
-    assert auto[0].condition.value == 2
-    assert auto[0].actions == ("skip_therapist_for_group",)
+    with pytest.raises(InvalidFlowConditionError):
+        StateMachine(make_flow(transitions=(configured,))).can_transition(
+            make_context(),
+            "confirm",
+        )
 
 
-def test_get_phone_split_config_only_returns_configuration() -> None:
-    config = StateMachine(_flow()).get_phone_split_config(
-        BookingState.SELECTING_THERAPIST
+def test_available_events_deduplicates_in_first_seen_order() -> None:
+    machine = StateMachine(duplicate_intent_flow())
+
+    assert machine.available_events(BookingState.IDLE) == ("deny", "*")
+
+
+def test_terminal_state_rejects_events_and_has_no_auto_resolution() -> None:
+    auto = FlowAutoTransition(
+        FlowCondition("booking", "not_null"),
+        BookingState.COMPLETED,
     )
+    machine = StateMachine(
+        make_flow(
+            state=BookingState.COMPLETED,
+            auto_transitions=(auto,),
+            terminal=True,
+        )
+    )
+    context = make_context(state=BookingState.COMPLETED)
 
-    assert config == PhoneSplitConfig(3, 3, 5000)
-
-
-def test_unknown_state_definition_raises() -> None:
     with pytest.raises(InvalidBookingStateError):
-        StateMachine(_flow()).get_state_definition(BookingState.COMPLETED)
+        machine.resolve_transition(context, "anything")
+    assert machine.resolve_auto_transition(context) is None
+
+
+def test_get_configuration_helpers_and_unknown_state() -> None:
+    machine = StateMachine(make_flow())
+
+    assert machine.get_auto_transitions(BookingState.IDLE) == ()
+    assert machine.get_phone_split_config(BookingState.IDLE) == PhoneSplitConfig(
+        3,
+        3,
+        5000,
+    )
+    with pytest.raises(InvalidBookingStateError):
+        machine.get_state_definition(BookingState.COMPLETED)

@@ -196,6 +196,10 @@ def _parse_state(
         for index, item in enumerate(raw_transitions)
     )
     auto_transitions = _parse_auto_transitions(name, definition, declared)
+    if terminal and auto_transitions:
+        raise InvalidFlowDefinitionError(
+            f"Terminal state '{name}' must not define auto transitions."
+        )
     phone_split = _parse_phone_split(name, definition.get("phone_split_mode"))
     return FlowState(
         description=description,

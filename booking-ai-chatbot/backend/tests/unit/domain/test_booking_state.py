@@ -13,7 +13,6 @@ EXPECTED_STATES = {
     BookingState.SELECTING_SERVICE: "selecting_service",
     BookingState.SELECTING_TIME: "selecting_time",
     BookingState.SELECTING_THERAPIST: "selecting_therapist",
-    BookingState.SELECTING_OPTIONS: "selecting_options",
     BookingState.COLLECTING_PHONE: "collecting_phone",
     BookingState.VERIFYING_PHONE: "verifying_phone",
     BookingState.AWAITING_CONFIRMATION: "awaiting_confirmation",
@@ -44,10 +43,29 @@ def test_invalid_string_raises_value_error() -> None:
 
 
 def test_booking_state_has_expected_number_of_members() -> None:
-    assert len(BookingState) == 16
+    assert len(BookingState) == 15
 
 
 def test_booking_state_values_are_unique() -> None:
     values = [state.value for state in BookingState]
 
     assert len(values) == len(set(values))
+
+
+def test_selecting_options_is_not_a_booking_state() -> None:
+    assert not hasattr(BookingState, "SELECTING_OPTIONS")
+
+    with pytest.raises(ValueError):
+        BookingState("selecting_options")
+
+
+def test_booking_state_values_use_snake_case() -> None:
+    for state in BookingState:
+        assert state.value == state.value.lower()
+        assert state.value.replace("_", "").isalnum()
+
+
+def test_terminal_and_failure_states_remain_available() -> None:
+    assert BookingState.COMPLETED.value == "completed"
+    assert BookingState.CANCELLED.value == "cancelled"
+    assert BookingState.BOOKING_FAILED.value == "booking_failed"

@@ -188,6 +188,21 @@ def test_invalid_auto_transition_target_raises(tmp_path: Path) -> None:
         FlowLoader.load(_write(tmp_path, payload))
 
 
+def test_terminal_state_rejects_auto_transitions(tmp_path: Path) -> None:
+    payload = _flow()
+    completed = cast(dict[str, object], _states(payload)["completed"])
+    completed["auto_transition"] = {
+        "condition": {"field": "booking", "op": "not_null"},
+        "target": "completed",
+    }
+
+    with pytest.raises(
+        InvalidFlowDefinitionError,
+        match="must not define auto transitions",
+    ):
+        FlowLoader.load(_write(tmp_path, payload))
+
+
 def test_duplicate_intents_are_preserved_for_future_condition_evaluation(
     tmp_path: Path,
 ) -> None:
