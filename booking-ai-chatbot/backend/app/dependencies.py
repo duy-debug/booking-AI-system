@@ -19,6 +19,11 @@ from app.core.config import Settings
 from app.dialog.dialog_controller import DialogController
 from app.dialog.flow_loader import FlowDefinition, FlowLoader
 from app.dialog.instruction_builder import InstructionBuilder
+from app.dialog.nlu import (
+    DeterministicNLU,
+    StateIntentPolicy,
+    build_state_intent_policy,
+)
 from app.dialog.state_machine import StateMachine
 from app.dialog.tool_bridge import ToolBridge
 from app.infrastructure.booking_api.http_booking_gateway import HTTPBookingGateway
@@ -37,6 +42,8 @@ class ApplicationContainer:
     flow_definition: FlowDefinition
     memory_cache: MemoryCache
     instruction_builder: InstructionBuilder
+    deterministic_nlu: DeterministicNLU
+    state_intent_policy: StateIntentPolicy
     _handlers: tuple[object, ...] = field(repr=False)
     _owns_http_client: bool = field(repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
@@ -65,6 +72,7 @@ async def create_application_container(
 
     try:
         flow_definition = FlowLoader.load(settings.booking_flow_path)
+        state_intent_policy = build_state_intent_policy(flow_definition)
         booking_gateway: BookingGateway = HTTPBookingGateway(
             client=client,
             base_url=settings.pos_base_url,
@@ -106,6 +114,10 @@ async def create_application_container(
             flow_definition=flow_definition,
             memory_cache=MemoryCache(),
             instruction_builder=InstructionBuilder(),
+            deterministic_nlu=DeterministicNLU(
+                intent_policy=state_intent_policy,
+            ),
+            state_intent_policy=state_intent_policy,
             _handlers=handlers,
             _owns_http_client=owns_http_client,
         )

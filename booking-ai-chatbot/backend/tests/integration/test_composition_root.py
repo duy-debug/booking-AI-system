@@ -71,6 +71,15 @@ async def test_container_assembles_shared_dependencies_without_network_calls() -
     assert container.dialog_controller._tool_bridge is container.tool_bridge
     assert isinstance(container.memory_cache, MemoryCache)
     assert container.instruction_builder.registered_templates()
+    assert container.deterministic_nlu.parse(
+        text="2 người",
+        state=BookingState.SELECTING_PEOPLE,
+    ).intent == "select_people"
+    assert container.state_intent_policy.is_allowed(
+        BookingState.SELECTING_PEOPLE,
+        "select_people",
+    )
+    assert "*" not in container.state_intent_policy.allowed_for(BookingState.IDLE)
     assert request_count == 0
 
     await container.close()
@@ -92,6 +101,8 @@ async def test_two_containers_are_isolated_except_for_injected_client() -> None:
     assert first.flow_definition is not second.flow_definition
     assert first.memory_cache is not second.memory_cache
     assert first.instruction_builder is not second.instruction_builder
+    assert first.deterministic_nlu is not second.deterministic_nlu
+    assert first.state_intent_policy is not second.state_intent_policy
 
     async def custom_action(context: ActionExecutionContext) -> ActionResult:
         return ActionResult("container_only")
