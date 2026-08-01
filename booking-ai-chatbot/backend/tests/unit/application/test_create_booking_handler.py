@@ -11,8 +11,11 @@ from app.application.handlers.create_booking_handler import CreateBookingHandler
 from app.application.ports.booking_gateway import (
     AvailabilityRequest,
     BookingGateway,
+    ChildReservationReference,
+    CourseSearchRequest,
     CreateBookingRequest,
     CreateBookingResult,
+    CustomerVerificationRequest,
     CustomerVerificationResult,
     FinalAvailabilityRequest,
     FinalAvailabilityResult,
@@ -40,6 +43,7 @@ SHOP_ID = UUID("11111111-1111-1111-1111-111111111111")
 MAIN_ID = UUID("22222222-2222-2222-2222-222222222222")
 ADDON_ID = UUID("33333333-3333-3333-3333-333333333333")
 BOOKING_ID = UUID("44444444-4444-4444-4444-444444444444")
+RESERVATION_ID = UUID("55555555-5555-5555-5555-555555555555")
 BOOKING_DATE = date(2099, 8, 1)
 START_TIME = time(10, 30)
 SHOP = Shop(SHOP_ID, "Central Spa")
@@ -81,11 +85,15 @@ class FakeBookingGateway:
         self.create_result = create_result or CreateBookingResult(
             BOOKING,
             reservation_code="RSV-001",
+            reservation_codes=("RSV-CHILD-1",),
+            child_reservations=(
+                ChildReservationReference(RESERVATION_ID, participant_index=1),
+            ),
         )
         self.final_error = final_error
         self.create_error = create_error
         self.availability_requests: list[AvailabilityRequest] = []
-        self.customer_verification_requests: list[str] = []
+        self.customer_verification_requests: list[CustomerVerificationRequest] = []
         self.final_availability_requests: list[FinalAvailabilityRequest] = []
         self.create_booking_requests: list[CreateBookingRequest] = []
         self.call_order: list[str] = []
@@ -95,9 +103,7 @@ class FakeBookingGateway:
 
     async def search_services(
         self,
-        shop_id: UUID,
-        booking_date: date,
-        query: str | None = None,
+        request: CourseSearchRequest,
     ) -> list[Service]:
         raise AssertionError("Unexpected search_services call.")
 
@@ -107,7 +113,10 @@ class FakeBookingGateway:
     ) -> tuple[time, ...]:
         raise AssertionError("Unexpected get_available_slots call.")
 
-    async def verify_customer(self, phone: str) -> CustomerVerificationResult:
+    async def verify_customer(
+        self,
+        request: CustomerVerificationRequest,
+    ) -> CustomerVerificationResult:
         raise AssertionError("Unexpected verify_customer call.")
 
     async def check_final_availability(
@@ -259,12 +268,15 @@ async def test_final_check_precedes_create_and_requests_are_complete() -> None:
             phone=CUSTOMER.phone,
             idempotency_key="conversation-1:attempt-1",
             member_rank="gold",
+            customer_name="Nguyen An",
         )
     ]
     assert result is fake.create_result
     assert context.booking is BOOKING
     assert context.booking_id == BOOKING_ID
     assert context.reservation_code == "RSV-001"
+    assert context.reservation_codes == ("RSV-CHILD-1",)
+    assert context.child_reservation_ids == (RESERVATION_ID,)
     assert context.state is original_state
     assert context.pending_action == "create_booking"
 
@@ -273,7 +285,12 @@ async def test_final_check_precedes_create_and_requests_are_complete() -> None:
 async def test_unavailable_final_check_raises_conflict_with_nearest_slots() -> None:
     nearest = (time(11, 0), time(11, 30))
     context = make_context()
-    original_values = (context.booking, context.booking_id, context.reservation_code)
+    original_values = (
+        context.booking,
+        context.booking_id,
+        context.reservation_code,
+        context.child_reservation_ids,
+    )
     fake = FakeBookingGateway(
         final_result=FinalAvailabilityResult(
             available=False,
@@ -289,7 +306,12 @@ async def test_unavailable_final_check_raises_conflict_with_nearest_slots() -> N
     assert exc_info.value.reason == "slot_conflict"
     assert fake.call_order == ["final"]
     assert fake.create_booking_requests == []
-    assert (context.booking, context.booking_id, context.reservation_code) == original_values
+    assert (
+        context.booking,
+        context.booking_id,
+        context.reservation_code,
+        context.child_reservation_ids,
+    ) == original_values
 
 
 @pytest.mark.asyncio

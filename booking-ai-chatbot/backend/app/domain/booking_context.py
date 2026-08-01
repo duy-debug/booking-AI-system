@@ -46,10 +46,13 @@ class BookingContext:
     phone: str | None = None
     phone_confirmed: bool = False
     member_rank: str | None = None
+    visit_count: int | None = None
     ng_list_checked: bool = False
     is_ng_customer: bool = False
     booking: Booking | None = None
     reservation_code: str | None = None
+    reservation_codes: tuple[str, ...] = ()
+    child_reservation_ids: tuple[UUID, ...] = ()
     pending_action: str | None = None
 
     def is_ready_to_create(self) -> bool:
@@ -97,6 +100,10 @@ class BookingContext:
             return
         self.shop = shop
         self._clear_course_and_availability()
+        self.member_rank = None
+        self.visit_count = None
+        self.ng_list_checked = False
+        self.is_ng_customer = False
 
     def set_booking_date(self, booking_date: date | None) -> None:
         """Set a date and invalidate date-dependent selections."""
@@ -187,6 +194,7 @@ class BookingContext:
         self.phone = phone
         self.phone_confirmed = False
         self.member_rank = None
+        self.visit_count = None
         self.ng_list_checked = False
         self.is_ng_customer = False
 
@@ -200,6 +208,7 @@ class BookingContext:
         self,
         *,
         member_rank: str | None,
+        visit_count: int | None = None,
         is_ng_customer: bool,
     ) -> None:
         """Store member and NG-list results supplied by the application."""
@@ -208,6 +217,7 @@ class BookingContext:
                 "A phone number is required before customer verification."
             )
         self.member_rank = member_rank
+        self.visit_count = visit_count
         self.ng_list_checked = True
         self.is_ng_customer = is_ng_customer
 
@@ -216,6 +226,7 @@ class BookingContext:
         self.phone = None
         self.phone_confirmed = False
         self.member_rank = None
+        self.visit_count = None
         self.ng_list_checked = False
         self.is_ng_customer = False
 
@@ -250,8 +261,11 @@ class BookingContext:
         self.phone = None
         self.phone_confirmed = False
         self.member_rank = None
+        self.visit_count = None
         self.ng_list_checked = False
         self.is_ng_customer = False
         self.booking = None
         self.reservation_code = None
+        self.reservation_codes = ()
+        self.child_reservation_ids = ()
         self.pending_action = None

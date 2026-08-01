@@ -11,8 +11,11 @@ import pytest
 from app.application.ports.booking_gateway import (
     AvailabilityRequest,
     BookingGateway,
+    ChildReservationReference,
+    CourseSearchRequest,
     CreateBookingRequest,
     CreateBookingResult,
+    CustomerVerificationRequest,
     CustomerVerificationResult,
     FinalAvailabilityRequest,
     FinalAvailabilityResult,
@@ -26,6 +29,7 @@ from app.domain.booking import (
     TherapistPreferenceType,
 )
 from app.domain.exceptions import (
+    InvalidBookingDataError,
     InvalidCourseSelectionError,
     InvalidCustomerCountError,
     InvalidDurationError,
@@ -36,6 +40,7 @@ SHOP_ID = UUID("11111111-1111-1111-1111-111111111111")
 SERVICE_ID = UUID("22222222-2222-2222-2222-222222222222")
 ADDON_ID = UUID("33333333-3333-3333-3333-333333333333")
 BOOKING_ID = UUID("44444444-4444-4444-4444-444444444444")
+RESERVATION_ID = UUID("55555555-5555-5555-5555-555555555555")
 BOOKING_DATE = date(2026, 8, 1)
 START_TIME = time(10, 30)
 SHOP = Shop(shop_id=SHOP_ID, name="Central Spa")
@@ -85,6 +90,11 @@ CREATE_REQUEST = CreateBookingRequest(
     phone=CUSTOMER.phone,
     idempotency_key="conversation-1:attempt-1",
 )
+COURSE_REQUEST = CourseSearchRequest(shop_id=SHOP_ID)
+CUSTOMER_REQUEST = CustomerVerificationRequest(
+    shop_id=SHOP_ID,
+    phone=CUSTOMER.phone,
+)
 
 
 class FakeBookingGateway:
@@ -92,7 +102,7 @@ class FakeBookingGateway:
 
     def __init__(self) -> None:
         self.availability_requests: list[AvailabilityRequest] = []
-        self.customer_verification_requests: list[str] = []
+        self.customer_verification_requests: list[CustomerVerificationRequest] = []
         self.final_availability_requests: list[FinalAvailabilityRequest] = []
         self.create_booking_requests: list[CreateBookingRequest] = []
 
@@ -101,9 +111,7 @@ class FakeBookingGateway:
 
     async def search_services(
         self,
-        shop_id: UUID,
-        booking_date: date,
-        query: str | None = None,
+        request: CourseSearchRequest,
     ) -> list[Service]:
         return [SERVICE]
 
@@ -114,9 +122,19 @@ class FakeBookingGateway:
         self.availability_requests.append(request)
         return (START_TIME,)
 
-    async def verify_customer(self, phone: str) -> CustomerVerificationResult:
-        self.customer_verification_requests.append(phone)
-        return CustomerVerificationResult(phone, "customer-1", "gold", 3, True, False)
+    async def verify_customer(
+        self,
+        request: CustomerVerificationRequest,
+    ) -> CustomerVerificationResult:
+        self.customer_verification_requests.append(request)
+        return CustomerVerificationResult(
+            request.phone,
+            "customer-1",
+            "gold",
+            3,
+            True,
+            False,
+        )
 
     async def check_final_availability(
         self,
@@ -159,6 +177,18 @@ if TYPE_CHECKING:
 def test_dtos_are_immutable() -> None:
     with pytest.raises(FrozenInstanceError):
         AVAILABILITY_REQUEST.num_customer = 2  # type: ignore[misc]
+
+    with pytest.raises(FrozenInstanceError):
+        CUSTOMER_REQUEST.phone = "0912345678"  # type: ignore[misc]
+
+    child = ChildReservationReference(RESERVATION_ID, participant_index=1)
+    with pytest.raises(FrozenInstanceError):
+        child.participant_index = 2  # type: ignore[misc]
+
+
+def test_customer_verification_request_requires_phone() -> None:
+    with pytest.raises(InvalidBookingDataError, match="phone"):
+        CustomerVerificationRequest(shop_id=SHOP_ID, phone="")
 
 
 @pytest.mark.parametrize("num_customer", [0, -1, 4])
@@ -224,13 +254,29 @@ def test_create_result_rejects_duplicate_reservation_codes() -> None:
         )
 
 
+def test_create_result_preserves_child_reservations() -> None:
+    child = ChildReservationReference(RESERVATION_ID, participant_index=1)
+
+    result = CreateBookingResult(BOOKING, child_reservations=(child,))
+
+    assert result.child_reservations == (child,)
+
+
+def test_create_result_rejects_duplicate_child_reservation_ids() -> None:
+    first = ChildReservationReference(RESERVATION_ID, participant_index=1)
+    duplicate = ChildReservationReference(RESERVATION_ID, participant_index=2)
+
+    with pytest.raises(ValueError, match="Child reservation IDs"):
+        CreateBookingResult(BOOKING, child_reservations=(first, duplicate))
+
+
 @pytest.mark.asyncio
 async def test_fake_gateway_supports_complete_contract_and_records_dtos() -> None:
     gateway: BookingGateway = FakeBookingGateway()
 
-    services = await gateway.search_services(SHOP_ID, BOOKING_DATE, query="aroma")
+    services = await gateway.search_services(COURSE_REQUEST)
     slots = await gateway.get_available_slots(AVAILABILITY_REQUEST)
-    verification = await gateway.verify_customer(CUSTOMER.phone)
+    verification = await gateway.verify_customer(CUSTOMER_REQUEST)
     final = await gateway.check_final_availability(FINAL_REQUEST)
     created = await gateway.create_booking(CREATE_REQUEST)
     found = await gateway.lookup_booking(BOOKING_ID)

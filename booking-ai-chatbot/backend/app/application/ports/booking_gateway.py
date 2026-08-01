@@ -7,17 +7,40 @@ from uuid import UUID
 
 from app.domain.booking import (
     Booking,
+    CourseType,
     Service,
     Shop,
     TherapistPreference,
     TherapistPreferenceType,
 )
 from app.domain.exceptions import (
+    InvalidBookingDataError,
     InvalidCourseSelectionError,
     InvalidCustomerCountError,
     InvalidDurationError,
     TherapistNotAllowedForGroupError,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class CourseSearchRequest:
+    """Contains POS-supported filters for a shop course catalog."""
+
+    shop_id: UUID
+    course_type: CourseType | None = None
+    is_active: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class CustomerVerificationRequest:
+    """Contains the shop and normalized phone required by POS eligibility."""
+
+    shop_id: UUID
+    phone: str
+
+    def __post_init__(self) -> None:
+        if not self.phone:
+            raise InvalidBookingDataError("Customer verification phone is required.")
 
 
 def _validate_booking_shape(
@@ -86,6 +109,14 @@ class CustomerVerificationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ChildReservationReference:
+    """Identifies one participant reservation created under a booking."""
+
+    reservation_id: UUID
+    participant_index: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class FinalAvailabilityRequest:
     """Contains all inputs required to recheck a selected slot."""
 
@@ -132,6 +163,7 @@ class CreateBookingRequest:
     phone: str
     idempotency_key: str
     member_rank: str | None = None
+    customer_name: str | None = None
 
     def __post_init__(self) -> None:
         _validate_booking_shape(
@@ -150,8 +182,26 @@ class CreateBookingResult:
     booking: Booking
     reservation_code: str | None = None
     reservation_codes: tuple[str, ...] = ()
+    child_reservations: tuple[ChildReservationReference, ...] = ()
 
     def __post_init__(self) -> None:
+        child_ids = [item.reservation_id for item in self.child_reservations]
+        if len(child_ids) != len(set(child_ids)):
+            raise ValueError("Child reservation IDs must be unique.")
+        participant_indexes = [
+            item.participant_index
+            for item in self.child_reservations
+            if item.participant_index is not None
+        ]
+        if len(participant_indexes) != len(set(participant_indexes)):
+            raise ValueError("Child reservation participant indexes must be unique.")
+        if (
+            self.child_reservations
+            and len(self.child_reservations) != self.booking.num_customer
+        ):
+            raise ValueError(
+                "Child reservation count must match the booking customer count."
+            )
         codes = (() if self.reservation_code is None else (self.reservation_code,)) + (
             self.reservation_codes
         )
@@ -168,11 +218,9 @@ class BookingGateway(Protocol):
 
     async def search_services(
         self,
-        shop_id: UUID,
-        booking_date: date,
-        query: str | None = None,
+        request: CourseSearchRequest,
     ) -> list[Service]:
-        """Return the shop course catalog available for a date."""
+        """Return the POS course catalog matching supported filters."""
         ...
 
     async def get_available_slots(
@@ -184,7 +232,7 @@ class BookingGateway(Protocol):
 
     async def verify_customer(
         self,
-        phone: str,
+        request: CustomerVerificationRequest,
     ) -> CustomerVerificationResult:
         """Return authoritative member and NG-list verification."""
         ...

@@ -12,8 +12,10 @@ from app.application.handlers.check_availability_handler import (
 from app.application.ports.booking_gateway import (
     AvailabilityRequest,
     BookingGateway,
+    CourseSearchRequest,
     CreateBookingRequest,
     CreateBookingResult,
+    CustomerVerificationRequest,
     CustomerVerificationResult,
     FinalAvailabilityRequest,
     FinalAvailabilityResult,
@@ -62,7 +64,7 @@ class FakeBookingGateway:
         self.slots = slots
         self.error = error
         self.availability_requests: list[AvailabilityRequest] = []
-        self.customer_verification_requests: list[str] = []
+        self.customer_verification_requests: list[CustomerVerificationRequest] = []
         self.final_availability_requests: list[FinalAvailabilityRequest] = []
         self.create_booking_requests: list[CreateBookingRequest] = []
 
@@ -71,9 +73,7 @@ class FakeBookingGateway:
 
     async def search_services(
         self,
-        shop_id: UUID,
-        booking_date: date,
-        query: str | None = None,
+        request: CourseSearchRequest,
     ) -> list[Service]:
         raise AssertionError("Unexpected search_services call.")
 
@@ -86,7 +86,10 @@ class FakeBookingGateway:
             raise self.error
         return self.slots
 
-    async def verify_customer(self, phone: str) -> CustomerVerificationResult:
+    async def verify_customer(
+        self,
+        request: CustomerVerificationRequest,
+    ) -> CustomerVerificationResult:
         raise AssertionError("Unexpected verify_customer call.")
 
     async def check_final_availability(

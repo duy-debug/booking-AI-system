@@ -30,6 +30,7 @@ class CreateBookingHandler:
 
         assert context.shop is not None
         assert context.service is not None
+        assert context.customer is not None
         assert context.booking_date is not None
         assert context.start_time is not None
         assert context.num_customer is not None
@@ -68,6 +69,7 @@ class CreateBookingHandler:
             phone=context.phone,
             idempotency_key=idempotency_key,
             member_rank=context.member_rank,
+            customer_name=context.customer.name,
         )
         result = await self._booking_gateway.create_booking(create_request)
 
@@ -75,5 +77,9 @@ class CreateBookingHandler:
         context.booking_id = result.booking.booking_id
         context.reservation_code = (
             result.reservation_code or result.booking.reservation_code
+        )
+        context.reservation_codes = result.reservation_codes
+        context.child_reservation_ids = tuple(
+            child.reservation_id for child in result.child_reservations
         )
         return result

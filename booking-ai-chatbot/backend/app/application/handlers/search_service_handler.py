@@ -1,10 +1,9 @@
-"""Application handler for searching a shop's date-aware service catalog."""
+"""Application handler for searching a shop's service catalog."""
 
-from datetime import date
 from uuid import UUID
 
-from app.application.ports.booking_gateway import BookingGateway
-from app.domain.booking import Service
+from app.application.ports.booking_gateway import BookingGateway, CourseSearchRequest
+from app.domain.booking import CourseType, Service
 
 
 class SearchServiceHandler:
@@ -16,12 +15,24 @@ class SearchServiceHandler:
     async def execute(
         self,
         shop_id: UUID,
-        booking_date: date,
         query: str | None = None,
+        *,
+        course_type: CourseType | None = None,
+        is_active: bool = True,
     ) -> list[Service]:
-        """Return services found by the booking gateway for a shop."""
-        return await self._booking_gateway.search_services(
-            shop_id=shop_id,
-            booking_date=booking_date,
-            query=query,
+        """Return the POS catalog, optionally filtered locally by course name."""
+        services = await self._booking_gateway.search_services(
+            CourseSearchRequest(
+                shop_id=shop_id,
+                course_type=course_type,
+                is_active=is_active,
+            )
         )
+        normalized_query = query.strip().casefold() if query is not None else ""
+        if not normalized_query:
+            return services
+        return [
+            service
+            for service in services
+            if normalized_query in service.name.casefold()
+        ]

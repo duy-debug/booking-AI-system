@@ -92,10 +92,13 @@ def test_booking_fields_default_to_none() -> None:
     assert context.phone is None
     assert context.phone_confirmed is False
     assert context.member_rank is None
+    assert context.visit_count is None
     assert context.ng_list_checked is False
     assert context.is_ng_customer is False
     assert context.booking is None
     assert context.reservation_code is None
+    assert context.reservation_codes == ()
+    assert context.child_reservation_ids == ()
     assert context.pending_action is None
 
 
@@ -113,6 +116,9 @@ def test_context_is_ready_when_required_data_is_present() -> None:
 def test_reset_clears_temporary_booking_data() -> None:
     context = make_ready_context()
     context.booking_id = BOOKING_ID
+    context.visit_count = 7
+    context.reservation_codes = ("RSV-1",)
+    context.child_reservation_ids = (BOOKING_ID,)
     context.pending_action = "create_booking"
 
     context.reset()
@@ -134,10 +140,13 @@ def test_reset_clears_temporary_booking_data() -> None:
     assert context.phone is None
     assert context.phone_confirmed is False
     assert context.member_rank is None
+    assert context.visit_count is None
     assert context.ng_list_checked is False
     assert context.is_ng_customer is False
     assert context.booking is None
     assert context.reservation_code is None
+    assert context.reservation_codes == ()
+    assert context.child_reservation_ids == ()
     assert context.pending_action is None
 
 
@@ -295,9 +304,14 @@ def test_set_phone_resets_all_customer_verification() -> None:
 def test_set_customer_verification_stores_external_result() -> None:
     context = BookingContext(conversation_id="conversation-1", phone="0901234567")
 
-    context.set_customer_verification(member_rank="gold", is_ng_customer=False)
+    context.set_customer_verification(
+        member_rank="gold",
+        visit_count=7,
+        is_ng_customer=False,
+    )
 
     assert context.member_rank == "gold"
+    assert context.visit_count == 7
     assert context.ng_list_checked is True
     assert context.is_ng_customer is False
 
@@ -316,11 +330,17 @@ def test_changing_shop_keeps_date_and_clears_dependent_data() -> None:
     context.therapist_preference = TherapistPreference(
         TherapistPreferenceType.FEMALE
     )
+    context.member_rank = "gold"
+    context.visit_count = 7
+    context.ng_list_checked = True
 
     context.set_shop(OTHER_SHOP)
 
     assert context.shop is OTHER_SHOP
     assert context.booking_date == date(2026, 8, 1)
+    assert context.member_rank is None
+    assert context.visit_count is None
+    assert context.ng_list_checked is False
     assert_course_and_availability_cleared(context)
 
 

@@ -10,13 +10,15 @@ from app.application.handlers.search_service_handler import SearchServiceHandler
 from app.application.ports.booking_gateway import (
     AvailabilityRequest,
     BookingGateway,
+    CourseSearchRequest,
     CreateBookingRequest,
     CreateBookingResult,
+    CustomerVerificationRequest,
     CustomerVerificationResult,
     FinalAvailabilityRequest,
     FinalAvailabilityResult,
 )
-from app.domain.booking import Booking, Service, Shop
+from app.domain.booking import Booking, CourseType, Service, Shop
 from app.domain.exceptions import InvalidBookingDataError
 
 SHOP_ID = UUID("11111111-1111-1111-1111-111111111111")
@@ -40,23 +42,17 @@ class FakeBookingGateway:
         self.services = services
         self.error = error
         self.search_services_call_count = 0
-        self.received_shop_id: UUID | None = None
-        self.received_booking_date: date | None = None
-        self.received_query: str | None = None
+        self.received_request: CourseSearchRequest | None = None
 
     async def search_shops(self, query: str | None = None) -> list[Shop]:
         raise AssertionError("Unexpected search_shops call.")
 
     async def search_services(
         self,
-        shop_id: UUID,
-        booking_date: date,
-        query: str | None = None,
+        request: CourseSearchRequest,
     ) -> list[Service]:
         self.search_services_call_count += 1
-        self.received_shop_id = shop_id
-        self.received_booking_date = booking_date
-        self.received_query = query
+        self.received_request = request
         if self.error is not None:
             raise self.error
         return self.services
@@ -67,7 +63,10 @@ class FakeBookingGateway:
     ) -> tuple[time, ...]:
         raise AssertionError("Unexpected get_available_slots call.")
 
-    async def verify_customer(self, phone: str) -> CustomerVerificationResult:
+    async def verify_customer(
+        self,
+        request: CustomerVerificationRequest,
+    ) -> CustomerVerificationResult:
         raise AssertionError("Unexpected verify_customer call.")
 
     async def check_final_availability(
@@ -103,30 +102,43 @@ def make_handler(fake: FakeBookingGateway) -> SearchServiceHandler:
 
 
 @pytest.mark.asyncio
-async def test_execute_calls_gateway_once_with_shop_and_query() -> None:
-    services = [SERVICE]
+async def test_execute_maps_pos_request_and_filters_query_locally() -> None:
+    other = Service(
+        service_id=UUID("33333333-3333-3333-3333-333333333333"),
+        name="Head spa",
+        duration_minutes=30,
+        price=Decimal("250000.00"),
+    )
+    services = [SERVICE, other]
     fake = FakeBookingGateway(services)
 
-    result = await make_handler(fake).execute(SHOP_ID, BOOKING_DATE, "aroma")
+    result = await make_handler(fake).execute(
+        SHOP_ID,
+        "  AROMA  ",
+        course_type=CourseType.MAIN,
+        is_active=True,
+    )
 
     assert fake.search_services_call_count == 1
-    assert fake.received_shop_id == SHOP_ID
-    assert fake.received_booking_date == BOOKING_DATE
-    assert fake.received_query == "aroma"
-    assert result is services
+    assert fake.received_request == CourseSearchRequest(
+        shop_id=SHOP_ID,
+        course_type=CourseType.MAIN,
+        is_active=True,
+    )
+    assert result == [SERVICE]
     assert result[0] is SERVICE
 
 
 @pytest.mark.asyncio
-async def test_execute_passes_none_query_to_gateway() -> None:
-    fake = FakeBookingGateway([SERVICE])
+async def test_execute_without_query_returns_original_gateway_list() -> None:
+    services = [SERVICE]
+    fake = FakeBookingGateway(services)
 
-    await make_handler(fake).execute(SHOP_ID, BOOKING_DATE)
+    result = await make_handler(fake).execute(SHOP_ID)
 
     assert fake.search_services_call_count == 1
-    assert fake.received_shop_id == SHOP_ID
-    assert fake.received_booking_date == BOOKING_DATE
-    assert fake.received_query is None
+    assert fake.received_request == CourseSearchRequest(shop_id=SHOP_ID)
+    assert result is services
 
 
 @pytest.mark.asyncio
@@ -134,7 +146,7 @@ async def test_execute_returns_same_empty_list_from_gateway() -> None:
     services: list[Service] = []
     fake = FakeBookingGateway(services)
 
-    result = await make_handler(fake).execute(SHOP_ID, BOOKING_DATE)
+    result = await make_handler(fake).execute(SHOP_ID)
 
     assert result is services
     assert result == []
@@ -146,7 +158,7 @@ async def test_execute_propagates_domain_exception() -> None:
     fake = FakeBookingGateway([], error=error)
 
     with pytest.raises(InvalidBookingDataError) as exc_info:
-        await make_handler(fake).execute(SHOP_ID, BOOKING_DATE, "invalid")
+        await make_handler(fake).execute(SHOP_ID, "invalid")
 
     assert exc_info.value is error
     assert fake.search_services_call_count == 1
