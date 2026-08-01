@@ -1,5 +1,6 @@
 """Assemble and own the application's runtime dependency graph."""
 
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -27,8 +28,77 @@ from app.dialog.nlu import (
 )
 from app.dialog.state_machine import StateMachine
 from app.dialog.tool_bridge import ToolBridge
+from app.domain.booking_context import BookingContext
 from app.infrastructure.booking_api.http_booking_gateway import HTTPBookingGateway
 from app.infrastructure.cache.memory_cache import MemoryCache
+
+_MAX_CONVERSATION_ID_LENGTH = 128
+_RAW_PHONE_PATTERN = re.compile(r"\+?\d{9,15}")
+
+
+class ConversationContextError(Exception):
+    """Base error for conversation context lifecycle failures."""
+
+
+class InvalidConversationIdError(ConversationContextError):
+    """Raised when a conversation identifier is unsafe or malformed."""
+
+
+class InvalidCachedContextError(ConversationContextError):
+    """Raised when cached data violates the booking-context contract."""
+
+
+class InvalidConversationContextError(ConversationContextError):
+    """Raised when a context cannot be saved under the supplied identifier."""
+
+
+class ConversationContextStore:
+    """Coordinates booking-context persistence in the in-process cache."""
+
+    def __init__(self, *, cache: MemoryCache) -> None:
+        self._cache = cache
+
+    async def get_or_create(self, conversation_id: str) -> BookingContext:
+        """Load a context or create and store an idle context on a cache miss."""
+        normalized_id = _validate_conversation_id(conversation_id)
+        context = await self._cache.get(normalized_id)
+        if context is None:
+            context = BookingContext(conversation_id=normalized_id)
+            await self._cache.save(context)
+            return context
+        if not isinstance(context, BookingContext):
+            raise InvalidCachedContextError(
+                "Cached conversation data must be a BookingContext."
+            )
+        if context.conversation_id != normalized_id:
+            raise InvalidCachedContextError(
+                "Cached BookingContext does not match its conversation key."
+            )
+        return context
+
+    async def save(
+        self,
+        conversation_id: str,
+        context: BookingContext,
+    ) -> None:
+        """Save the supplied context by reference under its conversation key."""
+        normalized_id = _validate_conversation_id(conversation_id)
+        if not isinstance(context, BookingContext):
+            raise InvalidConversationContextError(
+                "Conversation context must be a BookingContext."
+            )
+        if context.conversation_id != normalized_id:
+            raise InvalidConversationContextError(
+                "BookingContext does not match the supplied conversation ID."
+            )
+        await self._cache.save(context)
+
+    async def reset(self, conversation_id: str) -> BookingContext:
+        """Replace cached state with a new idle context for the conversation."""
+        normalized_id = _validate_conversation_id(conversation_id)
+        context = BookingContext(conversation_id=normalized_id)
+        await self._cache.save(context)
+        return context
 
 
 @dataclass(slots=True)
@@ -42,6 +112,7 @@ class ApplicationContainer:
     state_machine: StateMachine
     flow_definition: FlowDefinition
     memory_cache: MemoryCache
+    conversation_context_store: ConversationContextStore
     instruction_builder: InstructionBuilder
     deterministic_nlu: DeterministicNLU
     state_intent_policy: StateIntentPolicy
@@ -111,6 +182,7 @@ async def create_application_container(
             tool_bridge=tool_bridge,
             max_auto_transitions=settings.max_auto_transitions,
         )
+        memory_cache = MemoryCache()
         return ApplicationContainer(
             http_client=client,
             booking_gateway=booking_gateway,
@@ -118,7 +190,8 @@ async def create_application_container(
             tool_bridge=tool_bridge,
             state_machine=state_machine,
             flow_definition=flow_definition,
-            memory_cache=MemoryCache(),
+            memory_cache=memory_cache,
+            conversation_context_store=ConversationContextStore(cache=memory_cache),
             instruction_builder=InstructionBuilder(),
             deterministic_nlu=DeterministicNLU(
                 intent_policy=state_intent_policy,
@@ -154,6 +227,24 @@ def get_dialog_controller(container: ApplicationContainer) -> DialogController:
 def get_memory_cache(container: ApplicationContainer) -> MemoryCache:
     """Return the container's conversation context cache."""
     return container.memory_cache
+
+
+def _validate_conversation_id(conversation_id: str) -> str:
+    if not isinstance(conversation_id, str):
+        raise InvalidConversationIdError("Conversation ID must be a string.")
+    normalized_id = conversation_id.strip()
+    if not normalized_id:
+        raise InvalidConversationIdError("Conversation ID must not be empty.")
+    if len(normalized_id) > _MAX_CONVERSATION_ID_LENGTH:
+        raise InvalidConversationIdError(
+            f"Conversation ID must not exceed {_MAX_CONVERSATION_ID_LENGTH} characters."
+        )
+    phone_candidate = normalized_id.replace(" ", "").replace("-", "")
+    if _RAW_PHONE_PATTERN.fullmatch(phone_candidate):
+        raise InvalidConversationIdError(
+            "A raw phone number must not be used as a conversation ID."
+        )
+    return normalized_id
 
 
 def _validate_settings(settings: Settings) -> None:

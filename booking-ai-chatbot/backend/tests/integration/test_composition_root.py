@@ -70,6 +70,7 @@ async def test_container_assembles_shared_dependencies_without_network_calls() -
     assert container.dialog_controller._state_machine is container.state_machine
     assert container.dialog_controller._tool_bridge is container.tool_bridge
     assert isinstance(container.memory_cache, MemoryCache)
+    assert container.conversation_context_store._cache is container.memory_cache
     assert container.instruction_builder.registered_templates()
     assert container.deterministic_nlu.parse(
         text="2 người",
@@ -106,6 +107,9 @@ async def test_two_containers_are_isolated_except_for_injected_client() -> None:
     assert first.state_machine is not second.state_machine
     assert first.flow_definition is not second.flow_definition
     assert first.memory_cache is not second.memory_cache
+    assert first.conversation_context_store is not second.conversation_context_store
+    assert first.conversation_context_store._cache is first.memory_cache
+    assert second.conversation_context_store._cache is second.memory_cache
     assert first.instruction_builder is not second.instruction_builder
     assert first.deterministic_nlu is not second.deterministic_nlu
     assert first.state_intent_policy is not second.state_intent_policy

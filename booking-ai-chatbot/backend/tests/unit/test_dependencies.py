@@ -9,7 +9,16 @@ import pytest
 
 import app.dependencies as dependencies
 from app.core.config import Settings
+from app.dependencies import (
+    ConversationContextStore,
+    InvalidCachedContextError,
+    InvalidConversationContextError,
+    InvalidConversationIdError,
+)
 from app.dialog.flow_loader import FlowDefinition, FlowLoader
+from app.domain.booking_context import BookingContext
+from app.domain.booking_state import BookingState
+from app.infrastructure.cache.memory_cache import MemoryCache
 
 
 def settings(
@@ -179,3 +188,110 @@ async def test_dependency_getters_return_container_instances() -> None:
 
     await container.close()
     await client.aclose()
+
+
+@pytest.mark.parametrize(
+    "conversation_id",
+    ["", "   ", "x" * 129, "0901234567", "+84 901-234-567"],
+)
+@pytest.mark.asyncio
+async def test_context_store_rejects_invalid_conversation_ids(
+    conversation_id: str,
+) -> None:
+    store = ConversationContextStore(cache=MemoryCache())
+
+    with pytest.raises(InvalidConversationIdError):
+        await store.get_or_create(conversation_id)
+
+
+@pytest.mark.asyncio
+async def test_context_store_normalizes_and_reuses_a_valid_conversation_id() -> None:
+    cache = MemoryCache()
+    store = ConversationContextStore(cache=cache)
+
+    created = await store.get_or_create("  conversation-1  ")
+    loaded = await store.get_or_create("conversation-1")
+
+    assert created.conversation_id == "conversation-1"
+    assert loaded is created
+    assert await cache.get("conversation-1") is created
+
+
+@pytest.mark.asyncio
+async def test_context_store_keeps_conversations_independent() -> None:
+    store = ConversationContextStore(cache=MemoryCache())
+
+    first = await store.get_or_create("conversation-1")
+    second = await store.get_or_create("conversation-2")
+
+    assert first is not second
+    assert first.conversation_id != second.conversation_id
+
+
+@pytest.mark.asyncio
+async def test_context_store_save_preserves_identity_and_state() -> None:
+    store = ConversationContextStore(cache=MemoryCache())
+    context = BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.SELECTING_SERVICE,
+    )
+
+    await store.save("conversation-1", context)
+    loaded = await store.get_or_create("conversation-1")
+
+    assert loaded is context
+    assert loaded.state is BookingState.SELECTING_SERVICE
+
+
+@pytest.mark.asyncio
+async def test_context_store_save_rejects_non_booking_context() -> None:
+    store = ConversationContextStore(cache=MemoryCache())
+
+    with pytest.raises(InvalidConversationContextError):
+        await store.save("conversation-1", cast(BookingContext, object()))
+
+
+@pytest.mark.asyncio
+async def test_context_store_save_rejects_mismatched_identity() -> None:
+    store = ConversationContextStore(cache=MemoryCache())
+    context = BookingContext(conversation_id="conversation-2")
+
+    with pytest.raises(InvalidConversationContextError):
+        await store.save("conversation-1", context)
+
+
+@pytest.mark.asyncio
+async def test_context_store_rejects_invalid_cached_value() -> None:
+    cache = MemoryCache()
+    cache._contexts["conversation-1"] = cast(BookingContext, object())
+    store = ConversationContextStore(cache=cache)
+
+    with pytest.raises(InvalidCachedContextError):
+        await store.get_or_create("conversation-1")
+
+
+@pytest.mark.asyncio
+async def test_context_store_reset_replaces_context_and_preserves_other_conversation() -> None:
+    cache = MemoryCache()
+    store = ConversationContextStore(cache=cache)
+    original = BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.SELECTING_SERVICE,
+        phone="0901234567",
+        pending_action="search_services",
+    )
+    other = BookingContext(
+        conversation_id="conversation-2",
+        state=BookingState.SELECTING_SHOP,
+    )
+    await cache.save(original)
+    await cache.save(other)
+
+    reset_context = await store.reset("conversation-1")
+
+    assert reset_context is not original
+    assert reset_context.state is BookingState.IDLE
+    assert reset_context.phone is None
+    assert reset_context.pending_action is None
+    assert await cache.get("conversation-1") is reset_context
+    assert await cache.get("conversation-2") is other
