@@ -639,13 +639,39 @@
       "description": "Creating the booking through the backend.",
       "on_enter": {
         "instruction_template": "booking_processing",
-        "actions": ["create_booking"]
+        "actions": ["create_booking"],
+        "on_fail": [
+          {
+            "condition": "booking_conflict",
+            "target": "selecting_time",
+            "actions": [],
+            "instruction_template": "slot_unavailable"
+          },
+          {
+            "condition": "booking_api_error",
+            "target": "booking_failed",
+            "actions": [],
+            "instruction_template": "booking_failed"
+          },
+          {
+            "condition": "booking_data_incomplete",
+            "target": "awaiting_confirmation",
+            "actions": [],
+            "instruction_template": "booking_data_incomplete"
+          },
+          {
+            "condition": "*",
+            "target": "booking_failed",
+            "actions": [],
+            "instruction_template": "booking_failed"
+          }
+        ]
       },
       "transitions": [
         {
           "intent": "booking_succeeded",
           "target": "completed",
-          "actions": ["complete_booking"]
+          "actions": []
         },
         {
           "intent": "booking_failed",
@@ -659,7 +685,7 @@
           "op": "not_null"
         },
         "target": "completed",
-        "actions": ["complete_booking"],
+        "actions": [],
         "on_fail": {
           "condition": "booking_api_error",
           "target": "booking_failed",

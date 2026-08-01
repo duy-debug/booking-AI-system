@@ -663,3 +663,36 @@ def test_failure_code_is_not_evaluated_as_flow_condition() -> None:
         StateMachine(make_flow()).resolve_failure(transition, "gte")
         is failure
     )
+
+
+def test_resolve_failure_supports_flow_on_enter_without_mutation() -> None:
+    context = make_context(state=BookingState.BOOKING_EXECUTING)
+    exact = FlowFailure(
+        "booking_conflict",
+        BookingState.SELECTING_TIME,
+        instruction_template="slot_unavailable",
+    )
+    wildcard = FlowFailure(
+        "*",
+        BookingState.BOOKING_FAILED,
+        instruction_template="booking_failed",
+    )
+    on_enter = FlowOnEnter(
+        "booking_processing",
+        ("create_booking",),
+        (wildcard, exact),
+    )
+    machine = StateMachine(make_flow())
+
+    assert machine.resolve_failure(on_enter, "booking_conflict") is exact
+    assert machine.resolve_failure(on_enter, "unknown_failure") is wildcard
+    assert context.state is BookingState.BOOKING_EXECUTING
+
+
+def test_flow_on_enter_failure_returns_none_without_route() -> None:
+    on_enter = FlowOnEnter("instruction", ("action",))
+
+    assert (
+        StateMachine(make_flow()).resolve_failure(on_enter, "booking_api_error")
+        is None
+    )

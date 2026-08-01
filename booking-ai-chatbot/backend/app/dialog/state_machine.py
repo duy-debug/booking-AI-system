@@ -2,7 +2,7 @@
 
 import operator
 from enum import Enum
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from app.dialog.flow_loader import (
     SUPPORTED_OPERATORS,
@@ -18,6 +18,15 @@ from app.dialog.flow_loader import (
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.domain.exceptions import InvalidBookingStateError
+
+
+class FailureSource(Protocol):
+    """Exposes declarative failure routes to the resolver."""
+
+    @property
+    def on_fail(self) -> tuple[FlowFailure, ...]:
+        """Return failure routes in declaration order."""
+        ...
 
 
 class StateMachine:
@@ -229,7 +238,7 @@ class StateMachine:
 
     def resolve_failure(
         self,
-        transition: FlowTransition | FlowAutoTransition,
+        transition: FailureSource,
         failure_code: str,
     ) -> FlowFailure | None:
         """Resolve an exact failure code before canonical fallback routes."""

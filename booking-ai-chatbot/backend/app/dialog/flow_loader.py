@@ -61,6 +61,7 @@ class FlowOnEnter:
 
     instruction_template: str | None = None
     actions: tuple[str, ...] = ()
+    on_fail: tuple[FlowFailure, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,7 +184,7 @@ def _parse_state(
         definition.get("description"),
         f"State '{name}' field 'description'",
     )
-    on_enter = _parse_on_enter(name, definition.get("on_enter"))
+    on_enter = _parse_on_enter(name, definition.get("on_enter"), declared)
     terminal = definition.get("terminal", False)
     if type(terminal) is not bool:
         raise InvalidFlowDefinitionError(
@@ -207,6 +208,10 @@ def _parse_state(
         raise InvalidFlowDefinitionError(
             f"Terminal state '{name}' must not define auto transitions."
         )
+    if terminal and _FORBIDDEN_FAILURE_ACTIONS.intersection(on_enter.actions):
+        raise InvalidFlowDefinitionError(
+            f"Terminal state '{name}' must not execute booking side effects."
+        )
     phone_split = _parse_phone_split(name, definition.get("phone_split_mode"))
     return FlowState(
         description=description,
@@ -218,7 +223,11 @@ def _parse_state(
     )
 
 
-def _parse_on_enter(state: str, raw: object) -> FlowOnEnter:
+def _parse_on_enter(
+    state: str,
+    raw: object,
+    declared: dict[BookingState, object],
+) -> FlowOnEnter:
     if raw is None:
         return FlowOnEnter()
     value = _object(raw, f"State '{state}' field 'on_enter' must be an object.")
@@ -229,7 +238,8 @@ def _parse_on_enter(state: str, raw: object) -> FlowOnEnter:
     if template == "":
         raise InvalidFlowDefinitionError("Instruction template must not be empty.")
     actions = _actions(value.get("actions", []), f"state '{state}' on_enter")
-    return FlowOnEnter(template, actions)
+    failures = _failures(value.get("on_fail"), state, declared)
+    return FlowOnEnter(template, actions, failures)
 
 
 def _parse_transition(

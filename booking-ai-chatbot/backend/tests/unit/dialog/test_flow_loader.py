@@ -112,6 +112,7 @@ def test_loads_conditions_failures_auto_transitions_and_on_enter(tmp_path: Path)
 
     assert idle.on_enter.instruction_template == "greeting"
     assert idle.on_enter.actions == ("initialize",)
+    assert idle.on_enter.on_fail == ()
     assert transition.conditions[0].field == "num_customer"
     assert transition.conditions[0].op == "eq"
     assert transition.on_fail[0].condition == "invalid"
@@ -302,4 +303,93 @@ def test_booking_side_effect_is_forbidden_in_failure_actions(
     }
 
     with pytest.raises(InvalidFlowDefinitionError, match="must not create"):
+        FlowLoader.load(_write(tmp_path, payload))
+
+
+def test_on_enter_failures_parse_exact_and_wildcard_routes(tmp_path: Path) -> None:
+    payload = _flow()
+    idle = cast(dict[str, object], _states(payload)["idle"])
+    on_enter = cast(dict[str, object], idle["on_enter"])
+    on_enter["on_fail"] = [
+        {
+            "condition": "booking_api_error",
+            "target": "collecting_phone",
+            "actions": ["clarify"],
+            "instruction_template": "booking_failed",
+        },
+        {
+            "condition": "*",
+            "target": "idle",
+            "instruction_template": "try_again",
+        },
+    ]
+
+    flow = FlowLoader.load(_write(tmp_path, payload))
+    failures = flow.states[BookingState.IDLE].on_enter.on_fail
+
+    assert failures[0].condition == "booking_api_error"
+    assert failures[0].target is BookingState.COLLECTING_PHONE
+    assert failures[0].actions == ("clarify",)
+    assert failures[1].condition == "*"
+    assert failures[1].target is BookingState.IDLE
+
+
+@pytest.mark.parametrize(
+    "failures",
+    [
+        [
+            {"condition": "duplicate", "target": "idle"},
+            {"condition": "duplicate", "target": "idle"},
+        ],
+        [
+            {"condition": "*", "target": "idle"},
+            {"condition": "default", "target": "idle"},
+        ],
+        [
+            {
+                "condition": "invalid",
+                "target": "idle",
+                "instruction_template": "",
+            }
+        ],
+        [{"condition": "invalid", "target": "selecting_date"}],
+        [
+            {
+                "condition": "invalid",
+                "target": "idle",
+                "actions": ["create_booking"],
+            }
+        ],
+        [
+            {
+                "condition": "invalid",
+                "target": "idle",
+                "actions": ["retry_booking"],
+            }
+        ],
+    ],
+)
+def test_invalid_on_enter_failure_routes_are_rejected(
+    tmp_path: Path,
+    failures: list[dict[str, object]],
+) -> None:
+    payload = _flow()
+    idle = cast(dict[str, object], _states(payload)["idle"])
+    on_enter = cast(dict[str, object], idle["on_enter"])
+    on_enter["on_fail"] = failures
+
+    with pytest.raises(InvalidFlowDefinitionError):
+        FlowLoader.load(_write(tmp_path, payload))
+
+
+@pytest.mark.parametrize("action", ["create_booking", "retry_booking"])
+def test_terminal_on_enter_rejects_booking_side_effect(
+    tmp_path: Path,
+    action: str,
+) -> None:
+    payload = _flow()
+    completed = cast(dict[str, object], _states(payload)["completed"])
+    completed["on_enter"] = {"actions": [action]}
+
+    with pytest.raises(InvalidFlowDefinitionError, match="Terminal state"):
         FlowLoader.load(_write(tmp_path, payload))
