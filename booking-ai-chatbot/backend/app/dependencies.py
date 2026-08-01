@@ -17,6 +17,7 @@ from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.application.ports.booking_gateway import BookingGateway
 from app.core.config import Settings
 from app.dialog.dialog_controller import DialogController
+from app.dialog.entity_resolution import EntityResolutionCoordinator
 from app.dialog.flow_loader import FlowDefinition, FlowLoader
 from app.dialog.instruction_builder import InstructionBuilder
 from app.dialog.nlu import (
@@ -44,6 +45,7 @@ class ApplicationContainer:
     instruction_builder: InstructionBuilder
     deterministic_nlu: DeterministicNLU
     state_intent_policy: StateIntentPolicy
+    entity_resolution_coordinator: EntityResolutionCoordinator
     _handlers: tuple[object, ...] = field(repr=False)
     _owns_http_client: bool = field(repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
@@ -84,6 +86,10 @@ async def create_application_container(
         collect_customer_handler = CollectCustomerHandler(booking_gateway)
         confirm_phone_handler = ConfirmPhoneHandler()
         create_booking_handler = CreateBookingHandler(booking_gateway)
+        entity_resolution_coordinator = EntityResolutionCoordinator(
+            search_shop_handler=search_shop_handler,
+            search_service_handler=search_service_handler,
+        )
         handlers: tuple[object, ...] = (
             search_shop_handler,
             search_service_handler,
@@ -118,6 +124,7 @@ async def create_application_container(
                 intent_policy=state_intent_policy,
             ),
             state_intent_policy=state_intent_policy,
+            entity_resolution_coordinator=entity_resolution_coordinator,
             _handlers=handlers,
             _owns_http_client=owns_http_client,
         )

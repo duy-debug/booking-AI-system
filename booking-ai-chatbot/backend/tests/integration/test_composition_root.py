@@ -80,6 +80,12 @@ async def test_container_assembles_shared_dependencies_without_network_calls() -
         "select_people",
     )
     assert "*" not in container.state_intent_policy.allowed_for(BookingState.IDLE)
+    assert container.entity_resolution_coordinator._search_shop_handler is (
+        container._handlers[0]
+    )
+    assert container.entity_resolution_coordinator._search_service_handler is (
+        container._handlers[1]
+    )
     assert request_count == 0
 
     await container.close()
@@ -103,6 +109,10 @@ async def test_two_containers_are_isolated_except_for_injected_client() -> None:
     assert first.instruction_builder is not second.instruction_builder
     assert first.deterministic_nlu is not second.deterministic_nlu
     assert first.state_intent_policy is not second.state_intent_policy
+    assert (
+        first.entity_resolution_coordinator
+        is not second.entity_resolution_coordinator
+    )
 
     async def custom_action(context: ActionExecutionContext) -> ActionResult:
         return ActionResult("container_only")
