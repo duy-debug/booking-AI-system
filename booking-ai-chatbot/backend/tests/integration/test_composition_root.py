@@ -8,6 +8,7 @@ from app.application.ports.booking_gateway import BookingGateway
 from app.core.config import Settings
 from app.dependencies import create_application_container
 from app.dialog.dialog_controller import DialogTurnInput, DialogTurnStatus
+from app.dialog.instruction_builder import DialogResponseDraft
 from app.dialog.tool_bridge import ActionExecutionContext, ActionResult
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
@@ -69,6 +70,7 @@ async def test_container_assembles_shared_dependencies_without_network_calls() -
     assert container.dialog_controller._state_machine is container.state_machine
     assert container.dialog_controller._tool_bridge is container.tool_bridge
     assert isinstance(container.memory_cache, MemoryCache)
+    assert container.instruction_builder.registered_templates()
     assert request_count == 0
 
     await container.close()
@@ -89,13 +91,20 @@ async def test_two_containers_are_isolated_except_for_injected_client() -> None:
     assert first.state_machine is not second.state_machine
     assert first.flow_definition is not second.flow_definition
     assert first.memory_cache is not second.memory_cache
+    assert first.instruction_builder is not second.instruction_builder
 
     async def custom_action(context: ActionExecutionContext) -> ActionResult:
         return ActionResult("container_only")
 
     first.tool_bridge.register_action("container_only", custom_action)
+    first.instruction_builder.register_template(
+        "container_only",
+        lambda context, result: DialogResponseDraft("Chỉ container đầu."),
+    )
     assert first.tool_bridge.has_action("container_only")
     assert not second.tool_bridge.has_action("container_only")
+    assert first.instruction_builder.has_template("container_only")
+    assert not second.instruction_builder.has_template("container_only")
 
     await first.close()
     await second.close()

@@ -18,6 +18,7 @@ from app.application.ports.booking_gateway import BookingGateway
 from app.core.config import Settings
 from app.dialog.dialog_controller import DialogController
 from app.dialog.flow_loader import FlowDefinition, FlowLoader
+from app.dialog.instruction_builder import InstructionBuilder
 from app.dialog.state_machine import StateMachine
 from app.dialog.tool_bridge import ToolBridge
 from app.infrastructure.booking_api.http_booking_gateway import HTTPBookingGateway
@@ -35,6 +36,7 @@ class ApplicationContainer:
     state_machine: StateMachine
     flow_definition: FlowDefinition
     memory_cache: MemoryCache
+    instruction_builder: InstructionBuilder
     _handlers: tuple[object, ...] = field(repr=False)
     _owns_http_client: bool = field(repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
@@ -103,6 +105,7 @@ async def create_application_container(
             state_machine=state_machine,
             flow_definition=flow_definition,
             memory_cache=MemoryCache(),
+            instruction_builder=InstructionBuilder(),
             _handlers=handlers,
             _owns_http_client=owns_http_client,
         )
