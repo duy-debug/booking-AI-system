@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Iterator
+from datetime import date, time
 from typing import cast
 from uuid import UUID
 
@@ -204,6 +205,61 @@ def test_valid_structured_llm_fallback_returns_http_200(
     assert response.status_code == 200
     assert response.json()["state"] == "selecting_shop"
     assert gateway.calls == 1
+    assert outbound_requests == []
+
+
+def test_in_progress_change_returns_200_and_persists_atomic_result(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    context = BookingContext(
+        "conversation-change",
+        state=BookingState.AWAITING_CONFIRMATION,
+        shop=SHOP,
+        booking_date=date(2026, 8, 5),
+        start_time=time(10, 0),
+    )
+    container.memory_cache._contexts[context.conversation_id] = context
+
+    response = post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message="đổi ngày",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "selecting_date"
+    assert response.json()["text"] == "Bạn muốn đổi sang ngày nào?"
+    saved = container.memory_cache._contexts[context.conversation_id]
+    assert saved.booking_date is None
+    assert saved.start_time is None
+    assert saved.shop is SHOP
+    assert outbound_requests == []
+
+
+def test_completed_booking_change_is_rejected_without_mutation_or_pos_call(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    context = BookingContext(
+        "conversation-completed-change",
+        state=BookingState.COMPLETED,
+        booking_date=date(2026, 8, 5),
+    )
+    container.memory_cache._contexts[context.conversation_id] = context
+
+    response = post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message="đổi ngày",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "completed"
+    assert "Đặt lịch này đã hoàn tất" in response.json()["text"]
+    assert context.booking_date == date(2026, 8, 5)
     assert outbound_requests == []
 
 

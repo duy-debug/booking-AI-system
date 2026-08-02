@@ -498,6 +498,14 @@ class ToolBridge:
             ("handle_service_selection", self._handle_service_selection),
             ("handle_time_selection", self._handle_time_selection),
             ("handle_therapist_selection", self._handle_therapist_selection),
+            ("change_shop", self._change_shop),
+            ("change_date", self._change_date),
+            ("change_people", self._change_people),
+            ("change_duration", self._change_duration),
+            ("change_service", self._change_service),
+            ("change_time", self._change_time),
+            ("change_therapist", self._change_therapist),
+            ("change_phone", self._change_phone),
             ("skip_therapist", self._skip_therapist),
             ("skip_therapist_for_group", self._skip_therapist_for_group),
             ("clear_date", self._clear_date),
@@ -583,6 +591,74 @@ class ToolBridge:
         )
         context.booking_context.set_therapist_preference(preference)
         return ActionResult("handle_therapist_selection", preference)
+
+    async def _change_shop(self, context: ActionExecutionContext) -> ActionResult:
+        shop = context.payload.get("shop")
+        if shop is not None and not isinstance(shop, Shop):
+            raise InvalidActionInputError("Changed shop must be a Shop.")
+        context.booking_context.change_shop(shop)
+        return ActionResult("change_shop", shop)
+
+    async def _change_date(self, context: ActionExecutionContext) -> ActionResult:
+        booking_date = context.payload.get("booking_date")
+        if booking_date is not None and type(booking_date) is not date:
+            raise InvalidActionInputError("Changed booking date must be a date.")
+        context.booking_context.change_booking_date(booking_date)
+        return ActionResult("change_date", booking_date)
+
+    async def _change_people(self, context: ActionExecutionContext) -> ActionResult:
+        value = context.payload.get("num_customer")
+        if value is not None and type(value) is not int:
+            raise InvalidActionInputError("Changed customer count must be an integer.")
+        context.booking_context.change_num_customer(value)
+        return ActionResult("change_people", value)
+
+    async def _change_duration(self, context: ActionExecutionContext) -> ActionResult:
+        value = context.payload.get("duration_minutes")
+        if value is not None and type(value) is not int:
+            raise InvalidActionInputError("Changed duration must be an integer.")
+        context.booking_context.change_duration(value)
+        return ActionResult("change_duration", value)
+
+    async def _change_service(self, context: ActionExecutionContext) -> ActionResult:
+        selection = context.payload.get("course_selection")
+        if selection is not None and not isinstance(selection, CourseSelection):
+            raise InvalidActionInputError(
+                "Changed service must be a CourseSelection."
+            )
+        context.booking_context.change_course_selection(selection)
+        return ActionResult("change_service", selection)
+
+    async def _change_time(self, context: ActionExecutionContext) -> ActionResult:
+        start_time = context.payload.get("start_time")
+        if start_time is not None and type(start_time) is not time:
+            raise InvalidActionInputError("Changed start time must be a time.")
+        context.booking_context.change_start_time(start_time)
+        return ActionResult("change_time", start_time)
+
+    async def _change_therapist(
+        self,
+        context: ActionExecutionContext,
+    ) -> ActionResult:
+        gender = context.payload.get("therapist_gender")
+        if gender is not None and gender not in {"male", "female", "none"}:
+            raise InvalidActionInputError("Changed therapist gender is invalid.")
+        preference = (
+            None
+            if gender is None
+            else TherapistPreference(TherapistPreferenceType(gender))
+        )
+        context.booking_context.change_therapist_preference(preference)
+        return ActionResult("change_therapist", preference)
+
+    async def _change_phone(self, context: ActionExecutionContext) -> ActionResult:
+        phone = context.payload.get("phone")
+        if phone is not None:
+            if not isinstance(phone, str):
+                raise InvalidActionInputError("Changed phone must be a string.")
+            BookingRules.validate_phone(phone)
+        context.booking_context.change_phone(phone)
+        return ActionResult("change_phone", phone)
 
     async def _skip_therapist(
         self,

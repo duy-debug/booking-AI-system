@@ -230,6 +230,96 @@ class BookingContext:
         self.ng_list_checked = False
         self.is_ng_customer = False
 
+    def change_shop(self, shop: Shop | None) -> None:
+        """Replace the shop and clear only shop-dependent booking data."""
+        self.shop = shop
+        self.service = None
+        self.addons = ()
+        self.options = ()
+        self._clear_availability_and_therapist()
+        self.member_rank = None
+        self.visit_count = None
+        self.ng_list_checked = False
+        self.is_ng_customer = False
+        self._clear_booking_result()
+
+    def change_booking_date(self, booking_date: date | None) -> None:
+        """Replace the date while preserving shop, course and customer choices."""
+        self.booking_date = booking_date
+        self._clear_availability_and_therapist()
+        self._clear_booking_result()
+
+    def change_num_customer(self, value: int | None) -> None:
+        """Replace the party size after validating its domain range."""
+        if value is not None and not 1 <= value <= 3:
+            raise InvalidCustomerCountError(
+                "Number of customers must be between one and three."
+            )
+        self.num_customer = value
+        self._clear_availability_and_therapist()
+        self._clear_booking_result()
+
+    def change_duration(self, value: int | None) -> None:
+        """Replace duration and invalidate its course and slot dependencies."""
+        if value is not None and (value <= 0 or value % 15 != 0):
+            raise InvalidDurationError(
+                "Booking duration must be positive and divisible by 15."
+            )
+        self.duration_minutes = value
+        self.service = None
+        self.addons = ()
+        self.options = ()
+        self._clear_availability_and_therapist()
+        self._clear_booking_result()
+
+    def change_course_selection(
+        self,
+        selection: CourseSelection | None,
+    ) -> None:
+        """Replace the course selection while preserving its selected shop."""
+        if selection is None:
+            self.service = None
+            self.addons = ()
+        else:
+            self.service = selection.main_course
+            self.addons = selection.addons
+        self.options = ()
+        self._clear_availability_and_therapist()
+        self._clear_booking_result()
+
+    def change_start_time(self, start_time: time | None) -> None:
+        """Replace the selected time and invalidate therapist confirmation."""
+        self.start_time = start_time
+        self.therapist_preference = None
+        self.therapist_verified = False
+        self._clear_booking_result()
+
+    def change_therapist_preference(
+        self,
+        preference: TherapistPreference | None,
+    ) -> None:
+        """Replace therapist preference without clearing the selected slot."""
+        if (
+            self.num_customer is not None
+            and self.num_customer >= 2
+            and preference is not None
+            and preference.preference_type is not TherapistPreferenceType.NONE
+        ):
+            raise TherapistNotAllowedForGroupError(
+                "Group bookings cannot specify a therapist preference."
+            )
+        self.therapist_preference = preference
+        self.therapist_verified = False
+        self._clear_booking_result()
+
+    def change_phone(self, phone: str | None) -> None:
+        """Replace customer phone data without clearing booking selections."""
+        self.customer = None
+        self.clear_phone()
+        if phone is not None:
+            self.phone = phone
+        self._clear_booking_result()
+
     def _clear_course_and_availability(self) -> None:
         self.service = None
         self.addons = ()
@@ -241,6 +331,14 @@ class BookingContext:
         self.start_time = None
         self.therapist_preference = None
         self.therapist_verified = False
+
+    def _clear_booking_result(self) -> None:
+        self.booking_id = None
+        self.booking = None
+        self.reservation_code = None
+        self.reservation_codes = ()
+        self.child_reservation_ids = ()
+        self.pending_action = None
 
     def reset(self) -> None:
         """Clear temporary booking data while preserving the conversation ID."""

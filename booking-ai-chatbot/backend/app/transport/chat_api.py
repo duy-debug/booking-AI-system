@@ -90,6 +90,9 @@ _UNSUPPORTED_TEXT = {
 }
 _ENTITY_FAILURE_TEXT = "Hệ thống chưa thể tra cứu thông tin lúc này. Vui lòng thử lại."
 _DEFAULT_UNRESOLVED_TEXT = "Tôi chưa hiểu yêu cầu. Vui lòng nhập lại rõ hơn."
+_TERMINAL_CHANGE_TEXT = (
+    "Đặt lịch này đã hoàn tất. Vui lòng tạo yêu cầu mới để thay đổi hoặc hủy lịch."
+)
 
 
 def get_application_container(request: Request) -> ApplicationContainer:
@@ -201,6 +204,13 @@ async def _process_chat_message(
         state=context.state,
     )
 
+    if (
+        context.state in {BookingState.COMPLETED, BookingState.CANCELLED}
+        and nlu_result.matched_rule
+        in {"change_booking_field", "change_entity_query"}
+    ):
+        return _handled_response(context, _TERMINAL_CHANGE_TEXT)
+
     if nlu_result.resolution_status is NLUResolutionStatus.UNRESOLVED:
         nlu_result = await container.llm_nlu_fallback.parse(
             text=request.message,
@@ -244,10 +254,14 @@ async def _process_chat_message(
         result=result,
         context=context,
     )
-    await container.conversation_context_store.save(
-        request.conversation_id,
-        context,
-    )
+    if not (
+        result.intent == "change_info"
+        and result.status is not DialogTurnStatus.SUCCESS
+    ):
+        await container.conversation_context_store.save(
+            request.conversation_id,
+            context,
+        )
     return response
 
 

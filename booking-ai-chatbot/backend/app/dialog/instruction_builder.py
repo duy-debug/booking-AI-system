@@ -222,9 +222,86 @@ class InstructionBuilder:
             ("booking_failed", self._booking_failed),
             ("booking_complete", self._booking_complete),
             ("booking_cancelled", self._booking_cancelled),
+            ("change_ask_shop", self._change_ask_shop),
+            ("change_ask_date", self._change_ask_date),
+            ("change_ask_people", self._change_ask_people),
+            ("change_ask_duration", self._change_ask_duration),
+            ("change_ask_service", self._change_ask_service),
+            ("change_ask_time", self._change_ask_time),
+            ("change_ask_therapist", self._change_ask_therapist),
+            ("change_ask_phone", self._change_ask_phone),
+            ("change_invalid", self._change_invalid),
         )
         for name, renderer in templates:
             self.register_template(name, renderer)
+
+    @staticmethod
+    def _change_ask_shop(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        return DialogResponseDraft("Bạn muốn đổi sang cửa hàng nào?")
+
+    @staticmethod
+    def _change_ask_date(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        return DialogResponseDraft("Bạn muốn đổi sang ngày nào?")
+
+    @staticmethod
+    def _change_ask_people(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        return DialogResponseDraft("Bạn muốn đổi thành bao nhiêu người?")
+
+    @staticmethod
+    def _change_ask_duration(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        return DialogResponseDraft("Bạn muốn đổi sang thời lượng bao nhiêu phút?")
+
+    @staticmethod
+    def _change_ask_service(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        return DialogResponseDraft("Bạn muốn đổi sang liệu trình nào?")
+
+    @staticmethod
+    def _change_ask_time(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        return DialogResponseDraft("Bạn muốn đổi sang khung giờ nào?")
+
+    @staticmethod
+    def _change_ask_therapist(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        return DialogResponseDraft(
+            "Bạn muốn chọn Nam, Nữ hay Không yêu cầu?",
+            ("Không yêu cầu", "Nam", "Nữ"),
+        )
+
+    @staticmethod
+    def _change_ask_phone(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        return DialogResponseDraft("Vui lòng nhập số điện thoại mới.")
+
+    @staticmethod
+    def _change_invalid(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        return DialogResponseDraft(
+            "Thông tin thay đổi chưa hợp lệ. Dữ liệu đặt lịch cũ vẫn được giữ nguyên."
+        )
 
     def _fallback_for_state(
         self,

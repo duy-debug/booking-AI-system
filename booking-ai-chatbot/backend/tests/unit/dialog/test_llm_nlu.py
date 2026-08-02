@@ -62,7 +62,7 @@ def policy() -> StateIntentPolicy:
             ),
             BookingState.COLLECTING_PHONE: frozenset({"provide_phone", "unknown"}),
             BookingState.AWAITING_CONFIRMATION: frozenset(
-                {"confirm", "deny", "unknown"}
+                {"confirm", "deny", "change_info", "unknown"}
             ),
         },
         frozenset(),
@@ -182,6 +182,48 @@ async def test_multiple_known_entities_only_use_the_current_intent_payload() -> 
     )
 
     assert result.payload == {"num_customer": 3}
+
+
+@pytest.mark.asyncio
+async def test_llm_change_output_maps_target_and_primitive_value() -> None:
+    fallback, gateway = fallback_for(
+        structured(
+            intent="change_booking_field",
+            entities={"change_target": "people", "number_of_people": 2},
+        )
+    )
+
+    result = await fallback.parse(
+        text="Cho mình đổi sang hai người",
+        state=BookingState.AWAITING_CONFIRMATION,
+    )
+
+    assert result.intent == "change_info"
+    assert result.payload == {"change_target": "people", "num_customer": 2}
+    assert gateway.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_llm_change_shop_query_stays_domain_neutral() -> None:
+    fallback, _ = fallback_for(
+        structured(
+            intent="change_booking_field",
+            entities={"change_target": "shop"},
+            entity_kind="shop",
+            entity_query="quận 1",
+        )
+    )
+
+    result = await fallback.parse(
+        text="Đổi sang chi nhánh gần quận 1",
+        state=BookingState.AWAITING_CONFIRMATION,
+    )
+
+    assert result.resolution_status is NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED
+    assert result.entity_kind is NLUEntityKind.SHOP
+    assert result.entity_query == "quận 1"
+    assert result.change_target == "shop"
+    assert result.payload == {}
 
 
 @pytest.mark.asyncio

@@ -65,7 +65,7 @@ def intent_policy() -> StateIntentPolicy:
                 {"provide_phone", "confirm", "deny", "cancel_flow", "unknown"}
             ),
             BookingState.AWAITING_CONFIRMATION: frozenset(
-                {"confirm", "deny", "cancel_flow", "unknown"}
+                {"confirm", "deny", "change_info", "cancel_flow", "unknown"}
             ),
             BookingState.BOOKING_FAILED: frozenset(
                 {"confirm", "deny", "unknown"}
@@ -199,6 +199,66 @@ def test_unknown_can_be_returned_as_unresolved_for_llm_fallback() -> None:
     assert result.intent is None
     assert result.resolution_status is NLUResolutionStatus.UNRESOLVED
     assert result.source is NLUSource.FALLBACK
+
+
+@pytest.mark.parametrize(
+    ("text", "target", "value_key", "expected"),
+    [
+        ("đổi ngày", "date", None, None),
+        ("đổi sang ngày mai", "date", "booking_date", date(2026, 8, 2)),
+        ("đổi thành 2 người", "people", "num_customer", 2),
+        ("đổi sang 60 phút", "duration", "duration_minutes", 60),
+        ("chọn lại cửa hàng", "shop", None, None),
+        ("chọn liệu trình khác", "service", None, None),
+        ("chọn giờ khác", "time", None, None),
+        (
+            "không yêu cầu kỹ thuật viên nữa",
+            "therapist",
+            "therapist_gender",
+            "none",
+        ),
+        ("sửa số điện thoại", "phone", None, None),
+    ],
+)
+def test_change_requests_use_one_general_intent(
+    nlu: DeterministicNLU,
+    text: str,
+    target: str,
+    value_key: str | None,
+    expected: object,
+) -> None:
+    result = nlu.parse(text=text, state=BookingState.AWAITING_CONFIRMATION)
+
+    assert result.intent == "change_info"
+    assert result.payload["change_target"] == target
+    assert set(result.payload) == (
+        {"change_target"} if value_key is None else {"change_target", value_key}
+    )
+    if value_key is not None:
+        assert result.payload[value_key] == expected
+
+
+def test_change_shop_query_requires_atomic_entity_resolution(
+    nlu: DeterministicNLU,
+) -> None:
+    result = nlu.parse(
+        text="đổi sang chi nhánh Quận 1",
+        state=BookingState.AWAITING_CONFIRMATION,
+    )
+
+    assert result.resolution_status is NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED
+    assert result.entity_kind is NLUEntityKind.SHOP
+    assert result.entity_query == "quận 1"
+    assert result.change_target == "shop"
+
+
+def test_non_booking_change_is_not_a_change_intent(nlu: DeterministicNLU) -> None:
+    result = nlu.parse(
+        text="đổi tiền giúp tôi",
+        state=BookingState.AWAITING_CONFIRMATION,
+    )
+
+    assert result.intent != "change_info"
 
 
 @pytest.mark.parametrize("phrase", ["đúng", "ĐÚNG RỒI!", "ok", "xác nhận"])

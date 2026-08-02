@@ -109,6 +109,25 @@ class FakeController:
         )
 
 
+class FailedChangeController(FakeController):
+    async def handle_turn(
+        self,
+        context: BookingContext,
+        turn: DialogTurnInput,
+    ) -> DialogTurnResult:
+        self.calls.append((context, turn))
+        return DialogTurnResult(
+            status=DialogTurnStatus.FAILURE_HANDLED,
+            initial_state=context.state,
+            final_state=context.state,
+            intent=turn.intent,
+            instruction_template="change_invalid",
+            executed_actions=(),
+            auto_transition_count=0,
+            failure_code="invalid_change",
+        )
+
+
 class FakeBuilder:
     def __init__(self) -> None:
         self.calls: list[tuple[DialogTurnResult, BookingContext]] = []
@@ -150,6 +169,7 @@ class FakeContainer:
             {
                 BookingState.IDLE: frozenset({"start_booking"}),
                 BookingState.SELECTING_SHOP: frozenset({"select_store"}),
+                BookingState.AWAITING_CONFIRMATION: frozenset({"change_info"}),
             },
             frozenset(),
         )
@@ -184,6 +204,17 @@ def unresolved_nlu() -> NLUResult:
         confidence=0.0,
         source=NLUSource.FALLBACK,
         resolution_status=NLUResolutionStatus.UNRESOLVED,
+    )
+
+
+def change_nlu() -> NLUResult:
+    return NLUResult(
+        intent="change_info",
+        payload={"change_target": "people", "num_customer": 5},
+        confidence=1.0,
+        source=NLUSource.DETERMINISTIC,
+        resolution_status=NLUResolutionStatus.RESOLVED,
+        matched_rule="change_booking_field",
     )
 
 
@@ -421,6 +452,24 @@ async def test_unresolved_branch_is_state_aware_and_does_not_dispatch(
     assert fake.llm_nlu_fallback.calls == [(request().message, state)]
     assert fake.entity_resolution_coordinator.calls == []
     assert fake.dialog_controller.calls == []
+    assert fake.conversation_context_store.saved == []
+
+
+@pytest.mark.asyncio
+async def test_failed_change_is_rendered_without_saving_partial_context() -> None:
+    context = BookingContext(
+        "conversation-a",
+        state=BookingState.AWAITING_CONFIRMATION,
+        num_customer=1,
+    )
+    fake = FakeContainer(context=context, nlu_result=change_nlu())
+    fake.dialog_controller = FailedChangeController()
+
+    response = await _process_chat_message(request=request(), container=as_container(fake))
+
+    assert response.status is DialogTurnStatus.FAILURE_HANDLED
+    assert context.num_customer == 1
+    assert len(fake.dialog_controller.calls) == 1
     assert fake.conversation_context_store.saved == []
 
 

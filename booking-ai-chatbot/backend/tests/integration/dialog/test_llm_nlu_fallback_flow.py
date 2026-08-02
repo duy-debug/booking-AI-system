@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import AsyncIterator
+from datetime import date
 from typing import cast
 
 import httpx
@@ -200,6 +201,28 @@ async def test_deterministic_entity_query_does_not_call_llm(
 
     assert gateway.calls == 0
     assert response.state is BookingState.SELECTING_SHOP
+    assert external_requests == []
+
+
+@pytest.mark.asyncio
+async def test_deterministic_change_request_does_not_call_llm(
+    runtime: tuple[ApplicationContainer, FakeLLMGateway, list[httpx.Request]],
+) -> None:
+    container, gateway, external_requests = runtime
+    context = await container.conversation_context_store.get_or_create(
+        "conversation-a"
+    )
+    context.state = BookingState.AWAITING_CONFIRMATION
+    context.booking_date = date(2026, 8, 5)
+
+    response = await _process_chat_message(
+        request=request("đổi ngày"),
+        container=container,
+    )
+
+    assert gateway.calls == 0
+    assert response.state is BookingState.SELECTING_DATE
+    assert context.booking_date is None
     assert external_requests == []
 
 

@@ -23,9 +23,20 @@ from pydantic import (
 from app.application.ports.llm_gateway import LLMGateway, LLMGatewayError, LLMMessage
 from app.dialog.dialog_controller import DialogTurnInput
 from app.dialog.flow_loader import FlowDefinition
+from app.domain.booking import CourseSelection, Shop
 from app.domain.booking_state import BookingState
 
 TodayProvider: TypeAlias = Callable[[], date]
+BookingChangeTarget: TypeAlias = Literal[
+    "shop",
+    "date",
+    "people",
+    "duration",
+    "service",
+    "time",
+    "therapist",
+    "phone",
+]
 
 LLM_NLU_MIN_CONFIDENCE = 0.70
 
@@ -162,6 +173,7 @@ class NLUResult:
     matched_rule: str | None = None
     entity_query: str | None = None
     entity_kind: NLUEntityKind | None = None
+    change_target: BookingChangeTarget | None = None
     has_unconsumed_entities: bool = False
 
     def __post_init__(self) -> None:
@@ -207,7 +219,11 @@ class NLUResult:
         if self.resolution_status is NLUResolutionStatus.RESOLVED:
             if self.intent is None:
                 raise ValueError("Resolved NLU result requires an intent.")
-            if self.entity_query is not None or self.entity_kind is not None:
+            if (
+                self.entity_query is not None
+                or self.entity_kind is not None
+                or self.change_target is not None
+            ):
                 raise ValueError("Resolved NLU result cannot contain an entity query.")
             return
         if self.intent is not None or self.payload:
@@ -219,7 +235,13 @@ class NLUResult:
                 or not isinstance(self.entity_kind, NLUEntityKind)
             ):
                 raise ValueError("Entity resolution result requires a query and kind.")
-        elif self.entity_query is not None or self.entity_kind is not None:
+            if self.change_target not in {None, "shop", "service"}:
+                raise ValueError("Entity resolution change target is invalid.")
+        elif (
+            self.entity_query is not None
+            or self.entity_kind is not None
+            or self.change_target is not None
+        ):
             raise ValueError("Unresolved NLU result cannot contain an entity query.")
 
 
@@ -256,6 +278,19 @@ class DeterministicNLU:
                 state,
                 allow_unknown=not self._unknown_as_unresolved,
             )
+
+        if _looks_like_change_request(normalized):
+            today = self._today_provider()
+            if not isinstance(today, date):
+                raise TypeError("Today provider must return a date.")
+            change_result = _parse_change_request(
+                normalized,
+                state=state,
+                today=today,
+                policy=self._intent_policy,
+            )
+            if change_result is not None:
+                return change_result
 
         if normalized in _CANCEL_PHRASES:
             return _resolved(
@@ -557,6 +592,7 @@ def _entity_required(
     confidence: float,
     matched_rule: str,
     has_unconsumed_entities: bool = False,
+    change_target: BookingChangeTarget | None = None,
 ) -> NLUResult:
     if not policy.is_allowed(state, required_intent):
         return _unresolved(
@@ -574,12 +610,139 @@ def _entity_required(
         matched_rule=matched_rule,
         entity_query=query,
         entity_kind=kind,
+        change_target=change_target,
         has_unconsumed_entities=has_unconsumed_entities,
     )
 
 
 def _contains_booking_request(text: str) -> bool:
     return text == "đặt lịch" or " muốn đặt lịch" in f" {text}"
+
+
+def _looks_like_change_request(text: str) -> bool:
+    return (
+        text.startswith(("đổi ", "chọn lại ", "sửa "))
+        or text.startswith(
+            ("chọn giờ khác", "chọn khung giờ khác", "chọn liệu trình khác")
+        )
+        or " đổi " in f" {text} "
+        or text.startswith("không yêu cầu kỹ thuật viên")
+    )
+
+
+def _parse_change_request(
+    text: str,
+    *,
+    state: BookingState,
+    today: date,
+    policy: StateIntentPolicy,
+) -> NLUResult | None:
+    target = _change_target(text)
+    if target is None:
+        return None
+
+    payload: dict[str, object] = {"change_target": target}
+    if target == "date":
+        booking_date, _ = _extract_date(text, today)
+        if booking_date is not None:
+            payload["booking_date"] = booking_date
+    elif target == "people":
+        people = _extract_people(text, allow_bare=False)
+        if people is not None:
+            payload["num_customer"] = people
+    elif target == "duration":
+        duration, _ = _extract_duration(text, allow_bare=False)
+        if duration is not None:
+            payload["duration_minutes"] = duration
+    elif target == "time":
+        start_time = _extract_time(text)
+        if start_time is not None:
+            payload["start_time"] = start_time
+    elif target == "therapist":
+        gender = _change_therapist_gender(text)
+        if gender is not None:
+            payload["therapist_gender"] = gender
+    elif target == "phone":
+        phone = _extract_phone(text)
+        if phone is not None:
+            payload["phone"] = phone
+    elif target in {"shop", "service"}:
+        query = _change_entity_query(text, target)
+        if query is not None:
+            return _entity_required(
+                policy,
+                state,
+                required_intent="change_info",
+                query=query,
+                kind=(
+                    NLUEntityKind.SHOP
+                    if target == "shop"
+                    else NLUEntityKind.COURSE
+                ),
+                confidence=0.95,
+                matched_rule="change_entity_query",
+                change_target=target,
+            )
+    return _resolved(
+        policy,
+        state,
+        "change_info",
+        payload,
+        0.95,
+        "change_booking_field",
+    )
+
+
+def _change_target(text: str) -> BookingChangeTarget | None:
+    if "số điện thoại" in text:
+        return "phone"
+    if "kỹ thuật viên" in text:
+        return "therapist"
+    if "cửa hàng" in text or "chi nhánh" in text:
+        return "shop"
+    if "liệu trình" in text or "dịch vụ" in text:
+        return "service"
+    if "ngày" in text:
+        return "date"
+    if "số người" in text or _extract_people(text, allow_bare=False) is not None:
+        return "people"
+    duration, _ = _extract_duration(text, allow_bare=False)
+    if "thời lượng" in text or duration is not None:
+        return "duration"
+    if "khung giờ" in text or "giờ" in text:
+        return "time"
+    return None
+
+
+def _change_entity_query(
+    text: str,
+    target: Literal["shop", "service"],
+) -> str | None:
+    query = _strip_prefixes(
+        text,
+        ("đổi sang ", "đổi ", "chọn lại ", "chọn "),
+    )
+    prefixes = (
+        ("chi nhánh ", "cửa hàng ")
+        if target == "shop"
+        else ("liệu trình ", "dịch vụ ")
+    )
+    query = _strip_prefixes(query, prefixes)
+    return (
+        None
+        if query in {"", "khác", "cửa hàng", "chi nhánh", "liệu trình", "dịch vụ"}
+        else query
+    )
+
+
+def _change_therapist_gender(text: str) -> Literal["male", "female", "none"] | None:
+    if "không yêu cầu" in text or "không chọn" in text:
+        return "none"
+    if text.endswith(" nam"):
+        return "male"
+    if text.endswith(" nữ"):
+        return "female"
+    return None
 
 
 def _extract_people(
@@ -824,6 +987,9 @@ def _validate_dispatch_payload(
     intent: str,
     payload: Mapping[str, object],
 ) -> None:
+    if intent == "change_info":
+        _validate_change_payload(payload)
+        return
     expected_keys: frozenset[str]
     expected_type: type[object] | None
     if intent == "select_people":
@@ -866,6 +1032,40 @@ def _validate_dispatch_payload(
             )
 
 
+def _validate_change_payload(payload: Mapping[str, object]) -> None:
+    target = payload.get("change_target")
+    value_contracts: dict[str, tuple[str, type[object]]] = {
+        "shop": ("shop", Shop),
+        "date": ("booking_date", date),
+        "people": ("num_customer", int),
+        "duration": ("duration_minutes", int),
+        "service": ("course_selection", CourseSelection),
+        "time": ("start_time", time),
+        "therapist": ("therapist_gender", str),
+        "phone": ("phone", str),
+    }
+    if not isinstance(target, str) or target not in value_contracts:
+        raise NLUResultNotDispatchableError(
+            "Booking change target is not supported."
+        )
+    value_key, value_type = value_contracts[target]
+    if frozenset(payload) == {"change_target"}:
+        return
+    if frozenset(payload) != {"change_target", value_key}:
+        raise NLUResultNotDispatchableError(
+            "Booking change payload does not match its target."
+        )
+    value = payload[value_key]
+    if value_type is int:
+        valid = type(value) is int
+    else:
+        valid = isinstance(value, value_type)
+    if not valid:
+        raise NLUResultNotDispatchableError(
+            "Booking change value has an invalid type."
+        )
+
+
 def _looks_like_question(raw_text: str, normalized: str) -> bool:
     return raw_text.strip().endswith("?") or normalized.startswith(_QUESTION_PREFIXES)
 
@@ -896,6 +1096,7 @@ class LLMNLUEntities(BaseModel):
     phone: StrictStr | None = None
     confirmation: StrictBool | None = None
     therapist_gender: Literal["male", "female", "none"] | None = None
+    change_target: BookingChangeTarget | None = None
 
 
 class LLMNLUOutput(BaseModel):
@@ -916,6 +1117,7 @@ _LLM_INTENT_ALIASES = {
     "select_shop": "select_store",
     "select_service": "select_course",
     "collect_phone": "provide_phone",
+    "change_booking_field": "change_info",
 }
 _LLM_ENTITY_INTENTS = {
     NLUEntityKind.SHOP: "select_store",
@@ -985,9 +1187,23 @@ class LLMNLUFallback:
 
         entity_kind, entity_query = _llm_entity_reference(output)
         if entity_kind is not None:
-            expected_intent = _LLM_ENTITY_INTENTS[entity_kind]
+            change_target = output.entities.change_target
+            expected_intent = (
+                "change_info"
+                if change_target is not None
+                else _LLM_ENTITY_INTENTS[entity_kind]
+            )
+            change_kind_matches = (
+                change_target is None
+                or (change_target == "shop" and entity_kind is NLUEntityKind.SHOP)
+                or (
+                    change_target == "service"
+                    and entity_kind is NLUEntityKind.COURSE
+                )
+            )
             if (
                 intent != expected_intent
+                or not change_kind_matches
                 or not self._intent_policy.is_allowed(state, expected_intent)
                 or entity_query is None
                 or not entity_query.strip()
@@ -1002,6 +1218,7 @@ class LLMNLUFallback:
                 matched_rule="llm_nlu_fallback",
                 entity_query=entity_query.strip(),
                 entity_kind=entity_kind,
+                change_target=change_target,
             )
 
         if not self._intent_policy.is_allowed(state, intent):
@@ -1031,7 +1248,8 @@ def _build_llm_messages(
         "entities, entity_kind, entity_query. "
         f"Current state: {state.value}. Allowed intents: {intents}. "
         "Entities may only contain number_of_people, duration_minutes, booking_date "
-        "(YYYY-MM-DD), start_time (HH:MM), phone, confirmation, therapist_gender. "
+        "(YYYY-MM-DD), start_time (HH:MM), phone, confirmation, therapist_gender, "
+        "change_target. Use intent change_info for an in-progress booking change. "
         "For shop/course/therapist return only entity_kind and entity_query; never infer "
         "IDs or return domain objects. Example: "
         '{"intent":"select_people","confidence":0.9,'
@@ -1060,6 +1278,8 @@ def _llm_direct_payload(
     intent: str,
     entities: LLMNLUEntities,
 ) -> dict[str, object] | None:
+    if intent == "change_info":
+        return _llm_change_payload(entities)
     if intent in _LLM_NO_PAYLOAD_INTENTS:
         return {}
     if intent == "select_people" and entities.number_of_people is not None:
@@ -1073,6 +1293,34 @@ def _llm_direct_payload(
     if intent == "provide_phone" and entities.phone is not None:
         return {"phone": entities.phone}
     return None
+
+
+def _llm_change_payload(
+    entities: LLMNLUEntities,
+) -> dict[str, object] | None:
+    target = entities.change_target
+    if target is None:
+        return None
+    payload: dict[str, object] = {"change_target": target}
+    if target == "people" and entities.number_of_people is not None:
+        payload["num_customer"] = entities.number_of_people
+    elif target == "duration" and entities.duration_minutes is not None:
+        payload["duration_minutes"] = entities.duration_minutes
+    elif target == "date" and entities.booking_date is not None:
+        parsed = _llm_date_payload(entities.booking_date)
+        if parsed is None:
+            return None
+        payload.update(parsed)
+    elif target == "time" and entities.start_time is not None:
+        parsed = _llm_time_payload(entities.start_time)
+        if parsed is None:
+            return None
+        payload.update(parsed)
+    elif target == "therapist" and entities.therapist_gender is not None:
+        payload["therapist_gender"] = entities.therapist_gender
+    elif target == "phone" and entities.phone is not None:
+        payload["phone"] = entities.phone
+    return payload
 
 
 def _llm_date_payload(value: str) -> dict[str, object] | None:

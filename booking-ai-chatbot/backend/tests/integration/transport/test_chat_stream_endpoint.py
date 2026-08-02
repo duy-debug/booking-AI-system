@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Iterator
+from datetime import date, time
 from typing import cast
 from uuid import UUID
 
@@ -192,6 +193,36 @@ def test_stream_success_contract_and_event_order(
         "/api/v1/chat",
         "/api/v1/chat/stream",
     }
+    assert outbound_requests == []
+
+
+def test_change_request_has_json_parity_and_normal_sse_event_order(
+    stream_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = stream_client
+    container = container_of(client)
+    context = BookingContext(
+        "conversation-change",
+        state=BookingState.AWAITING_CONFIRMATION,
+        booking_date=date(2026, 8, 5),
+        start_time=time(10, 0),
+    )
+    container.memory_cache._contexts[context.conversation_id] = context
+
+    response = post_stream(
+        client,
+        conversation_id=context.conversation_id,
+        message="đổi ngày",
+    )
+    events = parse_events(response)
+
+    assert response.status_code == 200
+    assert [event for event, _ in events] == ["started", "message", "completed"]
+    assert events[1][1]["state"] == "selecting_date"
+    assert events[1][1]["text"] == "Bạn muốn đổi sang ngày nào?"
+    assert "token" not in {event for event, _ in events}
+    assert context.booking_date is None
+    assert context.start_time is None
     assert outbound_requests == []
 
 

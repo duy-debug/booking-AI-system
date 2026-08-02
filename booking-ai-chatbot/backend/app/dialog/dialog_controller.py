@@ -6,6 +6,7 @@ from enum import StrEnum
 from types import MappingProxyType
 
 from app.dialog.flow_loader import (
+    ChangeRule,
     FlowAutoTransition,
     FlowDefinition,
     FlowFailure,
@@ -90,6 +91,7 @@ class DialogController:
         flow: FlowDefinition,
         state_machine: StateMachine,
         tool_bridge: ToolBridge,
+        change_rules: Mapping[str, ChangeRule] | None = None,
         max_auto_transitions: int = 8,
     ) -> None:
         if type(max_auto_transitions) is not int or max_auto_transitions < 1:
@@ -97,6 +99,7 @@ class DialogController:
         self._flow = flow
         self._state_machine = state_machine
         self._tool_bridge = tool_bridge
+        self._change_rules = dict(change_rules or {})
         self._max_auto_transitions = max_auto_transitions
 
     async def handle_turn(
@@ -112,10 +115,18 @@ class DialogController:
             payload=turn.payload,
             idempotency_key=turn.idempotency_key,
         )
-        transition = self._state_machine.resolve_transition(
-            booking_context,
-            turn.intent,
-        )
+        change_rule: ChangeRule | None = None
+        has_change_value = False
+        if turn.intent == "change_info":
+            change_rule, transition, has_change_value = self._change_transition(
+                booking_context,
+                turn,
+            )
+        else:
+            transition = self._state_machine.resolve_transition(
+                booking_context,
+                turn.intent,
+            )
 
         try:
             transition_report = await self._execute_actions(
@@ -156,6 +167,19 @@ class DialogController:
             )
 
         committed_actions += on_enter_report.executed_action_names
+        if change_rule is not None:
+            return self._success_result(
+                booking_context=booking_context,
+                initial_state=initial_state,
+                intent=turn.intent,
+                instruction_template=(
+                    on_enter.instruction_template
+                    if has_change_value
+                    else change_rule.prompt_template
+                ),
+                committed_actions=committed_actions,
+                auto_transition_count=0,
+            )
         return await self._execute_auto_transitions(
             booking_context=booking_context,
             action_context=action_context,
@@ -164,6 +188,38 @@ class DialogController:
             committed_actions=committed_actions,
             instruction_template=on_enter.instruction_template,
         )
+
+    def _change_transition(
+        self,
+        booking_context: BookingContext,
+        turn: DialogTurnInput,
+    ) -> tuple[ChangeRule, FlowTransition, bool]:
+        target = turn.payload.get("change_target")
+        if not isinstance(target, str):
+            raise InvalidDialogTurnError(
+                "A booking change requires a supported change target."
+            )
+        try:
+            rule = self._change_rules[target]
+        except KeyError as error:
+            raise InvalidDialogTurnError(
+                "The requested booking field cannot be changed."
+            ) from error
+        self._state_machine.resolve_transition(booking_context, turn.intent)
+        has_value = len(turn.payload) > 1
+        transition = FlowTransition(
+            intent=turn.intent,
+            target=rule.applied_state if has_value else rule.next_state,
+            actions=(rule.reset_action,),
+            on_fail=(
+                FlowFailure(
+                    condition="*",
+                    target=booking_context.state,
+                    instruction_template="change_invalid",
+                ),
+            ),
+        )
+        return rule, transition, has_value
 
     async def _execute_auto_transitions(
         self,

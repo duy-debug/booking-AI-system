@@ -152,6 +152,7 @@ async def create_application_container(
 
     try:
         flow_definition = FlowLoader.load(settings.booking_flow_path)
+        change_rules = FlowLoader.load_change_handlers(settings.change_handlers_path)
         state_intent_policy = build_state_intent_policy(flow_definition)
         booking_gateway: BookingGateway = HTTPBookingGateway(
             client=client,
@@ -193,6 +194,7 @@ async def create_application_container(
             flow=flow_definition,
             state_machine=state_machine,
             tool_bridge=tool_bridge,
+            change_rules=change_rules,
             max_auto_transitions=settings.max_auto_transitions,
         )
         memory_cache = MemoryCache()
@@ -275,6 +277,8 @@ def _validate_settings(settings: Settings) -> None:
         raise ValueError("POS timeout must be positive.")
     if not settings.booking_flow_path.is_file():
         raise ValueError("Booking flow path must reference an existing file.")
+    if not settings.change_handlers_path.is_file():
+        raise ValueError("Change handlers path must reference an existing file.")
     if type(settings.max_auto_transitions) is not int or settings.max_auto_transitions < 1:
         raise ValueError("Maximum auto transitions must be at least one.")
     if type(settings.enable_llm_nlu_fallback) is not bool:

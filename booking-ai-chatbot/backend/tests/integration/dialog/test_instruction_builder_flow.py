@@ -19,6 +19,7 @@ FLOW_PATH = (
     / "flows"
     / "booking-flow.json"
 )
+CHANGE_HANDLERS_PATH = FLOW_PATH.with_name("change-handlers.json")
 SHOP = Shop(UUID("11111111-1111-1111-1111-111111111111"), "Sen Spa")
 SERVICE = Service(
     UUID("22222222-2222-2222-2222-222222222222"),
@@ -92,9 +93,12 @@ def declared_templates(flow: FlowDefinition) -> tuple[str, ...]:
 def test_real_flow_template_audit_has_no_missing_or_unused_renderer() -> None:
     flow = FlowLoader.load(FLOW_PATH)
     builder = InstructionBuilder()
-    declared = declared_templates(flow)
+    rules = FlowLoader.load_change_handlers(CHANGE_HANDLERS_PATH)
+    declared = declared_templates(flow) + tuple(
+        rule.prompt_template for rule in rules.values()
+    ) + ("change_invalid",)
 
-    assert len(declared) == 28
+    assert len(declared) == 37
     assert builder.find_missing_templates(declared) == ()
     assert set(builder.registered_templates()) - set(declared) == set()
 

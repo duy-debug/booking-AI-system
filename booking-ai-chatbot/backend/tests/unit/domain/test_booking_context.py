@@ -48,6 +48,7 @@ OTHER_SHOP = Shop(
     shop_id=UUID("55555555-5555-5555-5555-555555555555"),
     name="Riverside Spa",
 )
+THERAPIST = TherapistPreference(TherapistPreferenceType.FEMALE)
 
 
 def make_ready_context() -> BookingContext:
@@ -65,6 +66,127 @@ def make_ready_context() -> BookingContext:
         phone_confirmed=True,
         ng_list_checked=True,
     )
+
+
+def make_change_context() -> BookingContext:
+    context = make_ready_context()
+    context.addons = (ADDON,)
+    context.options = (BookingOption("option-1", "Hot towel"),)
+    context.available_slots = (time(10, 30), time(11, 0))
+    context.therapist_preference = THERAPIST
+    context.therapist_verified = True
+    return context
+
+
+def test_change_shop_clears_shop_dependencies_only() -> None:
+    context = make_change_context()
+
+    context.change_shop(OTHER_SHOP)
+
+    assert context.shop is OTHER_SHOP
+    assert context.service is None
+    assert context.addons == ()
+    assert context.available_slots is None
+    assert context.start_time is None
+    assert context.therapist_preference is None
+    assert context.booking_date == date(2026, 8, 1)
+    assert context.num_customer == 1
+    assert context.duration_minutes == 60
+
+
+def test_change_date_preserves_shop_service_and_other_independent_values() -> None:
+    context = make_change_context()
+
+    context.change_booking_date(date(2026, 8, 2))
+
+    assert context.booking_date == date(2026, 8, 2)
+    assert context.shop is SHOP
+    assert context.service is SERVICE
+    assert context.num_customer == 1
+    assert context.start_time is None
+    assert context.therapist_preference is None
+
+
+def test_change_people_clears_slot_and_therapist_but_preserves_course() -> None:
+    context = make_change_context()
+
+    context.change_num_customer(2)
+
+    assert context.num_customer == 2
+    assert context.shop is SHOP
+    assert context.service is SERVICE
+    assert context.booking_date == date(2026, 8, 1)
+    assert context.start_time is None
+    assert context.therapist_preference is None
+
+
+def test_invalid_change_people_is_atomic() -> None:
+    context = make_change_context()
+
+    with pytest.raises(InvalidCustomerCountError):
+        context.change_num_customer(5)
+
+    assert context.num_customer == 1
+    assert context.start_time == time(10, 30)
+    assert context.therapist_preference is THERAPIST
+
+
+def test_change_duration_clears_course_but_preserves_shop() -> None:
+    context = make_change_context()
+
+    context.change_duration(90)
+
+    assert context.duration_minutes == 90
+    assert context.shop is SHOP
+    assert context.service is None
+    assert context.start_time is None
+
+
+def test_change_service_preserves_shop_and_invalidates_availability() -> None:
+    context = make_change_context()
+
+    context.change_course_selection(None)
+
+    assert context.shop is SHOP
+    assert context.service is None
+    assert context.available_slots is None
+    assert context.start_time is None
+
+
+def test_change_time_preserves_date_and_available_slots() -> None:
+    context = make_change_context()
+
+    context.change_start_time(time(11, 0))
+
+    assert context.booking_date == date(2026, 8, 1)
+    assert context.available_slots == (time(10, 30), time(11, 0))
+    assert context.start_time == time(11, 0)
+    assert context.therapist_preference is None
+
+
+def test_change_therapist_preserves_selected_slot() -> None:
+    context = make_change_context()
+    replacement = TherapistPreference(TherapistPreferenceType.MALE)
+
+    context.change_therapist_preference(replacement)
+
+    assert context.start_time == time(10, 30)
+    assert context.therapist_preference is replacement
+    assert context.therapist_verified is False
+
+
+def test_change_phone_preserves_booking_selection() -> None:
+    context = make_change_context()
+
+    context.change_phone(None)
+
+    assert context.phone is None
+    assert context.customer is None
+    assert context.phone_confirmed is False
+    assert context.shop is SHOP
+    assert context.service is SERVICE
+    assert context.booking_date == date(2026, 8, 1)
+    assert context.start_time == time(10, 30)
 
 
 def test_new_context_starts_idle() -> None:

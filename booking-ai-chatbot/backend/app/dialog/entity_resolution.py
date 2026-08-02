@@ -179,11 +179,15 @@ class EntityResolutionCoordinator:
         context: BookingContext,
     ) -> EntityResolutionResult:
         """Resolve one valid entity query without mutating dialog context."""
-        kind, query = _validate_resolution_request(nlu_result, state)
+        kind, query, change_target = _validate_resolution_request(nlu_result, state)
         if kind is NLUEntityKind.SHOP:
-            return await self._resolve_shop(query)
+            return await self._resolve_shop(query, change=change_target == "shop")
         if kind is NLUEntityKind.COURSE:
-            return await self._resolve_course(query, context)
+            return await self._resolve_course(
+                query,
+                context,
+                change=change_target == "service",
+            )
         return self._resolve_therapist(query)
 
     def select_candidate(
@@ -211,7 +215,12 @@ class EntityResolutionCoordinator:
             matched_count=1,
         )
 
-    async def _resolve_shop(self, query: str) -> EntityResolutionResult:
+    async def _resolve_shop(
+        self,
+        query: str,
+        *,
+        change: bool = False,
+    ) -> EntityResolutionResult:
         try:
             shops = await self._search_shop_handler.execute(query)
         except Exception:
@@ -222,7 +231,15 @@ class EntityResolutionCoordinator:
         if not shops:
             return _not_found(NLUEntityKind.SHOP, "shop_not_found")
         dispatches = tuple(
-            _CandidateDispatch("select_store", {"shop": shop}) for shop in shops
+            _CandidateDispatch(
+                "change_info" if change else "select_store",
+                (
+                    {"change_target": "shop", "shop": shop}
+                    if change
+                    else {"shop": shop}
+                ),
+            )
+            for shop in shops
         )
         if len(shops) == 1:
             return _resolved_result(NLUEntityKind.SHOP, dispatches[0])
@@ -241,6 +258,8 @@ class EntityResolutionCoordinator:
         self,
         query: str,
         context: BookingContext,
+        *,
+        change: bool = False,
     ) -> EntityResolutionResult:
         if context.shop is None:
             return _failure(
@@ -262,13 +281,24 @@ class EntityResolutionCoordinator:
 
         dispatches: list[_CandidateDispatch] = []
         for service in services:
-            selection = _build_course_selection(service, context)
+            selection = _build_course_selection(
+                service,
+                context,
+                replace_existing=change,
+            )
             if selection is None:
                 return _unsupported(NLUEntityKind.COURSE, "main_course_required")
             dispatches.append(
                 _CandidateDispatch(
-                    "select_course",
-                    {"course_selection": selection},
+                    "change_info" if change else "select_course",
+                    (
+                        {
+                            "change_target": "service",
+                            "course_selection": selection,
+                        }
+                        if change
+                        else {"course_selection": selection}
+                    ),
                 )
             )
         if len(services) == 1:
@@ -343,7 +373,7 @@ def entity_resolution_to_dialog_turn_input(
 def _validate_resolution_request(
     result: NLUResult,
     state: BookingState,
-) -> tuple[NLUEntityKind, str]:
+) -> tuple[NLUEntityKind, str, str | None]:
     if (
         result.resolution_status
         is not NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED
@@ -361,20 +391,38 @@ def _validate_resolution_request(
         NLUEntityKind.COURSE: BookingState.SELECTING_SERVICE,
         NLUEntityKind.THERAPIST: BookingState.SELECTING_THERAPIST,
     }[result.entity_kind]
-    if state is not expected_state:
+    if result.change_target is None and state is not expected_state:
         raise InvalidEntityResolutionRequestError(
             "Entity kind is not valid for the current dialog state."
         )
-    return result.entity_kind, result.entity_query
+    expected_change_kind = {
+        "shop": NLUEntityKind.SHOP,
+        "service": NLUEntityKind.COURSE,
+    }
+    if (
+        result.change_target is not None
+        and expected_change_kind.get(result.change_target) is not result.entity_kind
+    ):
+        raise InvalidEntityResolutionRequestError(
+            "Change target does not match the requested entity kind."
+        )
+    return result.entity_kind, result.entity_query, result.change_target
 
 
 def _build_course_selection(
     service: Service,
     context: BookingContext,
+    *,
+    replace_existing: bool = False,
 ) -> CourseSelection | None:
     try:
         if service.course_type is CourseType.MAIN:
-            return CourseSelection(service, context.addons)
+            return CourseSelection(
+                service,
+                () if replace_existing else context.addons,
+            )
+        if replace_existing:
+            return None
         if context.service is None:
             return None
         return CourseSelection(
@@ -468,6 +516,25 @@ def _validate_resolution_payload(
     payload: Mapping[str, object],
 ) -> None:
     expected: tuple[str, type[object]]
+    if intent == "change_info":
+        target = payload.get("change_target")
+        expected_change: tuple[str, type[object]]
+        if target == "shop":
+            expected_change = ("shop", Shop)
+        elif target == "service":
+            expected_change = ("course_selection", CourseSelection)
+        else:
+            raise EntityResolutionNotDispatchableError(
+                "Resolved change entity has an invalid target."
+            )
+        change_key, change_type = expected_change
+        if frozenset(payload) != {"change_target", change_key} or not isinstance(
+            payload[change_key], change_type
+        ):
+            raise EntityResolutionNotDispatchableError(
+                "Resolved change entity payload is invalid."
+            )
+        return
     if intent == "select_store":
         expected = ("shop", Shop)
     elif intent == "select_course":

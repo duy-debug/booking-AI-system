@@ -30,6 +30,7 @@ FLOW_PATH = (
     / "flows"
     / "booking-flow.json"
 )
+CHANGE_HANDLERS_PATH = FLOW_PATH.with_name("change-handlers.json")
 CONVERSATIONAL_STATES = (
     BookingState.SELECTING_SHOP,
     BookingState.SELECTING_DATE,
@@ -43,6 +44,24 @@ CONVERSATIONAL_STATES = (
     BookingState.AWAITING_CONFIRMATION,
     BookingState.BOOKING_FAILED,
 )
+
+
+def test_change_handlers_define_one_rule_per_supported_target() -> None:
+    rules = FlowLoader.load_change_handlers(CHANGE_HANDLERS_PATH)
+
+    assert set(rules) == {
+        "shop",
+        "date",
+        "people",
+        "duration",
+        "service",
+        "time",
+        "therapist",
+        "phone",
+    }
+    assert rules["date"].reset_action == "change_date"
+    assert rules["date"].next_state is BookingState.SELECTING_DATE
+    assert rules["date"].applied_state is BookingState.SELECTING_PEOPLE
 
 
 @pytest.fixture(scope="module")

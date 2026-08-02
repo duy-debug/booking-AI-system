@@ -30,6 +30,7 @@ FLOW_PATH = (
 PARSER_OUTPUT_INTENTS = {
     "ask_question",
     "cancel_flow",
+    "change_info",
     "confirm",
     "deny",
     "provide_phone",
@@ -66,7 +67,6 @@ def test_parser_output_intents_are_supported_by_real_flow_or_system_policy() -> 
     assert PARSER_OUTPUT_INTENTS - declared == set()
     assert declared - PARSER_OUTPUT_INTENTS - SYSTEM_EVENTS == {
         "*",
-        "change_info",
         "select_course",
         "select_store",
         "select_therapist",

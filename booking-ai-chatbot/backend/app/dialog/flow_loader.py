@@ -96,6 +96,16 @@ class FlowDefinition:
     states: dict[BookingState, FlowState]
 
 
+@dataclass(frozen=True, slots=True)
+class ChangeRule:
+    """Defines one declarative in-progress booking change route."""
+
+    reset_action: str
+    next_state: BookingState
+    applied_state: BookingState
+    prompt_template: str
+
+
 class InvalidFlowDefinitionError(ValueError):
     """Raised when a booking flow definition is invalid."""
 
@@ -128,6 +138,74 @@ class FlowLoader:
             for state, raw_definition in declared.items()
         }
         return FlowDefinition(version, name, description, initial_state, states)
+
+    @staticmethod
+    def load_change_handlers(path: Path) -> dict[str, ChangeRule]:
+        """Load the compact target-to-change-rule mapping."""
+        with path.open("r", encoding="utf-8") as handlers_file:
+            raw: object = json.load(handlers_file)
+        root = _object(raw, "Change handlers root must be a JSON object.")
+        allowed_targets = {
+            "shop",
+            "date",
+            "people",
+            "duration",
+            "service",
+            "time",
+            "therapist",
+            "phone",
+        }
+        if set(root) != allowed_targets:
+            raise InvalidFlowDefinitionError(
+                "Change handlers must define exactly the supported change targets."
+            )
+        return {
+            target: _parse_change_rule(target, definition)
+            for target, definition in root.items()
+        }
+
+
+def _parse_change_rule(target: str, raw: object) -> ChangeRule:
+    value = _object(raw, f"Change handler '{target}' must be an object.")
+    if set(value) != {
+        "reset_action",
+        "next_state",
+        "applied_state",
+        "prompt_template",
+    }:
+        raise InvalidFlowDefinitionError(
+            f"Change handler '{target}' has an invalid schema."
+        )
+    reset_action = _required_string(
+        value,
+        "reset_action",
+        f"Change handler '{target}' reset action",
+    )
+    prompt_template = _required_string(
+        value,
+        "prompt_template",
+        f"Change handler '{target}' prompt template",
+    )
+    if not _ACTION_NAME_PATTERN.fullmatch(reset_action):
+        raise InvalidFlowDefinitionError(
+            f"Change handler '{target}' reset action must be snake_case."
+        )
+    if not _ACTION_NAME_PATTERN.fullmatch(prompt_template):
+        raise InvalidFlowDefinitionError(
+            f"Change handler '{target}' prompt template must be snake_case."
+        )
+    return ChangeRule(
+        reset_action=reset_action,
+        next_state=_state_value(
+            value["next_state"],
+            f"change handler '{target}' next state",
+        ),
+        applied_state=_state_value(
+            value["applied_state"],
+            f"change handler '{target}' applied state",
+        ),
+        prompt_template=prompt_template,
+    )
 
 
 def _object(raw: object, message: str) -> dict[str, object]:
