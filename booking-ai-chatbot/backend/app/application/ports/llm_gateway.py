@@ -4,6 +4,22 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
+class LLMGatewayError(Exception):
+    """Base exception for expected language-model provider failures."""
+
+
+class LLMGatewayTimeoutError(LLMGatewayError):
+    """Raised when the language-model provider times out."""
+
+
+class LLMGatewayUnavailableError(LLMGatewayError):
+    """Raised when the configured language-model provider is unavailable."""
+
+
+class InvalidLLMResponseError(LLMGatewayError):
+    """Raised when a provider response violates the gateway contract."""
+
+
 @dataclass(frozen=True, slots=True)
 class LLMMessage:
     """Represents a message sent to a language model."""

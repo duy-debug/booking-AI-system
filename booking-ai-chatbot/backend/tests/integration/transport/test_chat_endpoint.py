@@ -1,5 +1,6 @@
 """Integration tests for the non-streaming FastAPI chat endpoint."""
 
+import json
 from collections.abc import Iterator
 from typing import cast
 from uuid import UUID
@@ -10,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import app.dependencies as dependencies
+from app.application.ports.llm_gateway import LLMMessage, LLMResponse
 from app.core.config import Settings
 from app.dependencies import ApplicationContainer
 from app.dialog.entity_resolution import (
@@ -18,7 +20,14 @@ from app.dialog.entity_resolution import (
     EntityResolutionResult,
     EntityResolutionStatus,
 )
-from app.dialog.nlu import NLUEntityKind, NLUResult
+from app.dialog.nlu import (
+    DeterministicNLU,
+    LLMNLUFallback,
+    NLUEntityKind,
+    NLUResolutionStatus,
+    NLUResult,
+    NLUSource,
+)
 from app.dialog.tool_bridge import ActionExecutionContext, ActionResult
 from app.domain.booking import Shop
 from app.domain.booking_context import BookingContext
@@ -46,6 +55,32 @@ class StaticResolver:
     ) -> EntityResolutionResult:
         self.calls += 1
         return self.result
+
+
+class StaticLLMGateway:
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.calls = 0
+
+    async def generate(
+        self,
+        messages: list[LLMMessage],
+        *,
+        tools: list[dict[str, object]] | None = None,
+    ) -> LLMResponse:
+        self.calls += 1
+        return LLMResponse(content=self.content)
+
+
+class AlwaysUnresolvedNLU:
+    def parse(self, *, text: str, state: BookingState) -> NLUResult:
+        return NLUResult(
+            intent=None,
+            payload={},
+            confidence=0.0,
+            source=NLUSource.FALLBACK,
+            resolution_status=NLUResolutionStatus.UNRESOLVED,
+        )
 
 
 @pytest.fixture
@@ -135,6 +170,40 @@ def test_valid_idle_booking_turn_returns_json_and_persists_state(
         "/api/v1/chat",
         "/api/v1/chat/stream",
     }
+    assert outbound_requests == []
+
+
+def test_valid_structured_llm_fallback_returns_http_200(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    gateway = StaticLLMGateway(
+        json.dumps(
+            {
+                "intent": "start_booking",
+                "confidence": 0.9,
+                "entities": {},
+                "entity_kind": None,
+                "entity_query": None,
+            }
+        )
+    )
+    container.deterministic_nlu = cast(DeterministicNLU, AlwaysUnresolvedNLU())
+    container.llm_nlu_fallback = LLMNLUFallback(
+        llm_gateway=gateway,
+        intent_policy=container.state_intent_policy,
+    )
+
+    response = post_message(
+        client,
+        conversation_id="conversation-llm",
+        message="Giúp mình bắt đầu quy trình nhé",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "selecting_shop"
+    assert gateway.calls == 1
     assert outbound_requests == []
 
 

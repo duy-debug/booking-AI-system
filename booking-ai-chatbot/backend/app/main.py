@@ -28,5 +28,11 @@ def create_app(settings: Settings) -> FastAPI:
 app = create_app(
     Settings(
         pos_base_url=os.getenv("BOOKING_API_URL", "http://localhost:8000"),
+        openrouter_api_key=os.getenv("OPENROUTER_API_KEY") or None,
+        openrouter_base_url=os.getenv(
+            "OPENROUTER_BASE_URL",
+            "https://openrouter.ai/api/v1",
+        ),
+        openrouter_model=os.getenv("OPENROUTER_MODEL", "openrouter/free"),
     )
 )

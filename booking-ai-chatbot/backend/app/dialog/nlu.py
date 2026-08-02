@@ -1,5 +1,6 @@
-"""Deterministic, state-aware intent and entity parsing for dialog input."""
+"""Deterministic and LLM-backed intent and entity parsing for dialog input."""
 
+import json
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -7,13 +8,26 @@ from datetime import date, time, timedelta
 from enum import StrEnum
 from math import isfinite
 from types import MappingProxyType
-from typing import TypeAlias
+from typing import Literal, TypeAlias
 
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+)
+
+from app.application.ports.llm_gateway import LLMGateway, LLMGatewayError, LLMMessage
 from app.dialog.dialog_controller import DialogTurnInput
 from app.dialog.flow_loader import FlowDefinition
 from app.domain.booking_state import BookingState
 
 TodayProvider: TypeAlias = Callable[[], date]
+
+LLM_NLU_MIN_CONFIDENCE = 0.70
 
 _RULE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _WHITESPACE_PATTERN = re.compile(r"\s+")
@@ -217,13 +231,17 @@ class DeterministicNLU:
         *,
         intent_policy: StateIntentPolicy,
         today_provider: TodayProvider = date.today,
+        unknown_as_unresolved: bool = False,
     ) -> None:
         if not isinstance(intent_policy, StateIntentPolicy):
             raise TypeError("Intent policy must be a StateIntentPolicy.")
         if not callable(today_provider):
             raise TypeError("Today provider must be callable.")
+        if not isinstance(unknown_as_unresolved, bool):
+            raise TypeError("Unknown fallback mode must be a boolean.")
         self._intent_policy = intent_policy
         self._today_provider = today_provider
+        self._unknown_as_unresolved = unknown_as_unresolved
 
     def parse(self, *, text: str, state: BookingState) -> NLUResult:
         """Return the first deterministic match according to rule precedence."""
@@ -233,7 +251,11 @@ class DeterministicNLU:
             raise TypeError("NLU state must be a BookingState value.")
         normalized = _normalize_text(text)
         if not normalized:
-            return _fallback(self._intent_policy, state)
+            return _fallback(
+                self._intent_policy,
+                state,
+                allow_unknown=not self._unknown_as_unresolved,
+            )
 
         if normalized in _CANCEL_PHRASES:
             return _resolved(
@@ -295,7 +317,11 @@ class DeterministicNLU:
             return state_result
 
         if normalized in _GREETING_PHRASES or normalized in _THANKS_PHRASES:
-            return _fallback(self._intent_policy, state)
+            return _fallback(
+                self._intent_policy,
+                state,
+                allow_unknown=not self._unknown_as_unresolved,
+            )
         if _looks_like_question(text, normalized):
             return _resolved(
                 self._intent_policy,
@@ -305,7 +331,11 @@ class DeterministicNLU:
                 0.8,
                 "faq_question_state",
             )
-        return _fallback(self._intent_policy, state)
+        return _fallback(
+            self._intent_policy,
+            state,
+            allow_unknown=not self._unknown_as_unresolved,
+        )
 
     def _parse_for_state(
         self,
@@ -482,8 +512,13 @@ def _resolved(
     )
 
 
-def _fallback(policy: StateIntentPolicy, state: BookingState) -> NLUResult:
-    if policy.is_allowed(state, "unknown"):
+def _fallback(
+    policy: StateIntentPolicy,
+    state: BookingState,
+    *,
+    allow_unknown: bool = True,
+) -> NLUResult:
+    if allow_unknown and policy.is_allowed(state, "unknown"):
         return NLUResult(
             intent="unknown",
             payload={},
@@ -847,3 +882,216 @@ def _freeze_value(value: object) -> object:
     if isinstance(value, set | frozenset):
         return frozenset(_freeze_value(item) for item in value)
     return value
+
+
+class LLMNLUEntities(BaseModel):
+    """Contains only primitive entity values accepted from an LLM."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    number_of_people: StrictInt | None = Field(default=None, ge=1, le=3)
+    duration_minutes: StrictInt | None = Field(default=None, ge=1)
+    booking_date: StrictStr | None = None
+    start_time: StrictStr | None = None
+    phone: StrictStr | None = None
+    confirmation: StrictBool | None = None
+    therapist_gender: Literal["male", "female", "none"] | None = None
+
+
+class LLMNLUOutput(BaseModel):
+    """Defines the complete JSON object accepted from the LLM provider."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    intent: StrictStr
+    confidence: StrictFloat = Field(ge=0.0, le=1.0, allow_inf_nan=False)
+    entities: LLMNLUEntities = Field(default_factory=LLMNLUEntities)
+    entity_kind: Literal["shop", "course", "therapist"] | None = None
+    entity_query: StrictStr | None = None
+
+
+_LLM_ISO_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
+_LLM_CLOCK_PATTERN = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d")
+_LLM_INTENT_ALIASES = {
+    "select_shop": "select_store",
+    "select_service": "select_course",
+    "collect_phone": "provide_phone",
+}
+_LLM_ENTITY_INTENTS = {
+    NLUEntityKind.SHOP: "select_store",
+    NLUEntityKind.COURSE: "select_course",
+    NLUEntityKind.THERAPIST: "select_therapist",
+}
+_LLM_NO_PAYLOAD_INTENTS = frozenset(
+    {"ask_question", "cancel_flow", "confirm", "deny", "start_booking"}
+)
+
+
+class LLMNLUFallback:
+    """Parse one unresolved message using validated structured LLM output."""
+
+    def __init__(
+        self,
+        *,
+        llm_gateway: LLMGateway,
+        intent_policy: StateIntentPolicy,
+        min_confidence: float = LLM_NLU_MIN_CONFIDENCE,
+        enabled: bool = True,
+    ) -> None:
+        if (
+            isinstance(min_confidence, bool)
+            or not isinstance(min_confidence, int | float)
+            or not isfinite(min_confidence)
+            or not 0.0 <= min_confidence <= 1.0
+        ):
+            raise ValueError("LLM NLU confidence threshold must be between zero and one.")
+        if type(enabled) is not bool:
+            raise TypeError("LLM NLU enabled flag must be boolean.")
+        self._llm_gateway = llm_gateway
+        self._intent_policy = intent_policy
+        self._min_confidence = float(min_confidence)
+        self._enabled = enabled
+
+    async def parse(self, *, text: str, state: BookingState) -> NLUResult:
+        """Call the gateway once and return a policy-safe NLU result."""
+        if not self._enabled:
+            return _llm_unresolved()
+        messages = _build_llm_messages(
+            text=text,
+            state=state,
+            allowed_intents=self._intent_policy.allowed_for(state),
+        )
+        try:
+            response = await self._llm_gateway.generate(messages)
+        except (LLMGatewayError, TimeoutError):
+            return _llm_unresolved()
+        if response.content is None or not response.content.strip():
+            return _llm_unresolved()
+        try:
+            output = LLMNLUOutput.model_validate_json(response.content)
+        except (ValueError, json.JSONDecodeError):
+            return _llm_unresolved()
+        return self._to_nlu_result(output, state)
+
+    def _to_nlu_result(
+        self,
+        output: LLMNLUOutput,
+        state: BookingState,
+    ) -> NLUResult:
+        raw_intent = output.intent.strip()
+        intent = _LLM_INTENT_ALIASES.get(raw_intent, raw_intent)
+        if intent == "unknown" or output.confidence < self._min_confidence:
+            return _llm_unresolved()
+
+        entity_kind, entity_query = _llm_entity_reference(output)
+        if entity_kind is not None:
+            expected_intent = _LLM_ENTITY_INTENTS[entity_kind]
+            if (
+                intent != expected_intent
+                or not self._intent_policy.is_allowed(state, expected_intent)
+                or entity_query is None
+                or not entity_query.strip()
+            ):
+                return _llm_unresolved()
+            return NLUResult(
+                intent=None,
+                payload={},
+                confidence=output.confidence,
+                source=NLUSource.FALLBACK,
+                resolution_status=NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED,
+                matched_rule="llm_nlu_fallback",
+                entity_query=entity_query.strip(),
+                entity_kind=entity_kind,
+            )
+
+        if not self._intent_policy.is_allowed(state, intent):
+            return _llm_unresolved()
+        payload = _llm_direct_payload(intent, output.entities)
+        if payload is None:
+            return _llm_unresolved()
+        return NLUResult(
+            intent=intent,
+            payload=payload,
+            confidence=output.confidence,
+            source=NLUSource.FALLBACK,
+            resolution_status=NLUResolutionStatus.RESOLVED,
+            matched_rule="llm_nlu_fallback",
+        )
+
+
+def _build_llm_messages(
+    *,
+    text: str,
+    state: BookingState,
+    allowed_intents: frozenset[str],
+) -> list[LLMMessage]:
+    intents = ", ".join(sorted(allowed_intents)) or "none"
+    system_prompt = (
+        "Classify one booking message. Return JSON only with keys intent, confidence, "
+        "entities, entity_kind, entity_query. "
+        f"Current state: {state.value}. Allowed intents: {intents}. "
+        "Entities may only contain number_of_people, duration_minutes, booking_date "
+        "(YYYY-MM-DD), start_time (HH:MM), phone, confirmation, therapist_gender. "
+        "For shop/course/therapist return only entity_kind and entity_query; never infer "
+        "IDs or return domain objects. Example: "
+        '{"intent":"select_people","confidence":0.9,'
+        '"entities":{"number_of_people":2},"entity_kind":null,'
+        '"entity_query":null}.'
+    )
+    return [
+        LLMMessage(role="system", content=system_prompt),
+        LLMMessage(role="user", content=text),
+    ]
+
+
+def _llm_entity_reference(
+    output: LLMNLUOutput,
+) -> tuple[NLUEntityKind | None, str | None]:
+    if output.entity_kind is not None:
+        return NLUEntityKind(output.entity_kind), output.entity_query
+    if output.intent.strip() == "select_therapist":
+        gender = output.entities.therapist_gender
+        if gender in {"male", "female"}:
+            return NLUEntityKind.THERAPIST, gender
+    return None, None
+
+
+def _llm_direct_payload(
+    intent: str,
+    entities: LLMNLUEntities,
+) -> dict[str, object] | None:
+    if intent in _LLM_NO_PAYLOAD_INTENTS:
+        return {}
+    if intent == "select_people" and entities.number_of_people is not None:
+        return {"num_customer": entities.number_of_people}
+    if intent == "select_duration" and entities.duration_minutes is not None:
+        return {"duration_minutes": entities.duration_minutes}
+    if intent == "select_date" and entities.booking_date is not None:
+        return _llm_date_payload(entities.booking_date)
+    if intent == "select_time" and entities.start_time is not None:
+        return _llm_time_payload(entities.start_time)
+    if intent == "provide_phone" and entities.phone is not None:
+        return {"phone": entities.phone}
+    return None
+
+
+def _llm_date_payload(value: str) -> dict[str, object] | None:
+    if not _LLM_ISO_DATE_PATTERN.fullmatch(value):
+        return None
+    try:
+        return {"booking_date": date.fromisoformat(value)}
+    except ValueError:
+        return None
+
+
+def _llm_time_payload(value: str) -> dict[str, object] | None:
+    if not _LLM_CLOCK_PATTERN.fullmatch(value):
+        return None
+    try:
+        return {"start_time": time.fromisoformat(value)}
+    except ValueError:
+        return None
+
+
+def _llm_unresolved() -> NLUResult:
+    return _unresolved(matched_rule="llm_nlu_fallback")

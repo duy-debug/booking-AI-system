@@ -16,3 +16,8 @@ class Settings:
     pos_timeout_seconds: float = 10.0
     booking_flow_path: Path = field(default_factory=_default_booking_flow_path)
     max_auto_transitions: int = 8
+    enable_llm_nlu_fallback: bool = True
+    llm_nlu_min_confidence: float = 0.70
+    openrouter_api_key: str | None = None
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_model: str = "openrouter/free"

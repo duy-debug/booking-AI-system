@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 import app.dependencies as dependencies
+from app.application.ports.llm_gateway import LLMMessage, LLMResponse
 from app.core.config import Settings
 from app.dependencies import (
     ConversationContextStore,
@@ -19,6 +20,16 @@ from app.dialog.flow_loader import FlowDefinition, FlowLoader
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.infrastructure.cache.memory_cache import MemoryCache
+
+
+class FakeLLMGateway:
+    async def generate(
+        self,
+        messages: list[LLMMessage],
+        *,
+        tools: list[dict[str, object]] | None = None,
+    ) -> LLMResponse:
+        return LLMResponse(content="{}")
 
 
 def settings(
@@ -188,6 +199,34 @@ async def test_dependency_getters_return_container_instances() -> None:
 
     await container.close()
     await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_factory_injects_one_llm_gateway_into_the_fallback() -> None:
+    client = httpx.AsyncClient()
+    gateway = FakeLLMGateway()
+    container = await dependencies.create_application_container(
+        settings(),
+        http_client=client,
+        llm_gateway=gateway,
+    )
+
+    assert container.llm_gateway is gateway
+    assert container.llm_nlu_fallback._llm_gateway is gateway
+
+    await container.close()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_invalid_llm_confidence_setting_is_rejected() -> None:
+    invalid = Settings(
+        pos_base_url="http://pos.test",
+        llm_nlu_min_confidence=1.1,
+    )
+
+    with pytest.raises(ValueError, match="confidence"):
+        await dependencies.create_application_container(invalid)
 
 
 @pytest.mark.parametrize(

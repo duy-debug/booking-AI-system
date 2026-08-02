@@ -202,6 +202,12 @@ async def _process_chat_message(
     )
 
     if nlu_result.resolution_status is NLUResolutionStatus.UNRESOLVED:
+        nlu_result = await container.llm_nlu_fallback.parse(
+            text=request.message,
+            state=context.state,
+        )
+
+    if nlu_result.resolution_status is NLUResolutionStatus.UNRESOLVED:
         return _handled_response(
             context,
             _UNRESOLVED_TEXT.get(context.state, _DEFAULT_UNRESOLVED_TEXT),

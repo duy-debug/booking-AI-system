@@ -62,6 +62,16 @@ class FakeNLU:
         return self.result
 
 
+class FakeLLMFallback:
+    def __init__(self, result: NLUResult) -> None:
+        self.result = result
+        self.calls: list[tuple[str, BookingState]] = []
+
+    async def parse(self, *, text: str, state: BookingState) -> NLUResult:
+        self.calls.append((text, state))
+        return self.result
+
+
 class FakeResolver:
     def __init__(self, result: EntityResolutionResult) -> None:
         self.result = result
@@ -126,9 +136,11 @@ class FakeContainer:
         context: BookingContext,
         nlu_result: NLUResult,
         resolution: EntityResolutionResult | None = None,
+        llm_result: NLUResult | None = None,
     ) -> None:
         self.conversation_context_store = FakeStore(context)
         self.deterministic_nlu = FakeNLU(nlu_result)
+        self.llm_nlu_fallback = FakeLLMFallback(llm_result or unresolved_nlu())
         self.entity_resolution_coordinator = FakeResolver(
             resolution or failed_resolution(NLUEntityKind.SHOP)
         )
@@ -210,6 +222,7 @@ async def test_resolved_branch_runs_controller_renderer_and_save_once() -> None:
     assert fake.conversation_context_store.loaded_ids == ["conversation-a"]
     assert fake.deterministic_nlu.calls == [("Tôi muốn đặt lịch", BookingState.IDLE)]
     assert fake.entity_resolution_coordinator.calls == []
+    assert fake.llm_nlu_fallback.calls == []
     assert len(fake.dialog_controller.calls) == 1
     assert fake.dialog_controller.calls[0][1].idempotency_key == " stable-key "
     assert fake.dialog_controller.calls[0][1].raw_message == "Tôi muốn đặt lịch"
@@ -240,12 +253,35 @@ async def test_entity_resolved_branch_runs_resolver_controller_renderer_and_save
     )
 
     assert len(fake.entity_resolution_coordinator.calls) == 1
+    assert fake.llm_nlu_fallback.calls == []
     assert len(fake.dialog_controller.calls) == 1
     turn = fake.dialog_controller.calls[0][1]
     assert turn.payload == {"shop": SHOP}
     assert turn.idempotency_key == "key"
     assert len(fake.instruction_builder.calls) == 1
     assert fake.conversation_context_store.saved == [("conversation-a", context)]
+
+
+@pytest.mark.asyncio
+async def test_unresolved_deterministic_result_uses_one_valid_llm_result() -> None:
+    context = BookingContext("conversation-a")
+    fake = FakeContainer(
+        context=context,
+        nlu_result=unresolved_nlu(),
+        llm_result=resolved_nlu(),
+    )
+
+    response = await _process_chat_message(
+        request=request(),
+        container=as_container(fake),
+    )
+
+    assert len(fake.deterministic_nlu.calls) == 1
+    assert len(fake.llm_nlu_fallback.calls) == 1
+    assert len(fake.dialog_controller.calls) == 1
+    assert len(fake.instruction_builder.calls) == 1
+    assert fake.conversation_context_store.saved == [("conversation-a", context)]
+    assert response.text == "Safe response"
 
 
 @pytest.mark.asyncio
@@ -382,6 +418,7 @@ async def test_unresolved_branch_is_state_aware_and_does_not_dispatch(
 
     assert expected in response.text
     assert response.state is state
+    assert fake.llm_nlu_fallback.calls == [(request().message, state)]
     assert fake.entity_resolution_coordinator.calls == []
     assert fake.dialog_controller.calls == []
     assert fake.conversation_context_store.saved == []

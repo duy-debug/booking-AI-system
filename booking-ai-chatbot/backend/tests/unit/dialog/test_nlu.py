@@ -184,6 +184,23 @@ def test_empty_text_uses_unknown_fallback(nlu: DeterministicNLU) -> None:
     assert result.matched_rule is None
 
 
+def test_unknown_can_be_returned_as_unresolved_for_llm_fallback() -> None:
+    parser = DeterministicNLU(
+        intent_policy=intent_policy(),
+        today_provider=lambda: FIXED_TODAY,
+        unknown_as_unresolved=True,
+    )
+
+    result = parser.parse(
+        text="Khoang mot tieng",
+        state=BookingState.SELECTING_DURATION,
+    )
+
+    assert result.intent is None
+    assert result.resolution_status is NLUResolutionStatus.UNRESOLVED
+    assert result.source is NLUSource.FALLBACK
+
+
 @pytest.mark.parametrize("phrase", ["đúng", "ĐÚNG RỒI!", "ok", "xác nhận"])
 def test_confirm_is_state_aware(
     nlu: DeterministicNLU,

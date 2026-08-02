@@ -14,6 +14,7 @@ from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.infrastructure.booking_api.http_booking_gateway import HTTPBookingGateway
 from app.infrastructure.cache.memory_cache import MemoryCache
+from app.infrastructure.llm.openrouter_llm_gateway import OpenRouterLLMGateway
 
 REQUIRED_ACTIONS = {
     "handle_store_selection",
@@ -87,6 +88,9 @@ async def test_container_assembles_shared_dependencies_without_network_calls() -
     assert container.entity_resolution_coordinator._search_service_handler is (
         container._handlers[1]
     )
+    assert isinstance(container.llm_gateway, OpenRouterLLMGateway)
+    assert container.llm_nlu_fallback._llm_gateway is container.llm_gateway
+    assert container.llm_nlu_fallback._intent_policy is container.state_intent_policy
     assert request_count == 0
 
     await container.close()
@@ -117,6 +121,10 @@ async def test_two_containers_are_isolated_except_for_injected_client() -> None:
         first.entity_resolution_coordinator
         is not second.entity_resolution_coordinator
     )
+    assert first.llm_gateway is not second.llm_gateway
+    assert first.llm_nlu_fallback is not second.llm_nlu_fallback
+    assert first.llm_nlu_fallback._llm_gateway is first.llm_gateway
+    assert second.llm_nlu_fallback._llm_gateway is second.llm_gateway
 
     async def custom_action(context: ActionExecutionContext) -> ActionResult:
         return ActionResult("container_only")

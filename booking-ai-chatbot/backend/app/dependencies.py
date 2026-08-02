@@ -4,6 +4,7 @@ import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from math import isfinite
 
 import httpx
 
@@ -16,6 +17,7 @@ from app.application.handlers.create_booking_handler import CreateBookingHandler
 from app.application.handlers.search_service_handler import SearchServiceHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.application.ports.booking_gateway import BookingGateway
+from app.application.ports.llm_gateway import LLMGateway
 from app.core.config import Settings
 from app.dialog.dialog_controller import DialogController
 from app.dialog.entity_resolution import EntityResolutionCoordinator
@@ -23,6 +25,7 @@ from app.dialog.flow_loader import FlowDefinition, FlowLoader
 from app.dialog.instruction_builder import InstructionBuilder
 from app.dialog.nlu import (
     DeterministicNLU,
+    LLMNLUFallback,
     StateIntentPolicy,
     build_state_intent_policy,
 )
@@ -31,6 +34,7 @@ from app.dialog.tool_bridge import ToolBridge
 from app.domain.booking_context import BookingContext
 from app.infrastructure.booking_api.http_booking_gateway import HTTPBookingGateway
 from app.infrastructure.cache.memory_cache import MemoryCache
+from app.infrastructure.llm.openrouter_llm_gateway import OpenRouterLLMGateway
 
 _MAX_CONVERSATION_ID_LENGTH = 128
 _RAW_PHONE_PATTERN = re.compile(r"\+?\d{9,15}")
@@ -117,6 +121,8 @@ class ApplicationContainer:
     deterministic_nlu: DeterministicNLU
     state_intent_policy: StateIntentPolicy
     entity_resolution_coordinator: EntityResolutionCoordinator
+    llm_gateway: LLMGateway
+    llm_nlu_fallback: LLMNLUFallback
     _handlers: tuple[object, ...] = field(repr=False)
     _owns_http_client: bool = field(repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
@@ -134,6 +140,7 @@ async def create_application_container(
     settings: Settings,
     *,
     http_client: httpx.AsyncClient | None = None,
+    llm_gateway: LLMGateway | None = None,
 ) -> ApplicationContainer:
     """Build an isolated application object graph from validated runtime settings."""
     _validate_settings(settings)
@@ -160,6 +167,12 @@ async def create_application_container(
         entity_resolution_coordinator = EntityResolutionCoordinator(
             search_shop_handler=search_shop_handler,
             search_service_handler=search_service_handler,
+        )
+        configured_llm_gateway = llm_gateway or OpenRouterLLMGateway(
+            client=client,
+            api_key=settings.openrouter_api_key,
+            base_url=settings.openrouter_base_url,
+            model=settings.openrouter_model,
         )
         handlers: tuple[object, ...] = (
             search_shop_handler,
@@ -195,9 +208,17 @@ async def create_application_container(
             instruction_builder=InstructionBuilder(),
             deterministic_nlu=DeterministicNLU(
                 intent_policy=state_intent_policy,
+                unknown_as_unresolved=True,
             ),
             state_intent_policy=state_intent_policy,
             entity_resolution_coordinator=entity_resolution_coordinator,
+            llm_gateway=configured_llm_gateway,
+            llm_nlu_fallback=LLMNLUFallback(
+                llm_gateway=configured_llm_gateway,
+                intent_policy=state_intent_policy,
+                min_confidence=settings.llm_nlu_min_confidence,
+                enabled=settings.enable_llm_nlu_fallback,
+            ),
             _handlers=handlers,
             _owns_http_client=owns_http_client,
         )
@@ -256,3 +277,16 @@ def _validate_settings(settings: Settings) -> None:
         raise ValueError("Booking flow path must reference an existing file.")
     if type(settings.max_auto_transitions) is not int or settings.max_auto_transitions < 1:
         raise ValueError("Maximum auto transitions must be at least one.")
+    if type(settings.enable_llm_nlu_fallback) is not bool:
+        raise ValueError("LLM NLU fallback enabled flag must be boolean.")
+    if (
+        isinstance(settings.llm_nlu_min_confidence, bool)
+        or not isinstance(settings.llm_nlu_min_confidence, int | float)
+        or not isfinite(settings.llm_nlu_min_confidence)
+        or not 0.0 <= settings.llm_nlu_min_confidence <= 1.0
+    ):
+        raise ValueError("LLM NLU confidence threshold must be between zero and one.")
+    if not settings.openrouter_base_url.strip():
+        raise ValueError("OpenRouter base URL must not be empty.")
+    if not settings.openrouter_model.strip():
+        raise ValueError("OpenRouter model must not be empty.")

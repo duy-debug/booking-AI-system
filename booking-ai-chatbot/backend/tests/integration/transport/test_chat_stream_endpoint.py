@@ -11,6 +11,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import app.dependencies as dependencies
+from app.application.ports.llm_gateway import (
+    LLMGatewayUnavailableError,
+    LLMMessage,
+    LLMResponse,
+)
 from app.core.config import Settings
 from app.dependencies import ApplicationContainer
 from app.dialog.entity_resolution import (
@@ -19,7 +24,14 @@ from app.dialog.entity_resolution import (
     EntityResolutionResult,
     EntityResolutionStatus,
 )
-from app.dialog.nlu import DeterministicNLU, NLUEntityKind, NLUResult
+from app.dialog.nlu import (
+    DeterministicNLU,
+    LLMNLUFallback,
+    NLUEntityKind,
+    NLUResolutionStatus,
+    NLUResult,
+    NLUSource,
+)
 from app.dialog.tool_bridge import ActionExecutionContext, ActionResult
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
@@ -43,6 +55,39 @@ class StaticResolver:
 class FailingNLU:
     def parse(self, *, text: str, state: BookingState) -> NLUResult:
         raise RuntimeError("private runtime failure")
+
+
+class AlwaysUnresolvedNLU:
+    def parse(self, *, text: str, state: BookingState) -> NLUResult:
+        return NLUResult(
+            intent=None,
+            payload={},
+            confidence=0.0,
+            source=NLUSource.FALLBACK,
+            resolution_status=NLUResolutionStatus.UNRESOLVED,
+        )
+
+
+class StaticLLMGateway:
+    def __init__(
+        self,
+        content: str | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.content = content
+        self.error = error
+        self.calls = 0
+
+    async def generate(
+        self,
+        messages: list[LLMMessage],
+        *,
+        tools: list[dict[str, object]] | None = None,
+    ) -> LLMResponse:
+        self.calls += 1
+        if self.error is not None:
+            raise self.error
+        return LLMResponse(content=self.content)
 
 
 @pytest.fixture
@@ -180,6 +225,14 @@ def test_unknown_input_is_a_normal_message_not_an_error(
 ) -> None:
     client, _ = stream_client
     container = container_of(client)
+    gateway = StaticLLMGateway(
+        error=LLMGatewayUnavailableError("provider unavailable")
+    )
+    container.deterministic_nlu = cast(DeterministicNLU, AlwaysUnresolvedNLU())
+    container.llm_nlu_fallback = LLMNLUFallback(
+        llm_gateway=gateway,
+        intent_policy=container.state_intent_policy,
+    )
     context = BookingContext(
         conversation_id="conversation-a",
         state=BookingState.COMPLETED,
@@ -196,6 +249,7 @@ def test_unknown_input_is_a_normal_message_not_an_error(
     assert [event for event, _ in events] == ["started", "message", "completed"]
     assert events[1][1]["state"] == "completed"
     assert "nhập lại rõ hơn" in cast(str, events[1][1]["text"])
+    assert gateway.calls == 1
 
 
 def test_ambiguous_entity_is_streamed_as_a_normal_message(
@@ -327,6 +381,23 @@ def test_stream_message_has_parity_with_json_on_independent_contexts(
     stream_client: tuple[TestClient, list[httpx.Request]],
 ) -> None:
     client, outbound_requests = stream_client
+    container = container_of(client)
+    gateway = StaticLLMGateway(
+        json.dumps(
+            {
+                "intent": "start_booking",
+                "confidence": 0.9,
+                "entities": {},
+                "entity_kind": None,
+                "entity_query": None,
+            }
+        )
+    )
+    container.deterministic_nlu = cast(DeterministicNLU, AlwaysUnresolvedNLU())
+    container.llm_nlu_fallback = LLMNLUFallback(
+        llm_gateway=gateway,
+        intent_policy=container.state_intent_policy,
+    )
 
     regular = client.post(
         "/api/v1/chat",
@@ -355,4 +426,5 @@ def test_stream_message_has_parity_with_json_on_independent_contexts(
         assert stream_message[key] == regular_body[key]
     assert stream_message["conversation_id"] == "conversation-sse"
     assert regular_body["conversation_id"] == "conversation-json"
+    assert gateway.calls == 2
     assert outbound_requests == []
