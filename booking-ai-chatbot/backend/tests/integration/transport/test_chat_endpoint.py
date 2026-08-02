@@ -131,7 +131,10 @@ def test_valid_idle_booking_turn_returns_json_and_persists_state(
     assert "text/event-stream" not in response.headers["content-type"]
     assert response.json()["conversation_id"] == "conversation-a"
     assert response.json()["state"] == "selecting_shop"
-    assert list(application.openapi()["paths"]) == ["/api/v1/chat"]
+    assert set(application.openapi()["paths"]) == {
+        "/api/v1/chat",
+        "/api/v1/chat/stream",
+    }
     assert outbound_requests == []
 
 

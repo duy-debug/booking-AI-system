@@ -1,4 +1,4 @@
-"""Validated HTTP schemas for the non-streaming chat transport."""
+"""Validated HTTP schemas shared by JSON and SSE chat transports."""
 
 from typing import Self
 

@@ -1,9 +1,10 @@
-"""Expose the non-streaming chat endpoint and its transport orchestration."""
+"""Expose JSON and SSE chat endpoints over one shared orchestration pipeline."""
 
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 
 from app.dependencies import (
     ApplicationContainer,
@@ -26,6 +27,7 @@ from app.dialog.nlu import (
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.transport.schemas import ChatRequest, ChatResponse
+from app.transport.sse import SSEEventType, encode_sse_event
 
 router = APIRouter(prefix="/api/v1")
 
@@ -120,6 +122,69 @@ async def chat(
             detail="Internal server error.",
         ) from error
     return _to_chat_response(request.conversation_id, response)
+
+
+@router.post("/chat/stream", response_class=StreamingResponse)
+async def chat_stream(
+    request: ChatRequest,
+    container: Annotated[
+        ApplicationContainer,
+        Depends(get_application_container),
+    ],
+) -> StreamingResponse:
+    """Stream one deterministic response as business-level SSE events."""
+    return StreamingResponse(
+        _stream_chat_events(request=request, container=container),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+async def _stream_chat_events(
+    *,
+    request: ChatRequest,
+    container: ApplicationContainer,
+) -> AsyncIterator[str]:
+    """Yield started, response and terminal events for one shared chat pipeline."""
+    yield encode_sse_event(
+        event=SSEEventType.STARTED,
+        data={"conversation_id": request.conversation_id},
+    )
+
+    try:
+        dialog_response = await _process_chat_message(
+            request=request,
+            container=container,
+        )
+        response = _to_chat_response(request.conversation_id, dialog_response)
+        message_event = encode_sse_event(
+            event=SSEEventType.MESSAGE,
+            data=response.model_dump(mode="json"),
+        )
+        completed_event = encode_sse_event(
+            event=SSEEventType.COMPLETED,
+            data={
+                "conversation_id": request.conversation_id,
+                "stream_status": "completed",
+                "dialog_status": response.status,
+            },
+        )
+    except Exception:
+        yield encode_sse_event(
+            event=SSEEventType.ERROR,
+            data={
+                "conversation_id": request.conversation_id,
+                "code": "chat_processing_failed",
+                "message": "Hệ thống chưa thể xử lý yêu cầu lúc này.",
+            },
+        )
+        return
+
+    yield message_event
+    yield completed_event
 
 
 async def _process_chat_message(
