@@ -6,6 +6,10 @@ from typing import Annotated, cast
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
+from app.application.ports.knowledge_gateway import (
+    KnowledgeDocument,
+    KnowledgeGatewayError,
+)
 from app.dependencies import (
     ApplicationContainer,
     InvalidCachedContextError,
@@ -38,6 +42,8 @@ _SAFE_METADATA_KEYS = frozenset(
         "booking_created",
         "can_retry",
         "can_change_info",
+        "response_type",
+        "source_count",
     }
 )
 _UNRESOLVED_TEXT = {
@@ -93,6 +99,15 @@ _DEFAULT_UNRESOLVED_TEXT = "Tôi chưa hiểu yêu cầu. Vui lòng nhập lại
 _TERMINAL_CHANGE_TEXT = (
     "Đặt lịch này đã hoàn tất. Vui lòng tạo yêu cầu mới để thay đổi hoặc hủy lịch."
 )
+_FAQ_UNAVAILABLE_TEXT = (
+    "Hiện tại hệ thống chưa thể tra cứu thông tin này. "
+    "Vui lòng liên hệ cửa hàng để được hỗ trợ."
+)
+_FAQ_NO_RESULT_TEXT = (
+    "Hiện tại tôi chưa có đủ thông tin để trả lời câu hỏi này. "
+    "Bạn có thể liên hệ cửa hàng để được hỗ trợ."
+)
+_MAX_FAQ_ANSWER_CHARS = 2000
 
 
 def get_application_container(request: Request) -> ApplicationContainer:
@@ -217,6 +232,21 @@ async def _process_chat_message(
             state=context.state,
         )
 
+    if nlu_result.intent == "ask_question":
+        faq_turn = to_dialog_turn_input(
+            nlu_result,
+            state=context.state,
+            intent_policy=container.state_intent_policy,
+            raw_message=request.message,
+        )
+        query = faq_turn.payload["query"]
+        assert isinstance(query, str)
+        return await _process_faq_query(
+            query=query,
+            context=context,
+            container=container,
+        )
+
     if nlu_result.resolution_status is NLUResolutionStatus.UNRESOLVED:
         return _handled_response(
             context,
@@ -263,6 +293,70 @@ async def _process_chat_message(
             context,
         )
     return response
+
+
+async def _process_faq_query(
+    *,
+    query: str,
+    context: BookingContext,
+    container: ApplicationContainer,
+) -> DialogResponse:
+    gateway = container.knowledge_gateway
+    if gateway is None:
+        return container.instruction_builder.build_faq_response(
+            answer=_FAQ_UNAVAILABLE_TEXT,
+            source_count=0,
+            context=context,
+            handled_failure=True,
+        )
+    try:
+        documents = await gateway.search(query, limit=3)
+    except KnowledgeGatewayError:
+        return container.instruction_builder.build_faq_response(
+            answer=_FAQ_UNAVAILABLE_TEXT,
+            source_count=0,
+            context=context,
+            handled_failure=True,
+        )
+    contents = _faq_contents(documents)
+    if not contents:
+        return container.instruction_builder.build_faq_response(
+            answer=_FAQ_NO_RESULT_TEXT,
+            source_count=0,
+            context=context,
+            handled_failure=True,
+        )
+    return container.instruction_builder.build_faq_response(
+        answer="\n\n".join(contents),
+        source_count=len(contents),
+        context=context,
+    )
+
+
+def _faq_contents(documents: list[KnowledgeDocument]) -> tuple[str, ...]:
+    contents: list[str] = []
+    seen: set[str] = set()
+    current_length = 0
+    for document in documents[:3]:
+        if not isinstance(document, KnowledgeDocument) or not isinstance(
+            document.content, str
+        ):
+            continue
+        content = " ".join(document.content.split())
+        deduplication_key = content.casefold()
+        if not content or deduplication_key in seen:
+            continue
+        separator_length = 2 if contents else 0
+        remaining = _MAX_FAQ_ANSWER_CHARS - current_length - separator_length
+        if remaining <= 0:
+            break
+        normalized = content[:remaining].rstrip()
+        if not normalized:
+            break
+        contents.append(normalized)
+        seen.add(deduplication_key)
+        current_length += separator_length + len(normalized)
+    return tuple(contents)
 
 
 def _entity_response(

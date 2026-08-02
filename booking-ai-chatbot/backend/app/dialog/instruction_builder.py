@@ -20,6 +20,8 @@ _SAFE_METADATA_KEYS = frozenset(
         "booking_created",
         "can_retry",
         "can_change_info",
+        "response_type",
+        "source_count",
     }
 )
 _UNHANDLED_FAILURE_TEXT = (
@@ -166,6 +168,59 @@ class InstructionBuilder:
             status=result.status,
             quick_replies=_normalize_quick_replies(draft.quick_replies),
             metadata=_allowlisted_metadata(draft.metadata),
+        )
+
+    def build_faq_response(
+        self,
+        *,
+        answer: str,
+        source_count: int,
+        context: BookingContext,
+        handled_failure: bool = False,
+    ) -> DialogResponse:
+        """Render an extractive FAQ answer without changing dialog workflow state."""
+        if not isinstance(answer, str) or not answer.strip():
+            raise ValueError("FAQ answer must not be empty.")
+        if type(source_count) is not int or source_count < 0 or source_count > 3:
+            raise ValueError("FAQ source count must be between zero and three.")
+        status = (
+            DialogTurnStatus.FAILURE_HANDLED
+            if handled_failure
+            else DialogTurnStatus.SUCCESS
+        )
+        text = answer.strip()
+        quick_replies: tuple[str, ...] = ()
+        if context.state in {
+            BookingState.SELECTING_SHOP,
+            BookingState.SELECTING_DATE,
+            BookingState.SELECTING_PEOPLE,
+            BookingState.SELECTING_DURATION,
+            BookingState.SELECTING_SERVICE,
+            BookingState.SELECTING_TIME,
+            BookingState.SELECTING_THERAPIST,
+            BookingState.COLLECTING_PHONE,
+            BookingState.VERIFYING_PHONE,
+            BookingState.AWAITING_CONFIRMATION,
+        }:
+            result = DialogTurnResult(
+                status=status,
+                initial_state=context.state,
+                final_state=context.state,
+                intent="ask_question",
+                instruction_template=None,
+                executed_actions=(),
+                auto_transition_count=0,
+            )
+            follow_up = self._fallback_for_state(context, result)
+            text = f"{text} {follow_up.text}"
+            quick_replies = follow_up.quick_replies
+        return DialogResponse(
+            text=text,
+            instruction_template=None,
+            state=context.state,
+            status=status,
+            quick_replies=quick_replies,
+            metadata={"response_type": "faq", "source_count": source_count},
         )
 
     def _get_renderer(self, name: str) -> InstructionRenderer:
@@ -650,8 +705,11 @@ def _allowlisted_metadata(values: Mapping[str, object]) -> Mapping[str, object]:
     for key, value in values.items():
         if key not in _SAFE_METADATA_KEYS:
             continue
-        if key == "available_slot_count":
+        if key in {"available_slot_count", "source_count"}:
             if type(value) is int and value >= 0:
+                safe[key] = value
+        elif key == "response_type":
+            if isinstance(value, str) and value == "faq":
                 safe[key] = value
         elif type(value) is bool:
             safe[key] = value

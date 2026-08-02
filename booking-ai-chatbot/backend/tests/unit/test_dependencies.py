@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 import app.dependencies as dependencies
+from app.application.ports.knowledge_gateway import KnowledgeDocument
 from app.application.ports.llm_gateway import LLMMessage, LLMResponse
 from app.core.config import Settings
 from app.dependencies import (
@@ -30,6 +31,16 @@ class FakeLLMGateway:
         tools: list[dict[str, object]] | None = None,
     ) -> LLMResponse:
         return LLMResponse(content="{}")
+
+
+class FakeKnowledgeGateway:
+    async def search(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+    ) -> list[KnowledgeDocument]:
+        return []
 
 
 def settings(
@@ -213,6 +224,36 @@ async def test_factory_injects_one_llm_gateway_into_the_fallback() -> None:
 
     assert container.llm_gateway is gateway
     assert container.llm_nlu_fallback._llm_gateway is gateway
+
+    await container.close()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_factory_preserves_injected_knowledge_gateway_identity() -> None:
+    client = httpx.AsyncClient()
+    gateway = FakeKnowledgeGateway()
+    container = await dependencies.create_application_container(
+        settings(),
+        http_client=client,
+        knowledge_gateway=gateway,
+    )
+
+    assert container.knowledge_gateway is gateway
+
+    await container.close()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_factory_allows_missing_knowledge_gateway() -> None:
+    client = httpx.AsyncClient()
+    container = await dependencies.create_application_container(
+        settings(),
+        http_client=client,
+    )
+
+    assert container.knowledge_gateway is None
 
     await container.close()
     await client.aclose()

@@ -7,6 +7,7 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
+from app.application.ports.knowledge_gateway import KnowledgeDocument
 from app.dependencies import ApplicationContainer
 from app.dialog.dialog_controller import (
     DialogTurnInput,
@@ -147,6 +148,42 @@ class FakeBuilder:
             metadata={"can_retry": True},
         )
 
+    def build_faq_response(
+        self,
+        *,
+        answer: str,
+        source_count: int,
+        context: BookingContext,
+        handled_failure: bool = False,
+    ) -> DialogResponse:
+        status = (
+            DialogTurnStatus.FAILURE_HANDLED
+            if handled_failure
+            else DialogTurnStatus.SUCCESS
+        )
+        return DialogResponse(
+            text=answer,
+            instruction_template=None,
+            state=context.state,
+            status=status,
+            metadata={"response_type": "faq", "source_count": source_count},
+        )
+
+
+class FakeKnowledgeGateway:
+    def __init__(self, documents: list[KnowledgeDocument]) -> None:
+        self.documents = documents
+        self.calls: list[tuple[str, int]] = []
+
+    async def search(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+    ) -> list[KnowledgeDocument]:
+        self.calls.append((query, limit))
+        return self.documents
+
 
 class FakeContainer:
     def __init__(
@@ -156,6 +193,7 @@ class FakeContainer:
         nlu_result: NLUResult,
         resolution: EntityResolutionResult | None = None,
         llm_result: NLUResult | None = None,
+        knowledge_gateway: FakeKnowledgeGateway | None = None,
     ) -> None:
         self.conversation_context_store = FakeStore(context)
         self.deterministic_nlu = FakeNLU(nlu_result)
@@ -165,11 +203,16 @@ class FakeContainer:
         )
         self.dialog_controller = FakeController()
         self.instruction_builder = FakeBuilder()
+        self.knowledge_gateway = knowledge_gateway
         self.state_intent_policy = StateIntentPolicy(
             {
-                BookingState.IDLE: frozenset({"start_booking"}),
-                BookingState.SELECTING_SHOP: frozenset({"select_store"}),
-                BookingState.AWAITING_CONFIRMATION: frozenset({"change_info"}),
+                BookingState.IDLE: frozenset({"start_booking", "ask_question"}),
+                BookingState.SELECTING_SHOP: frozenset(
+                    {"select_store", "ask_question"}
+                ),
+                BookingState.AWAITING_CONFIRMATION: frozenset(
+                    {"change_info", "ask_question"}
+                ),
             },
             frozenset(),
         )
@@ -215,6 +258,17 @@ def change_nlu() -> NLUResult:
         source=NLUSource.DETERMINISTIC,
         resolution_status=NLUResolutionStatus.RESOLVED,
         matched_rule="change_booking_field",
+    )
+
+
+def faq_nlu(query: str) -> NLUResult:
+    return NLUResult(
+        intent="ask_question",
+        payload={"query": query},
+        confidence=1.0,
+        source=NLUSource.DETERMINISTIC,
+        resolution_status=NLUResolutionStatus.RESOLVED,
+        matched_rule="faq_explicit",
     )
 
 
@@ -313,6 +367,29 @@ async def test_unresolved_deterministic_result_uses_one_valid_llm_result() -> No
     assert len(fake.instruction_builder.calls) == 1
     assert fake.conversation_context_store.saved == [("conversation-a", context)]
     assert response.text == "Safe response"
+
+
+@pytest.mark.asyncio
+async def test_faq_branch_uses_knowledge_without_controller_resolver_or_save() -> None:
+    query = "Cửa hàng mở cửa lúc mấy giờ?"
+    document = KnowledgeDocument("Cửa hàng mở cửa từ 09:00.", 0.9, "internal")
+    gateway = FakeKnowledgeGateway([document])
+    context = BookingContext("conversation-a", state=BookingState.SELECTING_SHOP)
+    fake = FakeContainer(
+        context=context,
+        nlu_result=faq_nlu(query),
+        knowledge_gateway=gateway,
+    )
+
+    response = await _process_chat_message(request=request(), container=as_container(fake))
+
+    assert gateway.calls == [(query, 3)]
+    assert response.text == document.content
+    assert response.state is BookingState.SELECTING_SHOP
+    assert response.metadata == {"response_type": "faq", "source_count": 1}
+    assert fake.entity_resolution_coordinator.calls == []
+    assert fake.dialog_controller.calls == []
+    assert fake.conversation_context_store.saved == []
 
 
 @pytest.mark.asyncio

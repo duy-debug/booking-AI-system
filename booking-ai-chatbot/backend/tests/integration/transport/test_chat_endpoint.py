@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import app.dependencies as dependencies
+from app.application.ports.knowledge_gateway import KnowledgeDocument
 from app.application.ports.llm_gateway import LLMMessage, LLMResponse
 from app.core.config import Settings
 from app.dependencies import ApplicationContainer
@@ -71,6 +72,21 @@ class StaticLLMGateway:
     ) -> LLMResponse:
         self.calls += 1
         return LLMResponse(content=self.content)
+
+
+class StaticKnowledgeGateway:
+    def __init__(self, documents: list[KnowledgeDocument]) -> None:
+        self.documents = documents
+        self.calls: list[tuple[str, int]] = []
+
+    async def search(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+    ) -> list[KnowledgeDocument]:
+        self.calls.append((query, limit))
+        return self.documents
 
 
 class AlwaysUnresolvedNLU:
@@ -205,6 +221,38 @@ def test_valid_structured_llm_fallback_returns_http_200(
     assert response.status_code == 200
     assert response.json()["state"] == "selecting_shop"
     assert gateway.calls == 1
+    assert outbound_requests == []
+
+
+def test_faq_returns_safe_json_without_state_change_or_internal_metadata(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    gateway = StaticKnowledgeGateway(
+        [KnowledgeDocument("Cửa hàng mở cửa từ 09:00 đến 22:00.", 0.98, "private")]
+    )
+    container.knowledge_gateway = gateway
+
+    response = post_message(
+        client,
+        conversation_id="conversation-faq-json",
+        message="Cửa hàng mở cửa lúc mấy giờ?",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "conversation_id": "conversation-faq-json",
+        "text": "Cửa hàng mở cửa từ 09:00 đến 22:00.",
+        "state": "idle",
+        "status": "success",
+        "instruction_template": None,
+        "quick_replies": [],
+        "metadata": {"response_type": "faq", "source_count": 1},
+    }
+    assert gateway.calls == [("Cửa hàng mở cửa lúc mấy giờ?", 3)]
+    assert "private" not in response.text
+    assert "0.98" not in response.text
     assert outbound_requests == []
 
 

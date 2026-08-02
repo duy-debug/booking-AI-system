@@ -170,7 +170,7 @@ def test_question_requires_named_state_transition() -> None:
 
     assert result.intent is None
     assert result.resolution_status is NLUResolutionStatus.UNRESOLVED
-    assert result.matched_rule == "faq_question_state"
+    assert result.matched_rule == "faq_explicit"
 
 
 def test_empty_text_uses_unknown_fallback(nlu: DeterministicNLU) -> None:
@@ -541,6 +541,63 @@ def test_booking_request_and_question_use_real_flow_intents(
 
     assert start.intent == "start_booking"
     assert question.intent == "ask_question"
+    assert question.payload == {"query": "Giá bao nhiêu?"}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Cửa hàng mở cửa lúc mấy giờ?",
+        "Cửa hàng đóng cửa lúc mấy giờ?",
+        "Massage Thái giá bao nhiêu?",
+        "Có chỗ đậu xe không?",
+        "Có nhận khách mang thai không?",
+        "Chính sách hủy lịch như thế nào?",
+        "Tôi cần đến trước bao nhiêu phút?",
+    ],
+)
+def test_explicit_faq_patterns_preserve_original_query(
+    nlu: DeterministicNLU,
+    text: str,
+) -> None:
+    result = nlu.parse(text=text, state=BookingState.IDLE)
+
+    assert result.intent == "ask_question"
+    assert result.payload == {"query": text}
+    assert result.matched_rule == "faq_explicit"
+
+
+@pytest.mark.parametrize(
+    ("text", "state"),
+    [
+        ("Tôi muốn đặt lúc 19 giờ", BookingState.SELECTING_TIME),
+        ("Còn khung giờ nào?", BookingState.SELECTING_TIME),
+        ("Chọn giờ nào được?", BookingState.SELECTING_TIME),
+        ("Đổi sang 20 giờ", BookingState.AWAITING_CONFIRMATION),
+        ("Đặt 2 người", BookingState.SELECTING_PEOPLE),
+    ],
+)
+def test_booking_and_change_phrases_are_not_misclassified_as_faq(
+    nlu: DeterministicNLU,
+    text: str,
+    state: BookingState,
+) -> None:
+    result = nlu.parse(text=text, state=state)
+
+    assert result.intent != "ask_question"
+
+
+def test_unknown_question_is_unresolved_in_production_fallback_mode() -> None:
+    parser = DeterministicNLU(
+        intent_policy=intent_policy(),
+        today_provider=lambda: FIXED_TODAY,
+        unknown_as_unresolved=True,
+    )
+
+    result = parser.parse(text="Bạn nghĩ sao về điều này?", state=BookingState.IDLE)
+
+    assert result.resolution_status is NLUResolutionStatus.UNRESOLVED
+    assert result.matched_rule == "question_unresolved"
 
 
 @pytest.mark.parametrize("phrase", ["xin chào", "cảm ơn", "cuối tuần sau"])

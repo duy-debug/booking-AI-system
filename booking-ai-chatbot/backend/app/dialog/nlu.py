@@ -39,6 +39,23 @@ BookingChangeTarget: TypeAlias = Literal[
 ]
 
 LLM_NLU_MIN_CONFIDENCE = 0.70
+FAQ_ALLOWED_STATES = frozenset(
+    {
+        BookingState.IDLE,
+        BookingState.SELECTING_SHOP,
+        BookingState.SELECTING_DATE,
+        BookingState.SELECTING_PEOPLE,
+        BookingState.SELECTING_DURATION,
+        BookingState.SELECTING_SERVICE,
+        BookingState.SELECTING_TIME,
+        BookingState.SELECTING_THERAPIST,
+        BookingState.COLLECTING_PHONE,
+        BookingState.VERIFYING_PHONE,
+        BookingState.AWAITING_CONFIRMATION,
+        BookingState.COMPLETED,
+        BookingState.CANCELLED,
+    }
+)
 
 _RULE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _WHITESPACE_PATTERN = re.compile(r"\s+")
@@ -149,7 +166,11 @@ class StateIntentPolicy:
         return state in self.wildcard_states
 
 
-def build_state_intent_policy(flow: FlowDefinition) -> StateIntentPolicy:
+def build_state_intent_policy(
+    flow: FlowDefinition,
+    *,
+    enable_faq: bool = False,
+) -> StateIntentPolicy:
     """Copy named intents and wildcard availability from an already loaded flow."""
     allowed: dict[BookingState, frozenset[str]] = {}
     wildcard_states: set[BookingState] = set()
@@ -158,6 +179,9 @@ def build_state_intent_policy(flow: FlowDefinition) -> StateIntentPolicy:
         if "*" in intents:
             wildcard_states.add(state)
         allowed[state] = frozenset(intent for intent in intents if intent != "*")
+    if enable_faq:
+        for state in FAQ_ALLOWED_STATES:
+            allowed[state] = allowed.get(state, frozenset()) | {"ask_question"}
     return StateIntentPolicy(allowed, frozenset(wildcard_states))
 
 
@@ -292,6 +316,16 @@ class DeterministicNLU:
             if change_result is not None:
                 return change_result
 
+        if _is_explicit_faq(normalized):
+            return _resolved(
+                self._intent_policy,
+                state,
+                "ask_question",
+                {"query": text.strip()},
+                0.95,
+                "faq_explicit",
+            )
+
         if normalized in _CANCEL_PHRASES:
             return _resolved(
                 self._intent_policy,
@@ -358,13 +392,10 @@ class DeterministicNLU:
                 allow_unknown=not self._unknown_as_unresolved,
             )
         if _looks_like_question(text, normalized):
-            return _resolved(
-                self._intent_policy,
-                state,
-                "ask_question",
-                {},
-                0.8,
-                "faq_question_state",
+            return _unresolved(
+                confidence=0.0,
+                source=NLUSource.FALLBACK,
+                matched_rule="question_unresolved",
             )
         return _fallback(
             self._intent_policy,
@@ -617,6 +648,19 @@ def _entity_required(
 
 def _contains_booking_request(text: str) -> bool:
     return text == "đặt lịch" or " muốn đặt lịch" in f" {text}"
+
+
+def _is_explicit_faq(text: str) -> bool:
+    patterns = (
+        "mở cửa lúc mấy giờ",
+        "đóng cửa lúc mấy giờ",
+        "giá bao nhiêu",
+        "có chỗ đậu xe không",
+        "có nhận khách mang thai không",
+        "chính sách hủy lịch",
+        "đến trước bao nhiêu phút",
+    )
+    return any(pattern in text for pattern in patterns)
 
 
 def _looks_like_change_request(text: str) -> bool:
@@ -1002,8 +1046,9 @@ def _validate_dispatch_payload(
         expected_keys, expected_type = frozenset({"start_time"}), time
     elif intent == "provide_phone":
         expected_keys, expected_type = frozenset({"phone"}), str
+    elif intent == "ask_question":
+        expected_keys, expected_type = frozenset({"query"}), str
     elif intent in {
-        "ask_question",
         "cancel_flow",
         "confirm",
         "deny",
@@ -1097,6 +1142,7 @@ class LLMNLUEntities(BaseModel):
     confirmation: StrictBool | None = None
     therapist_gender: Literal["male", "female", "none"] | None = None
     change_target: BookingChangeTarget | None = None
+    query: StrictStr | None = None
 
 
 class LLMNLUOutput(BaseModel):
@@ -1125,7 +1171,7 @@ _LLM_ENTITY_INTENTS = {
     NLUEntityKind.THERAPIST: "select_therapist",
 }
 _LLM_NO_PAYLOAD_INTENTS = frozenset(
-    {"ask_question", "cancel_flow", "confirm", "deny", "start_booking"}
+    {"cancel_flow", "confirm", "deny", "start_booking"}
 )
 
 
@@ -1249,7 +1295,8 @@ def _build_llm_messages(
         f"Current state: {state.value}. Allowed intents: {intents}. "
         "Entities may only contain number_of_people, duration_minutes, booking_date "
         "(YYYY-MM-DD), start_time (HH:MM), phone, confirmation, therapist_gender, "
-        "change_target. Use intent change_info for an in-progress booking change. "
+        "change_target, query. Use intent change_info for an in-progress booking "
+        "change and ask_question for an FAQ query. "
         "For shop/course/therapist return only entity_kind and entity_query; never infer "
         "IDs or return domain objects. Example: "
         '{"intent":"select_people","confidence":0.9,'
@@ -1282,6 +1329,9 @@ def _llm_direct_payload(
         return _llm_change_payload(entities)
     if intent in _LLM_NO_PAYLOAD_INTENTS:
         return {}
+    if intent == "ask_question" and entities.query is not None:
+        query = entities.query.strip()
+        return {"query": query} if query else None
     if intent == "select_people" and entities.number_of_people is not None:
         return {"num_customer": entities.number_of_people}
     if intent == "select_duration" and entities.duration_minutes is not None:

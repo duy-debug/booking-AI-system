@@ -12,6 +12,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import app.dependencies as dependencies
+from app.application.ports.knowledge_gateway import (
+    KnowledgeDocument,
+    KnowledgeGatewayUnavailableError,
+)
 from app.application.ports.llm_gateway import (
     LLMGatewayUnavailableError,
     LLMMessage,
@@ -89,6 +93,28 @@ class StaticLLMGateway:
         if self.error is not None:
             raise self.error
         return LLMResponse(content=self.content)
+
+
+class StaticKnowledgeGateway:
+    def __init__(
+        self,
+        documents: list[KnowledgeDocument] | None = None,
+        error: KnowledgeGatewayUnavailableError | None = None,
+    ) -> None:
+        self.documents = documents or []
+        self.error = error
+        self.calls: list[tuple[str, int]] = []
+
+    async def search(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+    ) -> list[KnowledgeDocument]:
+        self.calls.append((query, limit))
+        if self.error is not None:
+            raise self.error
+        return self.documents
 
 
 @pytest.fixture
@@ -458,4 +484,70 @@ def test_stream_message_has_parity_with_json_on_independent_contexts(
     assert stream_message["conversation_id"] == "conversation-sse"
     assert regular_body["conversation_id"] == "conversation-json"
     assert gateway.calls == 2
+    assert outbound_requests == []
+
+
+def test_faq_stream_has_json_parity_and_uses_one_injected_gateway(
+    stream_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = stream_client
+    container = container_of(client)
+    gateway = StaticKnowledgeGateway(
+        [KnowledgeDocument("Bãi đỗ xe nằm cạnh cửa hàng.", 0.9, "private")]
+    )
+    container.knowledge_gateway = gateway
+    message = "Có chỗ đậu xe không?"
+
+    regular = client.post(
+        "/api/v1/chat",
+        json={"conversation_id": "faq-json", "message": message},
+    )
+    streamed = post_stream(
+        client,
+        conversation_id="faq-sse",
+        message=message,
+    )
+    events = parse_events(streamed)
+    regular_body = regular.json()
+    stream_message = events[1][1]
+
+    assert [event for event, _ in events] == ["started", "message", "completed"]
+    for key in {
+        "text",
+        "state",
+        "status",
+        "instruction_template",
+        "quick_replies",
+        "metadata",
+    }:
+        assert stream_message[key] == regular_body[key]
+    assert gateway.calls == [(message, 3), (message, 3)]
+    assert "token" not in {event for event, _ in events}
+    assert outbound_requests == []
+
+
+def test_handled_knowledge_failure_is_a_normal_sse_message(
+    stream_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = stream_client
+    gateway = StaticKnowledgeGateway(
+        error=KnowledgeGatewayUnavailableError("private provider failure")
+    )
+    container_of(client).knowledge_gateway = gateway
+
+    response = post_stream(
+        client,
+        conversation_id="faq-unavailable",
+        message="Chính sách hủy lịch như thế nào?",
+    )
+    events = parse_events(response)
+
+    assert [event for event, _ in events] == ["started", "message", "completed"]
+    assert events[1][1]["status"] == "failure_handled"
+    assert events[1][1]["metadata"] == {
+        "response_type": "faq",
+        "source_count": 0,
+    }
+    assert "private provider failure" not in response.text
+    assert "error" not in {event for event, _ in events}
     assert outbound_requests == []

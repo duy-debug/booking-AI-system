@@ -4,6 +4,14 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
+class KnowledgeGatewayError(Exception):
+    """Base exception for expected knowledge retrieval failures."""
+
+
+class KnowledgeGatewayUnavailableError(KnowledgeGatewayError):
+    """Raised when the configured knowledge source is unavailable."""
+
+
 @dataclass(frozen=True, slots=True)
 class KnowledgeDocument:
     """Represents a relevant document returned by knowledge search."""

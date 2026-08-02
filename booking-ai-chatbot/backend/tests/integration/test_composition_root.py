@@ -91,6 +91,15 @@ async def test_container_assembles_shared_dependencies_without_network_calls() -
     assert isinstance(container.llm_gateway, OpenRouterLLMGateway)
     assert container.llm_nlu_fallback._llm_gateway is container.llm_gateway
     assert container.llm_nlu_fallback._intent_policy is container.state_intent_policy
+    assert container.knowledge_gateway is None
+    assert container.state_intent_policy.is_allowed(
+        BookingState.IDLE,
+        "ask_question",
+    )
+    assert container.state_intent_policy.is_allowed(
+        BookingState.COMPLETED,
+        "ask_question",
+    )
     assert request_count == 0
 
     await container.close()

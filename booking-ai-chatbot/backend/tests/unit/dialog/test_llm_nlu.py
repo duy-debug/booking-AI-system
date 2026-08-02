@@ -46,8 +46,7 @@ class FakeLLMGateway:
 
 
 def policy() -> StateIntentPolicy:
-    return StateIntentPolicy(
-        {
+    allowed = {
             BookingState.IDLE: frozenset({"start_booking", "unknown"}),
             BookingState.SELECTING_SHOP: frozenset({"select_store", "unknown"}),
             BookingState.SELECTING_DATE: frozenset({"select_date", "unknown"}),
@@ -64,7 +63,9 @@ def policy() -> StateIntentPolicy:
             BookingState.AWAITING_CONFIRMATION: frozenset(
                 {"confirm", "deny", "change_info", "unknown"}
             ),
-        },
+        }
+    return StateIntentPolicy(
+        {state: intents | {"ask_question"} for state, intents in allowed.items()},
         frozenset(),
     )
 
@@ -224,6 +225,25 @@ async def test_llm_change_shop_query_stays_domain_neutral() -> None:
     assert result.entity_query == "quận 1"
     assert result.change_target == "shop"
     assert result.payload == {}
+
+
+@pytest.mark.asyncio
+async def test_llm_faq_output_preserves_query_without_generating_answer() -> None:
+    fallback, gateway = fallback_for(
+        structured(
+            intent="ask_question",
+            entities={"query": "Có dịch vụ cho khách mang thai không?"},
+        )
+    )
+
+    result = await fallback.parse(
+        text="Mình đang có em bé thì dùng dịch vụ nào được?",
+        state=BookingState.IDLE,
+    )
+
+    assert result.intent == "ask_question"
+    assert result.payload == {"query": "Có dịch vụ cho khách mang thai không?"}
+    assert gateway.calls == 1
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,7 @@ from app.application.handlers.create_booking_handler import CreateBookingHandler
 from app.application.handlers.search_service_handler import SearchServiceHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.application.ports.booking_gateway import BookingGateway
+from app.application.ports.knowledge_gateway import KnowledgeGateway
 from app.application.ports.llm_gateway import LLMGateway
 from app.core.config import Settings
 from app.dialog.dialog_controller import DialogController
@@ -123,6 +124,7 @@ class ApplicationContainer:
     entity_resolution_coordinator: EntityResolutionCoordinator
     llm_gateway: LLMGateway
     llm_nlu_fallback: LLMNLUFallback
+    knowledge_gateway: KnowledgeGateway | None
     _handlers: tuple[object, ...] = field(repr=False)
     _owns_http_client: bool = field(repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
@@ -141,6 +143,7 @@ async def create_application_container(
     *,
     http_client: httpx.AsyncClient | None = None,
     llm_gateway: LLMGateway | None = None,
+    knowledge_gateway: KnowledgeGateway | None = None,
 ) -> ApplicationContainer:
     """Build an isolated application object graph from validated runtime settings."""
     _validate_settings(settings)
@@ -153,7 +156,10 @@ async def create_application_container(
     try:
         flow_definition = FlowLoader.load(settings.booking_flow_path)
         change_rules = FlowLoader.load_change_handlers(settings.change_handlers_path)
-        state_intent_policy = build_state_intent_policy(flow_definition)
+        state_intent_policy = build_state_intent_policy(
+            flow_definition,
+            enable_faq=True,
+        )
         booking_gateway: BookingGateway = HTTPBookingGateway(
             client=client,
             base_url=settings.pos_base_url,
@@ -221,6 +227,7 @@ async def create_application_container(
                 min_confidence=settings.llm_nlu_min_confidence,
                 enabled=settings.enable_llm_nlu_fallback,
             ),
+            knowledge_gateway=knowledge_gateway,
             _handlers=handlers,
             _owns_http_client=owns_http_client,
         )
