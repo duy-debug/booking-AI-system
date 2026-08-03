@@ -34,3 +34,8 @@ class Settings:
     qdrant_api_key: str | None = None
     qdrant_collection: str = "kb_chunks"
     knowledge_qdrant_enabled: bool = False
+    log_level: str = "INFO"
+    log_format: str = "console"
+    log_json_path: str | None = None
+    log_max_bytes: int = 10 * 1024 * 1024
+    log_backup_count: int = 5

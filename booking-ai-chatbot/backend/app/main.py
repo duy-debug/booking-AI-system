@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.core.config import Settings
+from app.core.logging import configure_logging
 from app.dependencies import application_container_lifespan
 from app.transport.chat_api import router as chat_router
 
@@ -48,6 +49,19 @@ def create_app(settings: Settings) -> FastAPI:
 
 
 _knowledge_qdrant_enabled = _environment_bool("KNOWLEDGE_QDRANT_ENABLED")
+_log_level = os.getenv("LOG_LEVEL", "INFO")
+_log_format = os.getenv("LOG_FORMAT", "console")
+_log_json_path = os.getenv("LOG_JSON_PATH") or None
+_log_max_bytes = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))
+_log_backup_count = int(os.getenv("LOG_BACKUP_COUNT", "5"))
+
+configure_logging(
+    level=_log_level,
+    log_format=_log_format,
+    json_path=_log_json_path,
+    max_bytes=_log_max_bytes,
+    backup_count=_log_backup_count,
+)
 
 app = create_app(
     Settings(
@@ -67,5 +81,10 @@ app = create_app(
         qdrant_api_key=os.getenv("QDRANT_API_KEY") or None,
         qdrant_collection=os.getenv("QDRANT_COLLECTION", "kb_chunks"),
         knowledge_qdrant_enabled=_knowledge_qdrant_enabled,
+        log_level=_log_level,
+        log_format=_log_format,
+        log_json_path=_log_json_path,
+        log_max_bytes=_log_max_bytes,
+        log_backup_count=_log_backup_count,
     )
 )
