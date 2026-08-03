@@ -322,7 +322,6 @@
             {
               "condition": "slot_unavailable",
               "target": "selecting_time",
-              "actions": ["suggest_nearest_time"],
               "instruction_template": "slot_unavailable"
             },
             {

@@ -14,7 +14,15 @@ from fastapi.testclient import TestClient
 
 import app.dependencies as dependencies
 from app.application.handlers.check_availability_handler import CheckAvailabilityHandler
+from app.application.handlers.create_booking_handler import CreateBookingHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
+from app.application.ports.booking_gateway import (
+    BookingGateway,
+    CreateBookingRequest,
+    CreateBookingResult,
+    FinalAvailabilityRequest,
+    FinalAvailabilityResult,
+)
 from app.application.ports.knowledge_gateway import (
     KnowledgeDocument,
     KnowledgeGatewayUnavailableError,
@@ -40,7 +48,7 @@ from app.dialog.nlu import (
     NLUResult,
     NLUSource,
 )
-from app.domain.booking import Service, Shop
+from app.domain.booking import Booking, Customer, Service, Shop
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.main import create_app
@@ -77,6 +85,41 @@ class RecordingAvailabilityHandler(CheckAvailabilityHandler):
         self.calls.append(context)
         context.set_available_slots(self.slots)
         return self.slots
+
+
+class EndpointCreateGateway:
+    def __init__(self) -> None:
+        self.final_requests: list[FinalAvailabilityRequest] = []
+        self.create_requests: list[CreateBookingRequest] = []
+
+    async def check_final_availability(
+        self,
+        request: FinalAvailabilityRequest,
+    ) -> FinalAvailabilityResult:
+        self.final_requests.append(request)
+        return FinalAvailabilityResult(available=True)
+
+    async def create_booking(
+        self,
+        request: CreateBookingRequest,
+    ) -> CreateBookingResult:
+        self.create_requests.append(request)
+        booking = Booking(
+            booking_id=UUID("33333333-3333-3333-3333-333333333333"),
+            status="confirmed",
+            shop=SHOP,
+            service=SERVICE,
+            customer=Customer(request.phone, request.customer_name),
+            booking_date=request.booking_date,
+            start_time=request.start_time,
+            num_customer=request.num_customer,
+            duration_minutes=request.duration_minutes,
+            reservation_code="RSV-ENDPOINT-001",
+        )
+        return CreateBookingResult(
+            booking,
+            reservation_code="RSV-ENDPOINT-001",
+        )
 
 
 class StaticResolver:
@@ -339,6 +382,72 @@ def test_p2_recovery_keeps_sse_order_and_json_parity(
     assert context.start_time == time(9, 0)
     assert context.booking is None
     assert gateway.calls == 1
+    assert outbound_requests == []
+
+
+def test_completed_booking_has_json_sse_parity_and_one_create_per_request(
+    stream_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = stream_client
+    container = container_of(client)
+    gateway = EndpointCreateGateway()
+    container.tool_bridge._create_booking_handler = CreateBookingHandler(
+        cast(BookingGateway, gateway)
+    )
+
+    def ready_context(conversation_id: str) -> BookingContext:
+        return BookingContext(
+            conversation_id,
+            state=BookingState.AWAITING_CONFIRMATION,
+            shop=SHOP,
+            service=SERVICE,
+            customer=Customer("0901234567", "Nguyen An"),
+            booking_date=date(2099, 8, 15),
+            start_time=time(10, 30),
+            num_customer=1,
+            duration_minutes=60,
+            phone="0901234567",
+            phone_confirmed=True,
+            ng_list_checked=True,
+        )
+
+    json_context = ready_context("conversation-e2e-json")
+    sse_context = ready_context("conversation-e2e-sse")
+    container.memory_cache._contexts[json_context.conversation_id] = json_context
+    container.memory_cache._contexts[sse_context.conversation_id] = sse_context
+
+    regular = client.post(
+        "/api/v1/chat",
+        json={
+            "conversation_id": json_context.conversation_id,
+            "message": "xác nhận",
+            "idempotency_key": "endpoint-json",
+        },
+    )
+    streamed = post_stream(
+        client,
+        conversation_id=sse_context.conversation_id,
+        message="xác nhận",
+        idempotency_key="endpoint-sse",
+    )
+    events = parse_events(streamed)
+
+    assert regular.status_code == 200
+    assert regular.json()["state"] == "completed"
+    assert regular.json()["status"] == "success"
+    assert regular.json()["metadata"] == {"booking_created": True}
+    assert "RSV-ENDPOINT-001" in cast(str, regular.json()["text"])
+    assert [event for event, _ in events] == ["started", "message", "completed"]
+    assert events[1][1]["state"] == regular.json()["state"]
+    assert events[1][1]["status"] == regular.json()["status"]
+    assert events[1][1]["text"] == regular.json()["text"]
+    assert events[1][1]["metadata"] == regular.json()["metadata"]
+    assert len(gateway.final_requests) == 2
+    assert len(gateway.create_requests) == 2
+    assert {request.idempotency_key for request in gateway.create_requests} == {
+        "endpoint-json",
+        "endpoint-sse",
+    }
     assert outbound_requests == []
 
 

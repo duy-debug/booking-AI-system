@@ -2,6 +2,7 @@
 
 from datetime import time
 
+from app.application.exceptions import SlotConflictError
 from app.application.ports.booking_gateway import AvailabilityRequest, BookingGateway
 from app.domain.booking_context import BookingContext
 from app.domain.exceptions import BookingContextNotReadyError
@@ -40,4 +41,6 @@ class CheckAvailabilityHandler:
         )
         slots = await self._booking_gateway.get_available_slots(request)
         context.set_available_slots(slots)
+        if not slots:
+            raise SlotConflictError(reason="No available slots for the booking shape.")
         return slots

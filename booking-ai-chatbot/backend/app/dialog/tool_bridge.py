@@ -391,6 +391,10 @@ class ToolBridge:
         if isinstance(error, InvalidFlowConditionError):
             return "flow_configuration_error"
         if isinstance(error, SlotConflictError | BookingConflictError):
+            if action_name == "load_time_slots":
+                return "no_slots_available"
+            if action_name == "handle_time_selection":
+                return "slot_unavailable"
             return "booking_conflict"
         if isinstance(error, CustomerVerificationMismatchError):
             return "customer_verification_mismatch"
@@ -596,6 +600,12 @@ class ToolBridge:
         context: ActionExecutionContext,
     ) -> ActionResult:
         start_time = _require_payload_value(context, "start_time", time)
+        available_slots = context.booking_context.available_slots
+        if available_slots is None or start_time not in available_slots:
+            raise SlotConflictError(
+                nearest_slots=available_slots or (),
+                reason="Selected time is not in the latest available slots.",
+            )
         context.booking_context.set_start_time(start_time)
         return ActionResult("handle_time_selection", start_time)
 

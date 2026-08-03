@@ -7,15 +7,35 @@ from uuid import UUID
 import httpx
 import pytest
 
+import app.dependencies as dependencies
 from app.application.handlers.check_availability_handler import CheckAvailabilityHandler
 from app.application.handlers.confirm_phone_handler import ConfirmPhoneHandler
-from app.application.ports.booking_gateway import BookingGateway
+from app.application.ports.booking_gateway import (
+    AvailabilityRequest,
+    BookingGateway,
+    ChildReservationReference,
+    CourseSearchRequest,
+    CreateBookingRequest,
+    CreateBookingResult,
+    CustomerVerificationRequest,
+    CustomerVerificationResult,
+    FinalAvailabilityRequest,
+    FinalAvailabilityResult,
+)
 from app.core.config import Settings
-from app.dependencies import create_application_container
+from app.dependencies import ApplicationContainer, create_application_container
 from app.dialog.dialog_controller import DialogTurnInput, DialogTurnStatus
 from app.dialog.instruction_builder import DialogResponseDraft
 from app.dialog.tool_bridge import ActionExecutionContext, ActionResult
-from app.domain.booking import Service, Shop
+from app.domain.booking import (
+    Booking,
+    CourseSelection,
+    Customer,
+    Service,
+    Shop,
+    TherapistPreference,
+    TherapistPreferenceType,
+)
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.infrastructure.booking_api.http_booking_gateway import HTTPBookingGateway
@@ -62,6 +82,133 @@ class FailingAvailabilityHandler(CheckAvailabilityHandler):
         self.calls += 1
         context.set_available_slots((time(11, 0),))
         raise RuntimeError("POS unavailable")
+
+
+class RecordingBookingGateway:
+    def __init__(self, *, create_error: Exception | None = None) -> None:
+        self.create_error = create_error
+        self.available_slots: tuple[time, ...] = (time(10, 30), time(11, 0))
+        self.final_requests: list[FinalAvailabilityRequest] = []
+        self.create_requests: list[CreateBookingRequest] = []
+
+    async def search_shops(self, query: str | None = None) -> list[Shop]:
+        return [SHOP]
+
+    async def search_services(self, request: CourseSearchRequest) -> list[Service]:
+        return [SERVICE]
+
+    async def get_available_slots(
+        self,
+        request: AvailabilityRequest,
+    ) -> tuple[time, ...]:
+        return self.available_slots
+
+    async def verify_customer(
+        self,
+        request: CustomerVerificationRequest,
+    ) -> CustomerVerificationResult:
+        return CustomerVerificationResult(
+            phone=request.phone,
+            customer_id="customer-1",
+            member_rank="gold",
+            visit_count=2,
+            ng_list_checked=True,
+            is_ng_customer=False,
+        )
+
+    async def check_final_availability(
+        self,
+        request: FinalAvailabilityRequest,
+    ) -> FinalAvailabilityResult:
+        self.final_requests.append(request)
+        return FinalAvailabilityResult(available=True)
+
+    async def create_booking(
+        self,
+        request: CreateBookingRequest,
+    ) -> CreateBookingResult:
+        self.create_requests.append(request)
+        if self.create_error is not None:
+            raise self.create_error
+        booking = Booking(
+            booking_id=UUID("33333333-3333-3333-3333-333333333333"),
+            status="confirmed",
+            shop=SHOP,
+            service=SERVICE,
+            customer=Customer(request.phone, request.customer_name),
+            booking_date=request.booking_date,
+            start_time=request.start_time,
+            num_customer=request.num_customer,
+            duration_minutes=request.duration_minutes,
+            therapist_preference=request.therapist_preference,
+            reservation_code="RSV-E2E-001",
+        )
+        children = tuple(
+            ChildReservationReference(
+                UUID(f"44444444-4444-4444-4444-{index:012d}"),
+                participant_index=index,
+            )
+            for index in range(1, request.num_customer + 1)
+        )
+        return CreateBookingResult(
+            booking,
+            reservation_code="RSV-E2E-001",
+            child_reservations=children,
+        )
+
+    async def lookup_booking(self, booking_id: UUID) -> Booking:
+        raise AssertionError("Unexpected lookup_booking call.")
+
+    async def reschedule_booking(
+        self,
+        booking_id: UUID,
+        booking_date: date,
+        start_time: time,
+    ) -> Booking:
+        raise AssertionError("Unexpected reschedule_booking call.")
+
+    async def cancel_booking(self, booking_id: UUID) -> Booking:
+        raise AssertionError("Unexpected cancel_booking call.")
+
+
+async def advance_to_awaiting_confirmation(
+    container: ApplicationContainer,
+    *,
+    num_customer: int,
+    therapist_preference: TherapistPreference | None,
+) -> tuple[BookingContext, tuple[BookingState, ...]]:
+    context = BookingContext(conversation_id=f"e2e-{num_customer}")
+    states: list[BookingState] = []
+
+    async def turn(intent: str, payload: dict[str, object]) -> None:
+        result = await container.dialog_controller.handle_turn(
+            context,
+            DialogTurnInput(intent=intent, payload=payload),
+        )
+        assert result.status is DialogTurnStatus.SUCCESS
+        states.append(context.state)
+
+    await turn("start_booking", {})
+    await turn("select_store", {"shop": SHOP})
+    await turn("select_date", {"booking_date": date(2099, 8, 5)})
+    await turn("select_people", {"num_customer": num_customer})
+    await turn("select_duration", {"duration_minutes": 60})
+    await turn(
+        "select_course",
+        {"course_selection": CourseSelection(main_course=SERVICE)},
+    )
+    await turn("select_time", {"start_time": time(10, 30)})
+    if num_customer == 1:
+        if therapist_preference is None:
+            await turn("deny", {})
+        else:
+            await turn(
+                "select_therapist",
+                {"therapist_preference": therapist_preference},
+            )
+    await turn("provide_phone", {"phone": "0901234567", "name": "Nguyen An"})
+    await turn("confirm", {})
+    return context, tuple(states)
 
 
 def shop_response(request: httpx.Request) -> httpx.Response:
@@ -367,6 +514,221 @@ async def test_reload_failure_rolls_back_and_does_not_commit_selecting_time() ->
     assert context.available_slots == stale_slots
     assert context.start_time == time(9, 0)
     assert context.booking is None
+
+    await container.close()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("num_customer", "therapist_preference"),
+    [
+        (1, None),
+        (1, TherapistPreference(TherapistPreferenceType.FEMALE)),
+        (2, None),
+        (3, None),
+    ],
+)
+async def test_booking_happy_path_reaches_completed_once_with_booking_code(
+    monkeypatch: pytest.MonkeyPatch,
+    num_customer: int,
+    therapist_preference: TherapistPreference | None,
+) -> None:
+    gateway = RecordingBookingGateway()
+    monkeypatch.setattr(dependencies, "HTTPBookingGateway", lambda **kwargs: gateway)
+    client = httpx.AsyncClient(base_url="http://pos.test")
+    container = await create_application_container(settings(), http_client=client)
+    context, states = await advance_to_awaiting_confirmation(
+        container,
+        num_customer=num_customer,
+        therapist_preference=therapist_preference,
+    )
+
+    result = await container.dialog_controller.handle_turn(
+        context,
+        DialogTurnInput(
+            intent="confirm",
+            payload={},
+            idempotency_key=f"booking-{num_customer}",
+        ),
+    )
+    response = container.instruction_builder.build_response(
+        result=result,
+        context=context,
+    )
+
+    assert states[:6] == (
+        BookingState.SELECTING_SHOP,
+        BookingState.SELECTING_DATE,
+        BookingState.SELECTING_PEOPLE,
+        BookingState.SELECTING_DURATION,
+        BookingState.SELECTING_SERVICE,
+        BookingState.SELECTING_TIME,
+    )
+    assert BookingState.COLLECTING_PHONE in states
+    assert states[-2:] == (
+        BookingState.VERIFYING_PHONE,
+        BookingState.AWAITING_CONFIRMATION,
+    )
+    assert result.status is DialogTurnStatus.SUCCESS
+    assert result.executed_actions == ("create_booking",)
+    assert context.state is BookingState.COMPLETED
+    assert context.booking is not None
+    assert context.reservation_code == "RSV-E2E-001"
+    assert "RSV-E2E-001" in response.text
+    assert response.metadata == {"booking_created": True}
+    assert len(gateway.final_requests) == 1
+    assert len(gateway.create_requests) == 1
+    assert len(context.child_reservation_ids) == num_customer
+    assert gateway.create_requests[0].num_customer == num_customer
+    if num_customer >= 2:
+        assert context.therapist_preference is None
+        assert gateway.create_requests[0].therapist_preference is None
+    else:
+        assert context.therapist_preference == (
+            therapist_preference
+            or TherapistPreference(TherapistPreferenceType.NONE)
+        )
+
+    await container.close()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_final_denial_cancels_without_pos_create(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gateway = RecordingBookingGateway()
+    monkeypatch.setattr(dependencies, "HTTPBookingGateway", lambda **kwargs: gateway)
+    client = httpx.AsyncClient(base_url="http://pos.test")
+    container = await create_application_container(settings(), http_client=client)
+    context, _ = await advance_to_awaiting_confirmation(
+        container,
+        num_customer=1,
+        therapist_preference=None,
+    )
+
+    result = await container.dialog_controller.handle_turn(
+        context,
+        DialogTurnInput(intent="deny", payload={}),
+    )
+
+    assert result.status is DialogTurnStatus.SUCCESS
+    assert context.state is BookingState.CANCELLED
+    assert gateway.final_requests == []
+    assert gateway.create_requests == []
+    assert context.booking is None
+
+    await container.close()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_empty_availability_returns_to_date_without_selecting_a_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gateway = RecordingBookingGateway()
+    gateway.available_slots = ()
+    monkeypatch.setattr(dependencies, "HTTPBookingGateway", lambda **kwargs: gateway)
+    client = httpx.AsyncClient(base_url="http://pos.test")
+    container = await create_application_container(settings(), http_client=client)
+    context = BookingContext(
+        conversation_id="e2e-no-slots",
+        state=BookingState.SELECTING_SERVICE,
+        shop=SHOP,
+        booking_date=date(2099, 8, 5),
+        num_customer=1,
+        duration_minutes=60,
+    )
+
+    result = await container.dialog_controller.handle_turn(
+        context,
+        DialogTurnInput(
+            intent="select_course",
+            payload={"course_selection": CourseSelection(main_course=SERVICE)},
+        ),
+    )
+
+    assert result.status is DialogTurnStatus.FAILURE_HANDLED
+    assert result.failure_code == "no_slots_available"
+    assert context.state is BookingState.SELECTING_DATE
+    assert context.booking_date is None
+    assert context.start_time is None
+    assert context.available_slots is None
+    assert gateway.create_requests == []
+
+    await container.close()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_time_selection_rejects_a_slot_outside_latest_availability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gateway = RecordingBookingGateway()
+    monkeypatch.setattr(dependencies, "HTTPBookingGateway", lambda **kwargs: gateway)
+    client = httpx.AsyncClient(base_url="http://pos.test")
+    container = await create_application_container(settings(), http_client=client)
+    context = BookingContext(
+        conversation_id="e2e-stale-slot",
+        state=BookingState.SELECTING_TIME,
+        shop=SHOP,
+        service=SERVICE,
+        booking_date=date(2099, 8, 5),
+        num_customer=1,
+        duration_minutes=60,
+        available_slots=gateway.available_slots,
+    )
+
+    result = await container.dialog_controller.handle_turn(
+        context,
+        DialogTurnInput(intent="select_time", payload={"start_time": time(9, 0)}),
+    )
+
+    assert result.status is DialogTurnStatus.FAILURE_HANDLED
+    assert result.failure_code == "slot_unavailable"
+    assert context.state is BookingState.SELECTING_TIME
+    assert context.start_time is None
+    assert context.available_slots == gateway.available_slots
+    assert gateway.create_requests == []
+
+    await container.close()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_create_failure_rolls_back_result_and_enters_recovery_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gateway = RecordingBookingGateway(create_error=RuntimeError("POS unavailable"))
+    monkeypatch.setattr(dependencies, "HTTPBookingGateway", lambda **kwargs: gateway)
+    client = httpx.AsyncClient(base_url="http://pos.test")
+    container = await create_application_container(settings(), http_client=client)
+    context, _ = await advance_to_awaiting_confirmation(
+        container,
+        num_customer=1,
+        therapist_preference=None,
+    )
+
+    result = await container.dialog_controller.handle_turn(
+        context,
+        DialogTurnInput(
+            intent="confirm",
+            payload={},
+            idempotency_key="booking-failure",
+        ),
+    )
+
+    assert result.status is DialogTurnStatus.FAILURE_HANDLED
+    assert result.failure_code == "booking_api_error"
+    assert result.failed_action == "create_booking"
+    assert context.state is BookingState.BOOKING_FAILED
+    assert context.booking is None
+    assert context.booking_id is None
+    assert context.reservation_code is None
+    assert context.child_reservation_ids == ()
+    assert len(gateway.final_requests) == 1
+    assert len(gateway.create_requests) == 1
 
     await container.close()
     await client.aclose()

@@ -364,7 +364,7 @@ def test_time_selection_failure_contract(flow: FlowDefinition) -> None:
     api_error = _failure(transition, "slot_api_error")
 
     assert unavailable.target is BookingState.SELECTING_TIME
-    assert unavailable.actions == ("suggest_nearest_time",)
+    assert unavailable.actions == ()
     assert unavailable.instruction_template == "slot_unavailable"
     assert api_error.target is BookingState.SELECTING_TIME
     assert api_error.actions == ()
@@ -553,7 +553,7 @@ def test_tool_bridge_audits_declared_actions_without_reading_json(
     declared_actions = _all_declared_actions(flow)
     unregistered = bridge.find_unregistered_actions(declared_actions)
 
-    assert len(set(declared_actions)) == 30
+    assert len(set(declared_actions)) == 29
     assert {
         "search_shop",
         "load_time_slots",
@@ -594,7 +594,6 @@ def test_happy_path_actions_are_bound_with_explicit_non_runtime_allowlists(
         "ask_to_clarify",
         "defer_change_info",
         "log_unhandled",
-        "suggest_nearest_time",
     }
     known_out_of_scope = {
         "ask_date",

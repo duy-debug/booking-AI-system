@@ -830,6 +830,8 @@ def wrapped_error(
     ("action_name", "cause", "expected"),
     [
         ("create_booking", SlotConflictError(), "booking_conflict"),
+        ("load_time_slots", SlotConflictError(), "no_slots_available"),
+        ("handle_time_selection", SlotConflictError(), "slot_unavailable"),
         (
             "handle_phone_collection",
             InvalidBookingDataError("sensitive message"),

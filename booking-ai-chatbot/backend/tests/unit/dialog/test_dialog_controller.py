@@ -687,6 +687,7 @@ async def test_group_booking_auto_skips_therapist_and_enters_phone_state() -> No
         conversation_id="c-1",
         state=BookingState.SELECTING_TIME,
         num_customer=2,
+        available_slots=(time(10, 30),),
     )
 
     result = await controller(flow, ToolBridge()).handle_turn(

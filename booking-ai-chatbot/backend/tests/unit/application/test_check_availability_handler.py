@@ -6,6 +6,7 @@ from uuid import UUID
 
 import pytest
 
+from app.application.exceptions import SlotConflictError
 from app.application.handlers.check_availability_handler import (
     CheckAvailabilityHandler,
 )
@@ -166,6 +167,19 @@ async def test_execute_maps_complete_request_and_updates_slots_only() -> None:
     assert context.available_slots is SLOTS
     assert context.start_time is None
     assert context.state is original_state
+
+
+@pytest.mark.asyncio
+async def test_empty_availability_is_a_typed_conflict_and_stores_no_slots() -> None:
+    context = make_context()
+    fake = FakeBookingGateway(slots=())
+
+    with pytest.raises(SlotConflictError):
+        await make_handler(fake).execute(context)
+
+    assert context.available_slots == ()
+    assert context.start_time is None
+    assert len(fake.availability_requests) == 1
 
 
 @pytest.mark.parametrize("group_size", [2, 3])
