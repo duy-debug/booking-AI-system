@@ -1,46 +1,39 @@
-export type UiType =
-  | "text" | "shop_options" | "course_options" | "addon_options"
-  | "people_options" | "date_picker" | "slot_options"
-  | "therapist_request_options" | "therapist_options" | "gender_options"
-  | "customer_form" | "booking_summary" | "confirmation" | "booking_result"
-  | "booking_lookup_form" | "booking_detail" | "booking_cancel_form"
-  | "booking_cancel_summary" | "booking_update_form" | "booking_update_summary";
-
-export interface UiOption {
-  id: string;
-  label: string;
-  description?: string | null;
-  metadata: Record<string, unknown>;
-}
-
-export interface UiBlock {
-  type: UiType;
-  options: UiOption[];
-  data: Record<string, unknown>;
-}
-
-export interface ChatSelection {
-  entity: string;
-  value: unknown;
-  label?: string;
-  metadata?: Record<string, unknown>;
+export interface ChatRequest {
+  conversation_id: string;
+  message: string;
+  idempotency_key?: string | null;
 }
 
 export interface ChatResponse {
-  contract_version: "1.0";
-  answer: string;
-  intent: string;
   conversation_id: string;
-  data?: unknown;
-  missing_entities?: string[];
-  ui?: UiBlock | null;
+  text: string;
+  state: string;
+  status: string;
+  instruction_template: string | null;
+  quick_replies: string[];
+  metadata: Record<string, unknown>;
 }
 
-export interface ProblemDetails {
-  status: number;
+export interface ChatStartedEvent {
+  conversation_id: string;
+}
+
+export interface ChatCompletedEvent {
+  conversation_id: string;
+  stream_status: "completed";
+  dialog_status: string;
+}
+
+export interface ChatErrorEvent {
+  conversation_id: string;
+  code: string;
+  message: string;
+}
+
+export interface ChatProblem {
+  status?: number;
   code: string;
   detail: string;
-  errors?: Array<{ field: string; message: string }>;
 }
 
 export interface ChatMessage {

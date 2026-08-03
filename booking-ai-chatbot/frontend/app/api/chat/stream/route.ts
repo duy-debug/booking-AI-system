@@ -5,6 +5,15 @@ const backendUrl = (process.env.CHATBOT_API_URL || "http://localhost:8001").repl
 export async function POST(request: NextRequest) {
   const correlationId = request.headers.get("x-correlation-id") || crypto.randomUUID();
   try {
+    const incoming: unknown = await request.json();
+    const source = typeof incoming === "object" && incoming !== null
+      ? incoming as Record<string, unknown>
+      : {};
+    const body = JSON.stringify({
+      conversation_id: source.conversation_id,
+      message: source.message,
+      idempotency_key: source.idempotency_key ?? null,
+    });
     const response = await fetch(`${backendUrl}/api/v1/chat/stream`, {
       method: "POST",
       headers: {
@@ -12,7 +21,7 @@ export async function POST(request: NextRequest) {
         Accept: "text/event-stream",
         "X-Correlation-ID": correlationId,
       },
-      body: await request.text(),
+      body,
       cache: "no-store",
       signal: request.signal,
     });

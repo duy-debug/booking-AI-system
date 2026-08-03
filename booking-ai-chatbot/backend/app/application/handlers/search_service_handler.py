@@ -31,6 +31,13 @@ class SearchServiceHandler:
         normalized_query = query.strip().casefold() if query is not None else ""
         if not normalized_query:
             return services
+        exact_matches = [
+            service
+            for service in services
+            if normalized_query == service.name.casefold()
+        ]
+        if exact_matches:
+            return exact_matches
         return [
             service
             for service in services

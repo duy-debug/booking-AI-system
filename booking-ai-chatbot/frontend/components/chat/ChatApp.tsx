@@ -9,7 +9,13 @@ import { ChatApiError, streamChat } from "@/services/chat-api";
 import { loadConversationId, saveConversationSession } from "@/services/chat-session";
 import type { ChatMessage } from "@/types/chat";
 
-const WELCOME_TEXT = "Xin chào! Mình là Kori, trợ lý wellness của Komorebi. Mình có thể giúp bạn đặt lịch, tra cứu, đổi hoặc hủy lịch hẹn. Hôm nay bạn cần mình hỗ trợ gì?";
+const WELCOME_TEXT = "Xin chào! Mình là Kori, trợ lý wellness của Komorebi. Mình có thể giúp bạn đặt lịch và giải đáp thông tin dịch vụ. Hôm nay bạn cần mình hỗ trợ gì?";
+
+interface ChatAttempt {
+  userMessage: string;
+  idempotencyKey: string;
+  conversationId: string;
+}
 
 const makeConversationId = () => crypto.randomUUID();
 const makeWelcome = (): ChatMessage => ({
@@ -26,20 +32,20 @@ export function ChatApp() {
   const [loading, setLoading] = useState(false);
   const [streamingStarted, setStreamingStarted] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastPrompt, setLastPrompt] = useState("");
+  const [failedAttempt, setFailedAttempt] = useState<ChatAttempt | null>(null);
   const [dark, setDark] = useState(false);
   const messageScrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const inFlightRef = useRef(false);
+  const lastAttemptRef = useRef<ChatAttempt | null>(null);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       const storedConversation = loadConversationId(localStorage);
       localStorage.removeItem("booking-chat-conversation");
-      const storedTheme = localStorage.getItem("booking-chat-theme");
       const nextConversation = storedConversation || makeConversationId();
       setConversationId(nextConversation);
-      setDark(storedTheme === "dark");
+      setDark(localStorage.getItem("booking-chat-theme") === "dark");
       setMessages([makeWelcome()]);
     });
     return () => window.cancelAnimationFrame(frame);
@@ -64,19 +70,30 @@ export function ChatApp() {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  async function interact(userText: string) {
-    if (!conversationId || inFlightRef.current) return;
+  function removeLatestTurn() {
+    setMessages((current) => {
+      const trimmed = [...current];
+      if (trimmed.at(-1)?.role === "assistant") trimmed.pop();
+      if (trimmed.at(-1)?.role === "user") trimmed.pop();
+      return trimmed;
+    });
+  }
+
+  async function interact(attempt: ChatAttempt, replaceLatest = false) {
+    if (!attempt.userMessage.trim() || attempt.conversationId !== conversationId || inFlightRef.current) return;
     inFlightRef.current = true;
+    if (replaceLatest) removeLatestTurn();
     saveConversationSession(localStorage, conversationId);
     const assistantMessageId = crypto.randomUUID();
     const controller = new AbortController();
     abortRef.current = controller;
-    setLastPrompt(userText);
+    lastAttemptRef.current = attempt;
+    setFailedAttempt(null);
     setError(null);
     setStreamingStarted(false);
     setMessages((current) => [
       ...current,
-      { id: crypto.randomUUID(), role: "user", text: userText, createdAt: Date.now() },
+      { id: crypto.randomUUID(), role: "user", text: attempt.userMessage, createdAt: Date.now() },
       { id: assistantMessageId, role: "assistant", text: "", createdAt: Date.now() },
     ]);
     setLoading(true);
@@ -84,20 +101,18 @@ export function ChatApp() {
     try {
       await streamChat(
         {
-          conversationId,
-          query: userText,
+          conversation_id: attempt.conversationId,
+          message: attempt.userMessage,
+          idempotency_key: attempt.idempotencyKey,
           signal: controller.signal,
         },
         {
-          onToken: (delta) => {
-            setStreamingStarted(true);
+          onStarted: () => setStreamingStarted(true),
+          onMessage: (response) => {
             setMessages((current) => current.map((message) => (
-              message.id === assistantMessageId ? { ...message, text: message.text + delta } : message
-            )));
-          },
-          onDone: (response) => {
-            setMessages((current) => current.map((message) => (
-              message.id === assistantMessageId ? { ...message, text: response.answer, response } : message
+              message.id === assistantMessageId
+                ? { ...message, text: response.text, response }
+                : message
             )));
           },
         },
@@ -113,9 +128,13 @@ export function ChatApp() {
         setMessages((current) => current.filter((message) => (
           message.id !== assistantMessageId || message.text.length > 0
         )));
-        setError(cause instanceof ChatApiError
-          ? cause.problem.detail
-          : "Không thể kết nối đến trợ lý. Vui lòng thử lại.");
+        setFailedAttempt(attempt);
+        const truncated = cause instanceof Error && cause.message.includes("ended unexpectedly");
+        setError(truncated
+          ? "Kết nối bị gián đoạn; yêu cầu có thể đã được xử lý. Bạn có thể thử lại an toàn với cùng mã yêu cầu."
+          : cause instanceof ChatApiError
+            ? cause.problem.detail
+            : "Không thể kết nối đến trợ lý. Vui lòng thử lại.");
       }
     } finally {
       if (abortRef.current === controller) {
@@ -126,34 +145,48 @@ export function ChatApp() {
     }
   }
 
+  function sendNewTurn(userText: string) {
+    const trimmed = userText.trim();
+    if (!trimmed || loading || inFlightRef.current || !conversationId) return;
+    const attempt: ChatAttempt = {
+      userMessage: trimmed,
+      idempotencyKey: crypto.randomUUID(),
+      conversationId,
+    };
+    void interact(attempt);
+  }
+
   function submit() {
     const value = input.trim();
     if (!value || loading) return;
     setInput("");
-    void interact(value);
+    sendNewTurn(value);
   }
 
   function resetChat() {
     abortRef.current?.abort();
     abortRef.current = null;
     inFlightRef.current = false;
-    setLoading(false);
     const next = makeConversationId();
     setConversationId(next);
     setMessages([makeWelcome()]);
+    setInput("");
+    setLoading(false);
     setError(null);
+    setFailedAttempt(null);
     setStreamingStarted(false);
+    lastAttemptRef.current = null;
   }
 
   function regenerate() {
-    if (!lastPrompt || loading) return;
-    setMessages((current) => {
-      const trimmed = [...current];
-      if (trimmed.at(-1)?.role === "assistant") trimmed.pop();
-      if (trimmed.at(-1)?.role === "user") trimmed.pop();
-      return trimmed;
-    });
-    window.setTimeout(() => void interact(lastPrompt), 0);
+    const attempt = lastAttemptRef.current;
+    if (!attempt || loading) return;
+    void interact(attempt, true);
+  }
+
+  function retry() {
+    if (!failedAttempt || loading) return;
+    void interact(failedAttempt, true);
   }
 
   return (
@@ -178,6 +211,7 @@ export function ChatApp() {
                 loading={loading}
                 streaming={loading && streamingStarted}
                 onRegenerate={regenerate}
+                onQuickReply={sendNewTurn}
               />
             ))}
 
@@ -191,21 +225,22 @@ export function ChatApp() {
             {error && (
               <div className="error-banner">
                 <span><strong>Không gửi được tin nhắn</strong>{error}</span>
-                <button onClick={() => { setError(null); if (lastPrompt) void interact(lastPrompt); }}>Thử lại</button>
+                <button disabled={loading} onClick={retry}>Thử lại</button>
               </div>
             )}
-
           </div>
           <div className="scroll-anchor" />
         </div>
 
-        <MessageComposer
-          value={input}
-          loading={loading}
-          onChange={setInput}
-          onSubmit={submit}
-          onStop={() => abortRef.current?.abort()}
-        />
+        {conversationId && (
+          <MessageComposer
+            value={input}
+            loading={loading}
+            onChange={setInput}
+            onSubmit={submit}
+            onStop={() => abortRef.current?.abort()}
+          />
+        )}
       </section>
     </main>
   );

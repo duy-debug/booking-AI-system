@@ -276,6 +276,13 @@ class EntityResolutionCoordinator:
                 NLUEntityKind.COURSE,
                 "course_resolution_unavailable",
             )
+        if context.service is None and context.duration_minutes is not None:
+            services = [
+                service
+                for service in services
+                if service.course_type is CourseType.MAIN
+                and service.duration_minutes == context.duration_minutes
+            ]
         if not services:
             return _not_found(NLUEntityKind.COURSE, "course_not_found")
 

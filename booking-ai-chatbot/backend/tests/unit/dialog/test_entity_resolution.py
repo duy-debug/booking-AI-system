@@ -328,6 +328,27 @@ async def test_one_main_course_resolves_course_selection_without_context_mutatio
 
 
 @pytest.mark.asyncio
+async def test_course_resolution_uses_selected_duration_to_disambiguate_main_course() -> None:
+    context = BookingContext(
+        "conversation-1",
+        state=BookingState.SELECTING_SERVICE,
+        shop=SHOP,
+        duration_minutes=60,
+    )
+
+    result = await coordinator(
+        services=FakeSearchServiceHandler([MAIN, OTHER_MAIN])
+    ).resolve(
+        nlu_result=entity_request(NLUEntityKind.COURSE, "massage"),
+        state=context.state,
+        context=context,
+    )
+
+    assert result.status is EntityResolutionStatus.RESOLVED
+    assert result.dispatch_payload == {"course_selection": CourseSelection(MAIN)}
+
+
+@pytest.mark.asyncio
 async def test_addon_preserves_type_and_requires_existing_main_course() -> None:
     without_main = await coordinator(
         services=FakeSearchServiceHandler([ADDON])

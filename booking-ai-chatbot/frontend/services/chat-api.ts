@@ -1,69 +1,148 @@
-import type { ChatResponse, ChatSelection, ProblemDetails } from "@/types/chat";
+import type {
+  ChatCompletedEvent,
+  ChatErrorEvent,
+  ChatProblem,
+  ChatRequest,
+  ChatResponse,
+  ChatStartedEvent,
+} from "@/types/chat";
 
 export class ChatApiError extends Error {
-  constructor(public readonly problem: ProblemDetails) {
+  constructor(public readonly problem: ChatProblem) {
     super(problem.detail);
   }
 }
 
-export async function transcribeAudio(audio: Blob): Promise<string> {
-  const form = new FormData();
-  const extension = audio.type.includes("ogg") ? "ogg" : audio.type.includes("mp4") ? "m4a" : "webm";
-  form.append("file", audio, `recording.${extension}`);
-  const response = await fetch("/api/audio/transcriptions", {
-    method: "POST",
-    headers: { "X-Correlation-ID": crypto.randomUUID() },
-    body: form,
-  });
-  const body = await response.json() as { text?: string } | ProblemDetails;
-  if (!response.ok) throw new ChatApiError(body as ProblemDetails);
-  return (body as { text: string }).text;
+interface ChatStreamCallbacks {
+  onStarted?: (data: ChatStartedEvent) => void;
+  onMessage?: (response: ChatResponse) => void;
+  onCompleted?: (data: ChatCompletedEvent) => void;
 }
 
-interface ChatStreamCallbacks {
-  onStart?: (data: { contract_version: "1.0"; conversation_id: string }) => void;
-  onToken?: (delta: string) => void;
-  onUi?: (ui: NonNullable<ChatResponse["ui"]>) => void;
-  onDone?: (response: ChatResponse) => void;
+interface StreamState {
+  response?: ChatResponse;
+  completed: boolean;
+  errored: boolean;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringField(value: Record<string, unknown>, field: string): string {
+  if (typeof value[field] !== "string") throw new Error(`Invalid SSE ${field}`);
+  return value[field];
+}
+
+function parseStarted(value: unknown): ChatStartedEvent {
+  if (!isRecord(value)) throw new Error("Invalid started event");
+  return { conversation_id: stringField(value, "conversation_id") };
+}
+
+function parseResponse(value: unknown): ChatResponse {
+  if (!isRecord(value)) throw new Error("Invalid message event");
+  const quickReplies = value.quick_replies;
+  const metadata = value.metadata;
+  if (!Array.isArray(quickReplies) || !quickReplies.every((item) => typeof item === "string")) {
+    throw new Error("Invalid SSE quick_replies");
+  }
+  if (!isRecord(metadata)) throw new Error("Invalid SSE metadata");
+  const instruction = value.instruction_template;
+  if (instruction !== null && typeof instruction !== "string") {
+    throw new Error("Invalid SSE instruction_template");
+  }
+  return {
+    conversation_id: stringField(value, "conversation_id"),
+    text: stringField(value, "text"),
+    state: stringField(value, "state"),
+    status: stringField(value, "status"),
+    instruction_template: instruction,
+    quick_replies: quickReplies,
+    metadata,
+  };
+}
+
+function parseCompleted(value: unknown): ChatCompletedEvent {
+  if (!isRecord(value) || value.stream_status !== "completed") {
+    throw new Error("Invalid completed event");
+  }
+  return {
+    conversation_id: stringField(value, "conversation_id"),
+    stream_status: "completed",
+    dialog_status: stringField(value, "dialog_status"),
+  };
+}
+
+function parseStreamError(value: unknown): ChatErrorEvent {
+  if (!isRecord(value)) throw new Error("Invalid error event");
+  return {
+    conversation_id: stringField(value, "conversation_id"),
+    code: stringField(value, "code"),
+    message: stringField(value, "message"),
+  };
+}
+
+function parseHttpProblem(value: unknown, status: number): ChatProblem {
+  if (!isRecord(value)) {
+    return { status, code: "CHAT_REQUEST_FAILED", detail: "Yêu cầu chatbot không thành công." };
+  }
+  const detailValue = value.detail;
+  const detail = typeof detailValue === "string"
+    ? detailValue
+    : Array.isArray(detailValue)
+      ? detailValue
+        .map((item) => isRecord(item) && typeof item.msg === "string" ? item.msg : null)
+        .filter((item): item is string => item !== null)
+        .join("; ")
+      : "Yêu cầu chatbot không thành công.";
+  return {
+    status,
+    code: typeof value.code === "string" ? value.code : "CHAT_REQUEST_FAILED",
+    detail: detail || "Yêu cầu chatbot không thành công.",
+  };
 }
 
 function dispatchSseEvent(
   block: string,
   callbacks: ChatStreamCallbacks,
-): ChatResponse | undefined {
+  state: StreamState,
+) {
   let event = "message";
   const dataLines: string[] = [];
-  for (const line of block.split(/\r?\n/)) {
+  for (const line of block.split("\n")) {
     if (line.startsWith("event:")) event = line.slice(6).trim();
     if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
   }
-  if (!dataLines.length) return;
+  if (!dataLines.length || state.completed || state.errored) return;
 
-  const data = JSON.parse(dataLines.join("\n")) as Record<string, unknown>;
-  if (event === "start") {
-    callbacks.onStart?.(data as { contract_version: "1.0"; conversation_id: string });
-  } else if (event === "token" || (event === "message" && "delta" in data)) {
-    callbacks.onToken?.(String(data.delta ?? ""));
-  } else if (event === "ui") {
-    callbacks.onUi?.(data.ui as NonNullable<ChatResponse["ui"]>);
-  } else if (event === "done") {
-    const response = data as unknown as ChatResponse;
-    callbacks.onDone?.(response);
-    return response;
+  const data: unknown = JSON.parse(dataLines.join("\n"));
+  if (event === "started") {
+    callbacks.onStarted?.(parseStarted(data));
+  } else if (event === "message") {
+    state.response = parseResponse(data);
+    callbacks.onMessage?.(state.response);
+  } else if (event === "completed") {
+    const completed = parseCompleted(data);
+    state.completed = true;
+    callbacks.onCompleted?.(completed);
   } else if (event === "error") {
-    throw new ChatApiError(data as unknown as ProblemDetails);
+    const error = parseStreamError(data);
+    state.errored = true;
+    throw new ChatApiError({ code: error.code, detail: error.message });
   }
 }
 
 export async function streamChat(
-  input: {
-    conversationId: string;
-    query?: string;
-    selection?: ChatSelection;
-    signal?: AbortSignal;
-  },
+  input: ChatRequest & { signal?: AbortSignal },
   callbacks: ChatStreamCallbacks = {},
 ): Promise<ChatResponse> {
+  const message = input.message.trim();
+  if (!message) throw new Error("Chat message must not be empty");
+  const request: ChatRequest = {
+    conversation_id: input.conversation_id,
+    message,
+    idempotency_key: input.idempotency_key ?? null,
+  };
   const response = await fetch("/api/chat/stream", {
     method: "POST",
     headers: {
@@ -71,26 +150,25 @@ export async function streamChat(
       Accept: "text/event-stream",
       "X-Correlation-ID": crypto.randomUUID(),
     },
-    body: JSON.stringify({
-      conversation_id: input.conversationId,
-      query: input.query,
-      selection: input.selection,
-    }),
+    body: JSON.stringify(request),
     signal: input.signal,
   });
 
   if (!response.ok) {
-    const problem = (await response.json()) as ProblemDetails;
-    throw new ChatApiError(problem);
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      body = null;
+    }
+    throw new ChatApiError(parseHttpProblem(body, response.status));
   }
-  if (!response.body) {
-    throw new Error("SSE response body is unavailable");
-  }
+  if (!response.body) throw new Error("SSE response body is unavailable");
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
+  const state: StreamState = { completed: false, errored: false };
   let buffer = "";
-  let completed: ChatResponse | undefined;
 
   while (true) {
     const { value, done } = await reader.read();
@@ -99,18 +177,13 @@ export async function streamChat(
     while (boundary >= 0) {
       const block = buffer.slice(0, boundary);
       buffer = buffer.slice(boundary + 2);
-      // done là terminal event. Bỏ qua mọi block phía sau để callback/state
-      // không bị áp dụng hai lần khi proxy hoặc upstream phát event lặp.
-      if (block.trim() && !completed) {
-        completed = dispatchSseEvent(block, callbacks) ?? completed;
-      }
+      if (block.trim()) dispatchSseEvent(block, callbacks, state);
       boundary = buffer.indexOf("\n\n");
     }
     if (done) break;
   }
 
-  if (!completed) {
-    throw new Error("SSE stream ended without a done event");
-  }
-  return completed;
+  if (!state.completed) throw new Error("SSE stream ended unexpectedly before completed event");
+  if (!state.response) throw new Error("SSE stream completed without a message event");
+  return state.response;
 }

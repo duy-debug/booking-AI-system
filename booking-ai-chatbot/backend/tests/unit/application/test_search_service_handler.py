@@ -130,6 +130,21 @@ async def test_execute_maps_pos_request_and_filters_query_locally() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_prefers_exact_name_over_broader_substring_matches() -> None:
+    longer = Service(
+        service_id=UUID("33333333-3333-3333-3333-333333333333"),
+        name=f"{SERVICE.name} 90 phút",
+        duration_minutes=90,
+        price=Decimal("650000.00"),
+    )
+    fake = FakeBookingGateway([SERVICE, longer])
+
+    result = await make_handler(fake).execute(SHOP_ID, SERVICE.name)
+
+    assert result == [SERVICE]
+
+
+@pytest.mark.asyncio
 async def test_execute_without_query_returns_original_gateway_list() -> None:
     services = [SERVICE]
     fake = FakeBookingGateway(services)

@@ -10,6 +10,7 @@ interface Props {
   loading: boolean;
   streaming: boolean;
   onRegenerate: () => void;
+  onQuickReply: (reply: string) => void;
 }
 
 function timeLabel(timestamp: number) {
@@ -34,7 +35,7 @@ function MessageBody({ text }: { text: string }) {
   });
 }
 
-export function MessageItem({ message, latest, loading, streaming, onRegenerate }: Props) {
+export function MessageItem({ message, latest, loading, streaming, onRegenerate, onQuickReply }: Props) {
   const [copied, setCopied] = useState(false);
   const [reaction, setReaction] = useState<"up" | "down" | null>(null);
 
@@ -49,6 +50,18 @@ export function MessageItem({ message, latest, loading, streaming, onRegenerate 
       {message.role === "assistant" && <span className="message-avatar"><BotIcon /></span>}
       <div className="message-content">
         <div className={`bubble ${streaming && latest ? "streaming" : ""}`}><MessageBody text={message.text} /></div>
+        {message.role === "assistant"
+          && latest
+          && !["completed", "cancelled"].includes(message.response?.state ?? "")
+          && (message.response?.quick_replies.length ?? 0) > 0 && (
+          <div className="quick-actions" aria-label="Gợi ý trả lời">
+            {[...new Set(message.response?.quick_replies ?? [])].map((reply) => (
+              <button key={reply} type="button" disabled={loading} onClick={() => onQuickReply(reply)}>
+                <strong>{reply}</strong><b aria-hidden="true">›</b>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="message-meta">
           <time>{timeLabel(message.createdAt)}</time>
           {message.role === "user" ? (
