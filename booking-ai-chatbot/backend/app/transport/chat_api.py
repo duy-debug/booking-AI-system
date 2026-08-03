@@ -6,10 +6,6 @@ from typing import Annotated, cast
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
-from app.application.ports.knowledge_gateway import (
-    KnowledgeDocument,
-    KnowledgeGatewayError,
-)
 from app.dependencies import (
     ApplicationContainer,
     InvalidCachedContextError,
@@ -99,17 +95,6 @@ _DEFAULT_UNRESOLVED_TEXT = "Tôi chưa hiểu yêu cầu. Vui lòng nhập lại
 _TERMINAL_CHANGE_TEXT = (
     "Đặt lịch này đã hoàn tất. Vui lòng tạo yêu cầu mới để thay đổi hoặc hủy lịch."
 )
-_FAQ_UNAVAILABLE_TEXT = (
-    "Hiện tại hệ thống chưa thể tra cứu thông tin này. "
-    "Vui lòng liên hệ cửa hàng để được hỗ trợ."
-)
-_FAQ_NO_RESULT_TEXT = (
-    "Hiện tại tôi chưa có đủ thông tin để trả lời câu hỏi này. "
-    "Bạn có thể liên hệ cửa hàng để được hỗ trợ."
-)
-_MAX_FAQ_ANSWER_CHARS = 2000
-
-
 def get_application_container(request: Request) -> ApplicationContainer:
     """Return the single container created by the FastAPI lifespan."""
     container = getattr(request.app.state, "application_container", None)
@@ -241,10 +226,9 @@ async def _process_chat_message(
         )
         query = faq_turn.payload["query"]
         assert isinstance(query, str)
-        return await _process_faq_query(
+        return await container.faq_manager.answer(
             query=query,
             context=context,
-            container=container,
         )
 
     if nlu_result.resolution_status is NLUResolutionStatus.UNRESOLVED:
@@ -293,70 +277,6 @@ async def _process_chat_message(
             context,
         )
     return response
-
-
-async def _process_faq_query(
-    *,
-    query: str,
-    context: BookingContext,
-    container: ApplicationContainer,
-) -> DialogResponse:
-    gateway = container.knowledge_gateway
-    if gateway is None:
-        return container.instruction_builder.build_faq_response(
-            answer=_FAQ_UNAVAILABLE_TEXT,
-            source_count=0,
-            context=context,
-            handled_failure=True,
-        )
-    try:
-        documents = await gateway.search(query, limit=3)
-    except KnowledgeGatewayError:
-        return container.instruction_builder.build_faq_response(
-            answer=_FAQ_UNAVAILABLE_TEXT,
-            source_count=0,
-            context=context,
-            handled_failure=True,
-        )
-    contents = _faq_contents(documents)
-    if not contents:
-        return container.instruction_builder.build_faq_response(
-            answer=_FAQ_NO_RESULT_TEXT,
-            source_count=0,
-            context=context,
-            handled_failure=True,
-        )
-    return container.instruction_builder.build_faq_response(
-        answer="\n\n".join(contents),
-        source_count=len(contents),
-        context=context,
-    )
-
-
-def _faq_contents(documents: list[KnowledgeDocument]) -> tuple[str, ...]:
-    contents: list[str] = []
-    seen: set[str] = set()
-    current_length = 0
-    for document in documents[:3]:
-        if not isinstance(document, KnowledgeDocument) or not isinstance(
-            document.content, str
-        ):
-            continue
-        content = " ".join(document.content.split())
-        deduplication_key = content.casefold()
-        if not content or deduplication_key in seen:
-            continue
-        separator_length = 2 if contents else 0
-        remaining = _MAX_FAQ_ANSWER_CHARS - current_length - separator_length
-        if remaining <= 0:
-            break
-        normalized = content[:remaining].rstrip()
-        if not normalized:
-            break
-        contents.append(normalized)
-        seen.add(deduplication_key)
-        current_length += separator_length + len(normalized)
-    return tuple(contents)
 
 
 def _entity_response(

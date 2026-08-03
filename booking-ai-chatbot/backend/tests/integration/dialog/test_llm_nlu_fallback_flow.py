@@ -8,6 +8,7 @@ from typing import cast
 import httpx
 import pytest
 
+from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.application.ports.llm_gateway import (
     LLMGatewayUnavailableError,
     LLMMessage,
@@ -28,7 +29,7 @@ from app.dialog.nlu import (
     NLUResult,
     NLUSource,
 )
-from app.dialog.tool_bridge import ActionExecutionContext, ActionResult
+from app.domain.booking import Shop
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.transport.chat_api import _process_chat_message
@@ -51,6 +52,15 @@ class FakeLLMGateway:
         if self.error is not None:
             raise self.error
         return LLMResponse(content=self.content)
+
+
+class FakeSearchShopHandler(SearchShopHandler):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def execute(self, query: str | None = None) -> list[Shop]:
+        self.calls += 1
+        return []
 
 
 class AlwaysUnresolvedNLU:
@@ -169,10 +179,8 @@ async def test_deterministic_resolved_does_not_call_llm(
 ) -> None:
     container, gateway, external_requests = runtime
 
-    async def search_shop(context: ActionExecutionContext) -> ActionResult:
-        return ActionResult("search_shop")
-
-    container.tool_bridge.register_action("search_shop", search_shop)
+    search_shop = FakeSearchShopHandler()
+    container.tool_bridge._search_shop_handler = search_shop
 
     response = await _process_chat_message(
         request=request("Tôi muốn đặt lịch"),
@@ -180,6 +188,7 @@ async def test_deterministic_resolved_does_not_call_llm(
     )
 
     assert gateway.calls == 0
+    assert search_shop.calls == 1
     assert response.state is BookingState.SELECTING_SHOP
     assert external_requests == []
 

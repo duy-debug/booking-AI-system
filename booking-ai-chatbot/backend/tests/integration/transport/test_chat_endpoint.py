@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import app.dependencies as dependencies
+from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.application.ports.knowledge_gateway import KnowledgeDocument
 from app.application.ports.llm_gateway import LLMMessage, LLMResponse
 from app.core.config import Settings
@@ -30,17 +31,26 @@ from app.dialog.nlu import (
     NLUResult,
     NLUSource,
 )
-from app.dialog.tool_bridge import ActionExecutionContext, ActionResult
 from app.domain.booking import Shop
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.main import create_app
+from app.sidecar.faq_manager import FAQManager
 
 SHOP = Shop(
     shop_id=UUID("11111111-1111-1111-1111-111111111111"),
     name="Shibuya",
     address="Tokyo",
 )
+
+
+class RecordingSearchShopHandler(SearchShopHandler):
+    def __init__(self) -> None:
+        self.calls: list[str | None] = []
+
+    async def execute(self, query: str | None = None) -> list[Shop]:
+        self.calls.append(query)
+        return [SHOP]
 
 
 class StaticResolver:
@@ -126,21 +136,7 @@ def chat_client(
             application.state.application_container,
         )
 
-        async def search_shop_action(
-            context: ActionExecutionContext,
-        ) -> ActionResult:
-            return ActionResult("search_shop")
-
-        async def load_service_catalog_action(
-            context: ActionExecutionContext,
-        ) -> ActionResult:
-            return ActionResult("load_service_catalog")
-
-        container.tool_bridge.register_action("search_shop", search_shop_action)
-        container.tool_bridge.register_action(
-            "load_service_catalog",
-            load_service_catalog_action,
-        )
+        container.tool_bridge._search_shop_handler = RecordingSearchShopHandler()
         yield client, outbound_requests
 
 
@@ -183,10 +179,71 @@ def test_valid_idle_booking_turn_returns_json_and_persists_state(
     assert "text/event-stream" not in response.headers["content-type"]
     assert response.json()["conversation_id"] == "conversation-a"
     assert response.json()["state"] == "selecting_shop"
+    search = cast(
+        RecordingSearchShopHandler,
+        container_of(client).tool_bridge._search_shop_handler,
+    )
+    assert search.calls == [None]
     assert set(application.openapi()["paths"]) == {
         "/api/v1/chat",
         "/api/v1/chat/stream",
     }
+    assert outbound_requests == []
+
+
+def test_json_happy_path_reaches_people_without_preload_calls(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+
+    started = post_message(
+        client,
+        conversation_id="conversation-p1",
+        message="Tôi muốn đặt lịch",
+    )
+    resolver = StaticResolver(
+        EntityResolutionResult(
+            status=EntityResolutionStatus.RESOLVED,
+            entity_kind=NLUEntityKind.SHOP,
+            dispatch_intent="select_store",
+            dispatch_payload={"shop": SHOP},
+            matched_count=1,
+        )
+    )
+    container.entity_resolution_coordinator = cast(
+        EntityResolutionCoordinator,
+        resolver,
+    )
+    selected_shop = post_message(
+        client,
+        conversation_id="conversation-p1",
+        message="Shibuya",
+    )
+    selected_date = post_message(
+        client,
+        conversation_id="conversation-p1",
+        message="15/08/2099",
+    )
+    context = container.memory_cache._contexts["conversation-p1"]
+    search = cast(
+        RecordingSearchShopHandler,
+        container.tool_bridge._search_shop_handler,
+    )
+
+    assert [
+        started.json()["state"],
+        selected_shop.json()["state"],
+        selected_date.json()["state"],
+    ] == ["selecting_shop", "selecting_date", "selecting_people"]
+    assert all(
+        response.json()["status"] == "success"
+        for response in (started, selected_shop, selected_date)
+    )
+    assert context.shop is SHOP
+    assert context.booking_date == date(2099, 8, 15)
+    assert search.calls == [None]
+    assert resolver.calls == 1
     assert outbound_requests == []
 
 
@@ -232,7 +289,10 @@ def test_faq_returns_safe_json_without_state_change_or_internal_metadata(
     gateway = StaticKnowledgeGateway(
         [KnowledgeDocument("Cửa hàng mở cửa từ 09:00 đến 22:00.", 0.98, "private")]
     )
-    container.knowledge_gateway = gateway
+    container.faq_manager = FAQManager(
+        knowledge_gateway=gateway,
+        instruction_builder=container.instruction_builder,
+    )
 
     response = post_message(
         client,

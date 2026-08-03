@@ -1,5 +1,8 @@
 """Integration tests for the complete in-process application object graph."""
 
+from datetime import date
+from uuid import UUID
+
 import httpx
 import pytest
 
@@ -10,6 +13,7 @@ from app.dependencies import create_application_container
 from app.dialog.dialog_controller import DialogTurnInput, DialogTurnStatus
 from app.dialog.instruction_builder import DialogResponseDraft
 from app.dialog.tool_bridge import ActionExecutionContext, ActionResult
+from app.domain.booking import Shop
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.infrastructure.booking_api.http_booking_gateway import HTTPBookingGateway
@@ -17,6 +21,7 @@ from app.infrastructure.cache.memory_cache import MemoryCache
 from app.infrastructure.llm.openrouter_llm_gateway import OpenRouterLLMGateway
 
 REQUIRED_ACTIONS = {
+    "search_shop",
     "handle_store_selection",
     "handle_date_selection",
     "handle_people_selection",
@@ -33,6 +38,38 @@ REQUIRED_ACTIONS = {
     "create_booking",
     "retry_booking",
 }
+
+SHOP = Shop(
+    shop_id=UUID("11111111-1111-1111-1111-111111111111"),
+    name="Shibuya",
+    address="Tokyo",
+)
+
+
+def shop_response(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(
+        200,
+        request=request,
+        json={
+            "data": [
+                {
+                    "shop_id": str(SHOP.shop_id),
+                    "shop_code": "SHOP001",
+                    "name": SHOP.name,
+                    "address": SHOP.address,
+                    "phone": None,
+                    "links": {
+                        "self": f"/api/shops/{SHOP.shop_id}",
+                        "courses": f"/api/shops/{SHOP.shop_id}/courses",
+                        "available_slots": (
+                            f"/api/shops/{SHOP.shop_id}/available-slots"
+                        ),
+                    },
+                }
+            ],
+            "meta": {"total": 1, "limit": None, "next_cursor": None},
+        },
+    )
 
 
 def settings() -> Settings:
@@ -91,7 +128,8 @@ async def test_container_assembles_shared_dependencies_without_network_calls() -
     assert isinstance(container.llm_gateway, OpenRouterLLMGateway)
     assert container.llm_nlu_fallback._llm_gateway is container.llm_gateway
     assert container.llm_nlu_fallback._intent_policy is container.state_intent_policy
-    assert container.knowledge_gateway is None
+    assert container.faq_manager._knowledge_gateway is None
+    assert container.faq_manager._instruction_builder is container.instruction_builder
     assert container.state_intent_policy.is_allowed(
         BookingState.IDLE,
         "ask_question",
@@ -132,6 +170,7 @@ async def test_two_containers_are_isolated_except_for_injected_client() -> None:
     )
     assert first.llm_gateway is not second.llm_gateway
     assert first.llm_nlu_fallback is not second.llm_nlu_fallback
+    assert first.faq_manager is not second.faq_manager
     assert first.llm_nlu_fallback._llm_gateway is first.llm_gateway
     assert second.llm_nlu_fallback._llm_gateway is second.llm_gateway
 
@@ -155,35 +194,84 @@ async def test_two_containers_are_isolated_except_for_injected_client() -> None:
 
 
 @pytest.mark.asyncio
-async def test_controller_runs_non_pos_turn_without_reloading_or_network() -> None:
-    request_count = 0
+async def test_controller_reaches_people_state_with_only_one_shop_search() -> None:
+    requests: list[httpx.Request] = []
 
-    def unexpected_request(request: httpx.Request) -> httpx.Response:
-        nonlocal request_count
-        request_count += 1
+    def handle_request(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "GET" and request.url.path == "/api/shops":
+            return shop_response(request)
         return httpx.Response(500, request=request)
 
     client = httpx.AsyncClient(
-        transport=httpx.MockTransport(unexpected_request),
+        transport=httpx.MockTransport(handle_request),
         base_url="http://pos.test",
     )
     container = await create_application_container(settings(), http_client=client)
-
-    async def search_shop_action(context: ActionExecutionContext) -> ActionResult:
-        return ActionResult("search_shop", [])
-
-    container.tool_bridge.register_action("search_shop", search_shop_action)
     context = BookingContext(conversation_id="conversation-1")
+
+    start = await container.dialog_controller.handle_turn(
+        context,
+        DialogTurnInput(intent="start_booking", payload={}),
+    )
+    shop = await container.dialog_controller.handle_turn(
+        context,
+        DialogTurnInput(intent="select_store", payload={"shop": SHOP}),
+    )
+    booking_date = await container.dialog_controller.handle_turn(
+        context,
+        DialogTurnInput(
+            intent="select_date",
+            payload={"booking_date": date(2099, 8, 5)},
+        ),
+    )
+
+    assert start.status is DialogTurnStatus.SUCCESS
+    assert start.executed_actions == ("search_shop",)
+    assert shop.status is DialogTurnStatus.SUCCESS
+    assert shop.executed_actions == ("handle_store_selection",)
+    assert booking_date.status is DialogTurnStatus.SUCCESS
+    assert booking_date.executed_actions == ("handle_date_selection",)
+    assert context.state is BookingState.SELECTING_PEOPLE
+    assert context.shop is SHOP
+    assert context.booking_date == date(2099, 8, 5)
+    assert [(request.method, request.url.path) for request in requests] == [
+        ("GET", "/api/shops")
+    ]
+
+    await container.close()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_shop_search_failure_does_not_partially_mutate_context() -> None:
+    requests: list[httpx.Request] = []
+
+    def unavailable(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(503, request=request)
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(unavailable),
+        base_url="http://pos.test",
+    )
+    container = await create_application_container(settings(), http_client=client)
+    context = BookingContext(
+        conversation_id="conversation-1",
+        pending_action="keep",
+    )
 
     result = await container.dialog_controller.handle_turn(
         context,
         DialogTurnInput(intent="start_booking", payload={}),
     )
 
-    assert result.status is DialogTurnStatus.SUCCESS
-    assert result.executed_actions == ("search_shop",)
-    assert context.state is BookingState.SELECTING_SHOP
-    assert request_count == 0
+    assert result.status is DialogTurnStatus.FAILURE_UNHANDLED
+    assert result.failed_action == "search_shop"
+    assert context.state is BookingState.IDLE
+    assert context.shop is None
+    assert context.pending_action == "keep"
+    assert len(requests) == 1
 
     await container.close()
     await client.aclose()

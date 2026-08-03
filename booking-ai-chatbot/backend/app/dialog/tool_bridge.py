@@ -18,6 +18,7 @@ from app.application.handlers.check_availability_handler import (
 from app.application.handlers.collect_customer_handler import CollectCustomerHandler
 from app.application.handlers.confirm_phone_handler import ConfirmPhoneHandler
 from app.application.handlers.create_booking_handler import CreateBookingHandler
+from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.dialog.flow_loader import (
     FlowFailure,
     InvalidFlowConditionError,
@@ -182,6 +183,7 @@ class ToolBridge:
     def __init__(
         self,
         *,
+        search_shop_handler: SearchShopHandler | None = None,
         check_availability_handler: CheckAvailabilityHandler | None = None,
         collect_customer_handler: CollectCustomerHandler | None = None,
         confirm_phone_handler: ConfirmPhoneHandler | None = None,
@@ -189,6 +191,7 @@ class ToolBridge:
         failure_code_provider: FailureCodeProvider | None = None,
     ) -> None:
         self._actions: dict[str, ActionCallable] = {}
+        self._search_shop_handler = search_shop_handler
         self._check_availability_handler = check_availability_handler
         self._collect_customer_handler = collect_customer_handler
         self._confirm_phone_handler = confirm_phone_handler
@@ -515,6 +518,8 @@ class ToolBridge:
             self.register_action(name, action)
 
     def _register_injected_handler_actions(self) -> None:
+        if self._search_shop_handler is not None:
+            self.register_action("search_shop", self._search_shop)
         if self._check_availability_handler is not None:
             self.register_action("load_time_slots", self._load_time_slots)
         if self._collect_customer_handler is not None:
@@ -527,6 +532,14 @@ class ToolBridge:
         if self._create_booking_handler is not None:
             self.register_action("create_booking", self._create_booking)
             self.register_action("retry_booking", self._retry_booking)
+
+    async def _search_shop(
+        self,
+        context: ActionExecutionContext,
+    ) -> ActionResult:
+        assert self._search_shop_handler is not None
+        shops = await self._search_shop_handler.execute()
+        return ActionResult("search_shop", shops)
 
     async def _handle_store_selection(
         self,

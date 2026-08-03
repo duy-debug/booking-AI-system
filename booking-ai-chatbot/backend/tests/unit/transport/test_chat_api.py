@@ -7,7 +7,6 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
-from app.application.ports.knowledge_gateway import KnowledgeDocument
 from app.dependencies import ApplicationContainer
 from app.dialog.dialog_controller import (
     DialogTurnInput,
@@ -170,19 +169,24 @@ class FakeBuilder:
         )
 
 
-class FakeKnowledgeGateway:
-    def __init__(self, documents: list[KnowledgeDocument]) -> None:
-        self.documents = documents
-        self.calls: list[tuple[str, int]] = []
+class FakeFAQManager:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, BookingContext]] = []
 
-    async def search(
+    async def answer(
         self,
-        query: str,
         *,
-        limit: int = 5,
-    ) -> list[KnowledgeDocument]:
-        self.calls.append((query, limit))
-        return self.documents
+        query: str,
+        context: BookingContext,
+    ) -> DialogResponse:
+        self.calls.append((query, context))
+        return DialogResponse(
+            text="Cửa hàng mở cửa từ 09:00.",
+            instruction_template=None,
+            state=context.state,
+            status=DialogTurnStatus.SUCCESS,
+            metadata={"response_type": "faq", "source_count": 1},
+        )
 
 
 class FakeContainer:
@@ -193,7 +197,7 @@ class FakeContainer:
         nlu_result: NLUResult,
         resolution: EntityResolutionResult | None = None,
         llm_result: NLUResult | None = None,
-        knowledge_gateway: FakeKnowledgeGateway | None = None,
+        faq_manager: FakeFAQManager | None = None,
     ) -> None:
         self.conversation_context_store = FakeStore(context)
         self.deterministic_nlu = FakeNLU(nlu_result)
@@ -203,7 +207,7 @@ class FakeContainer:
         )
         self.dialog_controller = FakeController()
         self.instruction_builder = FakeBuilder()
-        self.knowledge_gateway = knowledge_gateway
+        self.faq_manager = faq_manager or FakeFAQManager()
         self.state_intent_policy = StateIntentPolicy(
             {
                 BookingState.IDLE: frozenset({"start_booking", "ask_question"}),
@@ -372,19 +376,18 @@ async def test_unresolved_deterministic_result_uses_one_valid_llm_result() -> No
 @pytest.mark.asyncio
 async def test_faq_branch_uses_knowledge_without_controller_resolver_or_save() -> None:
     query = "Cửa hàng mở cửa lúc mấy giờ?"
-    document = KnowledgeDocument("Cửa hàng mở cửa từ 09:00.", 0.9, "internal")
-    gateway = FakeKnowledgeGateway([document])
+    faq_manager = FakeFAQManager()
     context = BookingContext("conversation-a", state=BookingState.SELECTING_SHOP)
     fake = FakeContainer(
         context=context,
         nlu_result=faq_nlu(query),
-        knowledge_gateway=gateway,
+        faq_manager=faq_manager,
     )
 
     response = await _process_chat_message(request=request(), container=as_container(fake))
 
-    assert gateway.calls == [(query, 3)]
-    assert response.text == document.content
+    assert faq_manager.calls == [(query, context)]
+    assert response.text == "Cửa hàng mở cửa từ 09:00."
     assert response.state is BookingState.SELECTING_SHOP
     assert response.metadata == {"response_type": "faq", "source_count": 1}
     assert fake.entity_resolution_coordinator.calls == []

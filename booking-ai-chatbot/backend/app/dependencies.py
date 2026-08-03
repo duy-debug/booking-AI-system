@@ -36,6 +36,7 @@ from app.domain.booking_context import BookingContext
 from app.infrastructure.booking_api.http_booking_gateway import HTTPBookingGateway
 from app.infrastructure.cache.memory_cache import MemoryCache
 from app.infrastructure.llm.openrouter_llm_gateway import OpenRouterLLMGateway
+from app.sidecar.faq_manager import FAQManager
 
 _MAX_CONVERSATION_ID_LENGTH = 128
 _RAW_PHONE_PATTERN = re.compile(r"\+?\d{9,15}")
@@ -124,7 +125,7 @@ class ApplicationContainer:
     entity_resolution_coordinator: EntityResolutionCoordinator
     llm_gateway: LLMGateway
     llm_nlu_fallback: LLMNLUFallback
-    knowledge_gateway: KnowledgeGateway | None
+    faq_manager: FAQManager
     _handlers: tuple[object, ...] = field(repr=False)
     _owns_http_client: bool = field(repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
@@ -190,6 +191,7 @@ async def create_application_container(
             create_booking_handler,
         )
         tool_bridge = ToolBridge(
+            search_shop_handler=search_shop_handler,
             check_availability_handler=check_availability_handler,
             collect_customer_handler=collect_customer_handler,
             confirm_phone_handler=confirm_phone_handler,
@@ -204,6 +206,7 @@ async def create_application_container(
             max_auto_transitions=settings.max_auto_transitions,
         )
         memory_cache = MemoryCache()
+        instruction_builder = InstructionBuilder()
         return ApplicationContainer(
             http_client=client,
             booking_gateway=booking_gateway,
@@ -213,7 +216,7 @@ async def create_application_container(
             flow_definition=flow_definition,
             memory_cache=memory_cache,
             conversation_context_store=ConversationContextStore(cache=memory_cache),
-            instruction_builder=InstructionBuilder(),
+            instruction_builder=instruction_builder,
             deterministic_nlu=DeterministicNLU(
                 intent_policy=state_intent_policy,
                 unknown_as_unresolved=True,
@@ -227,7 +230,10 @@ async def create_application_container(
                 min_confidence=settings.llm_nlu_min_confidence,
                 enabled=settings.enable_llm_nlu_fallback,
             ),
-            knowledge_gateway=knowledge_gateway,
+            faq_manager=FAQManager(
+                knowledge_gateway=knowledge_gateway,
+                instruction_builder=instruction_builder,
+            ),
             _handlers=handlers,
             _owns_http_client=owns_http_client,
         )

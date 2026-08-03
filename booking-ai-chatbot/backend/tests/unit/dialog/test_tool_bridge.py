@@ -18,6 +18,7 @@ from app.application.handlers.check_availability_handler import (
 from app.application.handlers.collect_customer_handler import CollectCustomerHandler
 from app.application.handlers.confirm_phone_handler import ConfirmPhoneHandler
 from app.application.handlers.create_booking_handler import CreateBookingHandler
+from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.application.ports.booking_gateway import (
     CreateBookingResult,
     CustomerVerificationResult,
@@ -384,6 +385,21 @@ class FakeCheckAvailabilityHandler(CheckAvailabilityHandler):
         return self.slots
 
 
+class FakeSearchShopHandler(SearchShopHandler):
+    """Fake application handler that records default shop searches."""
+
+    def __init__(self, *, error: Exception | None = None) -> None:
+        self.calls: list[str | None] = []
+        self.shops = [SHOP]
+        self.error = error
+
+    async def execute(self, query: str | None = None) -> list[Shop]:
+        self.calls.append(query)
+        if self.error is not None:
+            raise self.error
+        return self.shops
+
+
 class FakeCollectCustomerHandler(CollectCustomerHandler):
     """Fake application handler that records already-parsed customer input."""
 
@@ -441,17 +457,63 @@ class FakeCreateBookingHandler(CreateBookingHandler):
 
 def production_bridge(
     *,
+    search_shop: FakeSearchShopHandler | None = None,
     availability: FakeCheckAvailabilityHandler | None = None,
     customer: FakeCollectCustomerHandler | None = None,
     confirmation: FakeConfirmPhoneHandler | None = None,
     create: FakeCreateBookingHandler | None = None,
 ) -> ToolBridge:
     return ToolBridge(
+        search_shop_handler=search_shop,
         check_availability_handler=availability,
         collect_customer_handler=customer,
         confirm_phone_handler=confirmation,
         create_booking_handler=create,
     )
+
+
+@pytest.mark.asyncio
+async def test_search_shop_binding_uses_default_query_without_context_mutation() -> None:
+    handler = FakeSearchShopHandler()
+    bridge = production_bridge(search_shop=handler)
+    booking_context = BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.IDLE,
+        pending_action="keep",
+    )
+
+    result = await bridge.execute_action(
+        "search_shop",
+        execution_context(booking_context=booking_context),
+    )
+
+    assert handler.calls == [None]
+    assert result.output is handler.shops
+    assert booking_context.state is BookingState.IDLE
+    assert booking_context.shop is None
+    assert booking_context.pending_action == "keep"
+
+
+@pytest.mark.asyncio
+async def test_search_shop_failure_preserves_context() -> None:
+    handler = FakeSearchShopHandler(error=RuntimeError("POS unavailable"))
+    bridge = production_bridge(search_shop=handler)
+    booking_context = BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.IDLE,
+        pending_action="keep",
+    )
+
+    with pytest.raises(ActionExecutionError):
+        await bridge.execute_action(
+            "search_shop",
+            execution_context(booking_context=booking_context),
+        )
+
+    assert handler.calls == [None]
+    assert booking_context.state is BookingState.IDLE
+    assert booking_context.shop is None
+    assert booking_context.pending_action == "keep"
 
 
 @pytest.mark.asyncio
@@ -607,6 +669,7 @@ def test_find_unregistered_actions_deduplicates_in_declaration_order() -> None:
 
 def test_injected_handlers_register_only_available_bindings() -> None:
     bridge = production_bridge(
+        search_shop=FakeSearchShopHandler(),
         availability=FakeCheckAvailabilityHandler(),
         customer=FakeCollectCustomerHandler(),
         confirmation=FakeConfirmPhoneHandler(),
@@ -616,6 +679,7 @@ def test_injected_handlers_register_only_available_bindings() -> None:
     assert bridge.find_unregistered_actions(
         (
             "load_time_slots",
+            "search_shop",
             "handle_phone_collection",
             "mark_phone_confirmed",
             "create_booking",

@@ -11,6 +11,7 @@ from app.application.handlers.check_availability_handler import (
 from app.application.handlers.collect_customer_handler import CollectCustomerHandler
 from app.application.handlers.confirm_phone_handler import ConfirmPhoneHandler
 from app.application.handlers.create_booking_handler import CreateBookingHandler
+from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.dialog.flow_loader import (
     FlowDefinition,
     FlowFailure,
@@ -312,6 +313,24 @@ def test_duration_step_accepts_course_without_loading_slots(
     }
 
 
+def test_shop_selection_does_not_preload_an_unconsumed_catalog(
+    flow: FlowDefinition,
+) -> None:
+    transition = _transition(flow, BookingState.SELECTING_SHOP, "select_store")
+
+    assert transition.actions == ("handle_store_selection",)
+    assert "load_service_catalog" not in _all_declared_actions(flow)
+
+
+def test_date_selection_defers_availability_until_booking_shape_is_complete(
+    flow: FlowDefinition,
+) -> None:
+    transition = _transition(flow, BookingState.SELECTING_DATE, "select_date")
+
+    assert transition.actions == ("handle_date_selection",)
+    assert "early_availability_check" not in _all_declared_actions(flow)
+
+
 def test_no_transition_targets_removed_options_state(flow: FlowDefinition) -> None:
     targets = {
         transition.target.value
@@ -422,23 +441,32 @@ def test_terminal_states_have_no_transitions(
 
 
 @pytest.mark.parametrize("state", CONVERSATIONAL_STATES)
-def test_conversational_states_have_faq_unknown_and_last_wildcard(
+def test_conversational_states_have_unknown_and_last_wildcard_without_faq(
     flow: FlowDefinition,
     state: BookingState,
 ) -> None:
     intents = tuple(item.intent for item in flow.states[state].transitions)
-    question = _transition(flow, state, "ask_question")
     unknown = _transition(flow, state, "unknown")
     wildcard = flow.states[state].transitions[-1]
 
-    assert question.target is state
-    assert question.actions == ("answer_question",)
+    assert "ask_question" not in intents
     assert "unknown" in intents
     assert unknown.target is state
     assert unknown.actions == ("ask_to_clarify",)
     assert wildcard.intent == "*"
     assert wildcard.target is state
     assert wildcard.actions == ("log_unhandled", "ask_to_clarify")
+
+
+def test_flow_has_no_out_of_flow_faq_action(flow: FlowDefinition) -> None:
+    actions = {
+        action
+        for state in flow.states.values()
+        for transition in state.transitions
+        for action in transition.actions
+    }
+
+    assert "answer_question" not in actions
 
 
 @pytest.mark.parametrize(
@@ -516,6 +544,7 @@ def test_tool_bridge_audits_declared_actions_without_reading_json(
     flow: FlowDefinition,
 ) -> None:
     bridge = ToolBridge(
+        search_shop_handler=cast(SearchShopHandler, object()),
         check_availability_handler=cast(CheckAvailabilityHandler, object()),
         collect_customer_handler=cast(CollectCustomerHandler, object()),
         confirm_phone_handler=cast(ConfirmPhoneHandler, object()),
@@ -524,8 +553,9 @@ def test_tool_bridge_audits_declared_actions_without_reading_json(
     declared_actions = _all_declared_actions(flow)
     unregistered = bridge.find_unregistered_actions(declared_actions)
 
-    assert len(set(declared_actions)) == 33
+    assert len(set(declared_actions)) == 30
     assert {
+        "search_shop",
         "load_time_slots",
         "handle_phone_collection",
         "mark_phone_confirmed",
@@ -533,6 +563,53 @@ def test_tool_bridge_audits_declared_actions_without_reading_json(
     }.isdisjoint(unregistered)
     assert "run_final_check" not in declared_actions
     assert "complete_booking" not in declared_actions
+
+
+def test_happy_path_actions_are_bound_with_explicit_non_runtime_allowlists(
+    flow: FlowDefinition,
+) -> None:
+    bridge = ToolBridge(
+        search_shop_handler=cast(SearchShopHandler, object()),
+        check_availability_handler=cast(CheckAvailabilityHandler, object()),
+        collect_customer_handler=cast(CollectCustomerHandler, object()),
+        confirm_phone_handler=cast(ConfirmPhoneHandler, object()),
+        create_booking_handler=cast(CreateBookingHandler, object()),
+    )
+    happy_path_steps = (
+        (BookingState.IDLE, "start_booking"),
+        (BookingState.SELECTING_SHOP, "select_store"),
+        (BookingState.SELECTING_DATE, "select_date"),
+        (BookingState.SELECTING_PEOPLE, "select_people"),
+        (BookingState.SELECTING_DURATION, "select_duration"),
+        (BookingState.SELECTING_SERVICE, "select_course"),
+    )
+    happy_path_actions = tuple(
+        action
+        for state, intent in happy_path_steps
+        for action in _transition(flow, state, intent).actions
+    )
+    dynamic_or_declarative = {
+        "ask_to_clarify",
+        "defer_change_info",
+        "log_unhandled",
+        "suggest_nearest_time",
+    }
+    known_out_of_scope = {
+        "ask_date",
+        "ask_people",
+        "clear_course_for_reselect",
+        "clear_phone_confirmation",
+        "handle_booking_failure",
+        "infer_duration_from_service",
+        "no_slots_available",
+        "people_too_many",
+        "reload_time_slots",
+    }
+
+    assert bridge.find_unregistered_actions(happy_path_actions) == ()
+    assert set(bridge.find_unregistered_actions(_all_declared_actions(flow))) <= (
+        dynamic_or_declarative | known_out_of_scope
+    )
 
 
 def test_flow_failure_metadata_is_safe_and_resolvable(

@@ -10,6 +10,7 @@ from typing import cast
 import httpx
 import pytest
 
+from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.application.ports.knowledge_gateway import (
     KnowledgeDocument,
     KnowledgeGatewayUnavailableError,
@@ -21,7 +22,7 @@ from app.dependencies import (
     ConversationContextStore,
     create_application_container,
 )
-from app.dialog.tool_bridge import ActionExecutionContext, ActionResult
+from app.domain.booking import Shop
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.transport.chat_api import _process_chat_message
@@ -59,6 +60,15 @@ class FakeLLMGateway:
     ) -> LLMResponse:
         self.calls += 1
         return LLMResponse(content=self.content)
+
+
+class FakeSearchShopHandler(SearchShopHandler):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def execute(self, query: str | None = None) -> list[Shop]:
+        self.calls += 1
+        return []
 
 
 class StoreSpy:
@@ -282,10 +292,8 @@ async def test_booking_and_change_intents_are_not_intercepted_by_faq(
 ) -> None:
     container, knowledge, _, _, external = runtime
 
-    async def search_shop(context: ActionExecutionContext) -> ActionResult:
-        return ActionResult("search_shop")
-
-    container.tool_bridge.register_action("search_shop", search_shop)
+    search_shop = FakeSearchShopHandler()
+    container.tool_bridge._search_shop_handler = search_shop
     booking_response = await _process_chat_message(
         request=request("Tôi muốn đặt lịch", "booking-intent"),
         container=container,
@@ -302,6 +310,7 @@ async def test_booking_and_change_intents_are_not_intercepted_by_faq(
     )
 
     assert booking_response.state is BookingState.SELECTING_SHOP
+    assert search_shop.calls == 1
     assert change_response.state is BookingState.SELECTING_DATE
     assert knowledge.calls == []
     assert external == []

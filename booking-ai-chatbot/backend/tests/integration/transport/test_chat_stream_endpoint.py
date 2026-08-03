@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import app.dependencies as dependencies
+from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.application.ports.knowledge_gateway import (
     KnowledgeDocument,
     KnowledgeGatewayUnavailableError,
@@ -37,10 +38,26 @@ from app.dialog.nlu import (
     NLUResult,
     NLUSource,
 )
-from app.dialog.tool_bridge import ActionExecutionContext, ActionResult
+from app.domain.booking import Shop
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.main import create_app
+from app.sidecar.faq_manager import FAQManager
+
+SHOP = Shop(
+    shop_id=UUID("11111111-1111-1111-1111-111111111111"),
+    name="Shibuya",
+    address="Tokyo",
+)
+
+
+class RecordingSearchShopHandler(SearchShopHandler):
+    def __init__(self) -> None:
+        self.calls: list[str | None] = []
+
+    async def execute(self, query: str | None = None) -> list[Shop]:
+        self.calls.append(query)
+        return [SHOP]
 
 
 class StaticResolver:
@@ -143,12 +160,7 @@ def stream_client(
             application.state.application_container,
         )
 
-        async def search_shop_action(
-            context: ActionExecutionContext,
-        ) -> ActionResult:
-            return ActionResult("search_shop")
-
-        container.tool_bridge.register_action("search_shop", search_shop_action)
+        container.tool_bridge._search_shop_handler = RecordingSearchShopHandler()
         yield client, outbound_requests
 
 
@@ -219,6 +231,11 @@ def test_stream_success_contract_and_event_order(
         "/api/v1/chat",
         "/api/v1/chat/stream",
     }
+    search = cast(
+        RecordingSearchShopHandler,
+        container_of(client).tool_bridge._search_shop_handler,
+    )
+    assert search.calls == [None]
     assert outbound_requests == []
 
 
@@ -495,7 +512,10 @@ def test_faq_stream_has_json_parity_and_uses_one_injected_gateway(
     gateway = StaticKnowledgeGateway(
         [KnowledgeDocument("Bãi đỗ xe nằm cạnh cửa hàng.", 0.9, "private")]
     )
-    container.knowledge_gateway = gateway
+    container.faq_manager = FAQManager(
+        knowledge_gateway=gateway,
+        instruction_builder=container.instruction_builder,
+    )
     message = "Có chỗ đậu xe không?"
 
     regular = client.post(
@@ -533,7 +553,11 @@ def test_handled_knowledge_failure_is_a_normal_sse_message(
     gateway = StaticKnowledgeGateway(
         error=KnowledgeGatewayUnavailableError("private provider failure")
     )
-    container_of(client).knowledge_gateway = gateway
+    container = container_of(client)
+    container.faq_manager = FAQManager(
+        knowledge_gateway=gateway,
+        instruction_builder=container.instruction_builder,
+    )
 
     response = post_stream(
         client,

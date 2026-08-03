@@ -16,11 +16,6 @@
           "actions": ["search_shop"]
         },
         {
-          "intent": "ask_question",
-          "target": "idle",
-          "actions": ["answer_question"]
-        },
-        {
           "intent": "unknown",
           "target": "idle",
           "actions": ["ask_to_clarify"]
@@ -41,17 +36,12 @@
         {
           "intent": "select_store",
           "target": "selecting_date",
-          "actions": ["handle_store_selection", "load_service_catalog"]
+          "actions": ["handle_store_selection"]
         },
         {
           "intent": "change_info",
           "target": "selecting_shop",
           "actions": ["defer_change_info"]
-        },
-        {
-          "intent": "ask_question",
-          "target": "selecting_shop",
-          "actions": ["answer_question"]
         },
         {
           "intent": "unknown",
@@ -79,7 +69,7 @@
         {
           "intent": "select_date",
           "target": "selecting_people",
-          "actions": ["handle_date_selection", "early_availability_check"],
+          "actions": ["handle_date_selection"],
           "on_fail": [
             {
               "condition": "date_in_past",
@@ -102,11 +92,6 @@
           "intent": "change_info",
           "target": "selecting_date",
           "actions": ["defer_change_info"]
-        },
-        {
-          "intent": "ask_question",
-          "target": "selecting_date",
-          "actions": ["answer_question"]
         },
         {
           "intent": "unknown",
@@ -157,11 +142,6 @@
           "intent": "change_info",
           "target": "selecting_people",
           "actions": ["defer_change_info"]
-        },
-        {
-          "intent": "ask_question",
-          "target": "selecting_people",
-          "actions": ["answer_question"]
         },
         {
           "intent": "unknown",
@@ -227,11 +207,6 @@
           "intent": "change_info",
           "target": "selecting_duration",
           "actions": ["defer_change_info"]
-        },
-        {
-          "intent": "ask_question",
-          "target": "selecting_duration",
-          "actions": ["answer_question"]
         },
         {
           "intent": "unknown",
@@ -317,11 +292,6 @@
           "actions": ["defer_change_info"]
         },
         {
-          "intent": "ask_question",
-          "target": "selecting_service",
-          "actions": ["answer_question"]
-        },
-        {
           "intent": "unknown",
           "target": "selecting_service",
           "actions": ["ask_to_clarify"]
@@ -381,11 +351,6 @@
           "intent": "change_info",
           "target": "selecting_time",
           "actions": ["defer_change_info"]
-        },
-        {
-          "intent": "ask_question",
-          "target": "selecting_time",
-          "actions": ["answer_question"]
         },
         {
           "intent": "unknown",
@@ -448,11 +413,6 @@
           "intent": "change_info",
           "target": "selecting_therapist",
           "actions": ["defer_change_info"]
-        },
-        {
-          "intent": "ask_question",
-          "target": "selecting_therapist",
-          "actions": ["answer_question"]
         },
         {
           "intent": "unknown",
@@ -519,11 +479,6 @@
           "actions": ["defer_change_info"]
         },
         {
-          "intent": "ask_question",
-          "target": "collecting_phone",
-          "actions": ["answer_question"]
-        },
-        {
           "intent": "unknown",
           "target": "collecting_phone",
           "actions": ["ask_to_clarify"]
@@ -572,11 +527,6 @@
           "actions": ["defer_change_info"]
         },
         {
-          "intent": "ask_question",
-          "target": "verifying_phone",
-          "actions": ["answer_question"]
-        },
-        {
           "intent": "unknown",
           "target": "verifying_phone",
           "actions": ["ask_to_clarify"]
@@ -612,11 +562,6 @@
           "intent": "change_info",
           "target": "awaiting_confirmation",
           "actions": ["defer_change_info"]
-        },
-        {
-          "intent": "ask_question",
-          "target": "awaiting_confirmation",
-          "actions": ["answer_question"]
         },
         {
           "intent": "unknown",
@@ -722,11 +667,6 @@
           "intent": "deny",
           "target": "cancelled",
           "actions": []
-        },
-        {
-          "intent": "ask_question",
-          "target": "booking_failed",
-          "actions": ["answer_question"]
         },
         {
           "intent": "unknown",

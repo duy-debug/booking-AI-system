@@ -239,7 +239,8 @@ async def test_factory_preserves_injected_knowledge_gateway_identity() -> None:
         knowledge_gateway=gateway,
     )
 
-    assert container.knowledge_gateway is gateway
+    assert container.faq_manager._knowledge_gateway is gateway
+    assert container.faq_manager._instruction_builder is container.instruction_builder
 
     await container.close()
     await client.aclose()
@@ -253,7 +254,7 @@ async def test_factory_allows_missing_knowledge_gateway() -> None:
         http_client=client,
     )
 
-    assert container.knowledge_gateway is None
+    assert container.faq_manager._knowledge_gateway is None
 
     await container.close()
     await client.aclose()

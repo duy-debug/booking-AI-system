@@ -41,6 +41,7 @@ PARSER_OUTPUT_INTENTS = {
     "start_booking",
     "unknown",
 }
+OUT_OF_FLOW_INTENTS = {"ask_question"}
 SYSTEM_EVENTS = {"booking_failed", "booking_succeeded", "cancel_flow"}
 
 
@@ -63,14 +64,37 @@ def flow_intents() -> set[str]:
 def test_parser_output_intents_are_supported_by_real_flow_or_system_policy() -> None:
     declared = flow_intents()
 
-    assert PARSER_OUTPUT_INTENTS - SYSTEM_EVENTS <= declared
-    assert PARSER_OUTPUT_INTENTS - declared == set()
+    assert PARSER_OUTPUT_INTENTS - SYSTEM_EVENTS - OUT_OF_FLOW_INTENTS <= declared
+    assert PARSER_OUTPUT_INTENTS - declared == OUT_OF_FLOW_INTENTS
     assert declared - PARSER_OUTPUT_INTENTS - SYSTEM_EVENTS == {
         "*",
         "select_course",
         "select_store",
         "select_therapist",
     }
+
+
+def test_runtime_policy_allows_faq_without_flow_transitions() -> None:
+    flow = FlowLoader.load(FLOW_PATH)
+    policy = build_state_intent_policy(flow, enable_faq=True)
+
+    assert "ask_question" not in flow_intents()
+    for state in {
+        BookingState.IDLE,
+        BookingState.SELECTING_SHOP,
+        BookingState.SELECTING_DATE,
+        BookingState.SELECTING_PEOPLE,
+        BookingState.SELECTING_DURATION,
+        BookingState.SELECTING_SERVICE,
+        BookingState.SELECTING_TIME,
+        BookingState.SELECTING_THERAPIST,
+        BookingState.COLLECTING_PHONE,
+        BookingState.VERIFYING_PHONE,
+        BookingState.AWAITING_CONFIRMATION,
+        BookingState.COMPLETED,
+        BookingState.CANCELLED,
+    }:
+        assert policy.is_allowed(state, "ask_question")
 
 
 @pytest.mark.asyncio
