@@ -459,7 +459,7 @@ class DeterministicNLU:
                     ),
                 )
 
-        if state is BookingState.SELECTING_TIME:
+        if state in {BookingState.SELECTING_TIME, BookingState.BOOKING_FAILED}:
             start_time = _extract_time(text)
             if start_time is not None:
                 time_payload: dict[str, object] = {"start_time": start_time}

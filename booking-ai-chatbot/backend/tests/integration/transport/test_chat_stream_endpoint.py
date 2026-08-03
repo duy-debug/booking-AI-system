@@ -114,12 +114,8 @@ class EndpointCreateGateway:
             start_time=request.start_time,
             num_customer=request.num_customer,
             duration_minutes=request.duration_minutes,
-            reservation_code="RSV-ENDPOINT-001",
         )
-        return CreateBookingResult(
-            booking,
-            reservation_code="RSV-ENDPOINT-001",
-        )
+        return CreateBookingResult(booking)
 
 
 class StaticResolver:
@@ -381,11 +377,11 @@ def test_p2_recovery_keeps_sse_order_and_json_parity(
     assert context.available_slots == availability.slots
     assert context.start_time == time(9, 0)
     assert context.booking is None
-    assert gateway.calls == 1
+    assert gateway.calls == 0
     assert outbound_requests == []
 
 
-def test_completed_booking_has_json_sse_parity_and_one_create_per_request(
+def test_completed_booking_without_code_has_json_sse_parity_and_one_create_per_request(
     stream_client: tuple[TestClient, list[httpx.Request]],
 ) -> None:
     client, outbound_requests = stream_client
@@ -436,7 +432,13 @@ def test_completed_booking_has_json_sse_parity_and_one_create_per_request(
     assert regular.json()["state"] == "completed"
     assert regular.json()["status"] == "success"
     assert regular.json()["metadata"] == {"booking_created": True}
-    assert "RSV-ENDPOINT-001" in cast(str, regular.json()["text"])
+    completion_text = cast(str, regular.json()["text"])
+    assert "Đặt lịch thành công" in completion_text
+    assert "đã được ghi nhận" in completion_text
+    assert "Mã đặt lịch" not in completion_text
+    assert "booking code" not in completion_text.casefold()
+    assert "reservation code" not in completion_text.casefold()
+    assert str(json_context.booking_id) not in completion_text
     assert [event for event, _ in events] == ["started", "message", "completed"]
     assert events[1][1]["state"] == regular.json()["state"]
     assert events[1][1]["status"] == regular.json()["status"]
@@ -630,7 +632,8 @@ def test_context_is_retained_between_stream_and_json_requests(
     assert parse_events(streamed)[1][1]["state"] == "selecting_shop"
     assert regular.json()["state"] == "selecting_shop"
     assert context.state is BookingState.SELECTING_SHOP
-    assert outbound_requests == []
+    assert len(outbound_requests) == 1
+    assert outbound_requests[0].url.path == "/api/shops"
 
 
 def test_stream_message_has_parity_with_json_on_independent_contexts(

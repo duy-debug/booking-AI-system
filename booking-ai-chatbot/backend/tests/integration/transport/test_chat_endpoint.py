@@ -352,7 +352,7 @@ def test_json_booking_failure_refreshes_slots_without_booking_creation(
     assert context.available_slots == availability.slots
     assert context.start_time == time(9, 0)
     assert context.booking is None
-    assert gateway.calls == 1
+    assert gateway.calls == 0
     assert outbound_requests == []
 
 

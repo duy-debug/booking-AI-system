@@ -14,6 +14,7 @@ from app.domain.exceptions import InvalidBookingDataError
 SHOP = Shop(
     shop_id=UUID("11111111-1111-1111-1111-111111111111"),
     name="Central Spa",
+    address="Central District",
 )
 
 
@@ -82,16 +83,35 @@ def make_handler(fake: FakeBookingGateway) -> SearchShopHandler:
 
 
 @pytest.mark.asyncio
-async def test_execute_calls_gateway_once_with_query_and_returns_same_list() -> None:
+async def test_execute_fetches_catalog_once_and_filters_by_name() -> None:
     shops = [SHOP]
     fake = FakeBookingGateway(shops)
 
     result = await make_handler(fake).execute("central")
 
     assert fake.search_shops_call_count == 1
-    assert fake.received_query == "central"
-    assert result is shops
+    assert fake.received_query is None
+    assert result == shops
     assert result[0] is SHOP
+
+
+@pytest.mark.asyncio
+async def test_execute_filters_by_address_case_insensitively() -> None:
+    fake = FakeBookingGateway([SHOP])
+
+    result = await make_handler(fake).execute("DISTRICT")
+
+    assert result == [SHOP]
+    assert fake.received_query is None
+
+
+@pytest.mark.asyncio
+async def test_execute_returns_empty_when_local_query_does_not_match() -> None:
+    fake = FakeBookingGateway([SHOP])
+
+    result = await make_handler(fake).execute("missing")
+
+    assert result == []
 
 
 @pytest.mark.asyncio
@@ -125,3 +145,4 @@ async def test_execute_propagates_domain_exception() -> None:
 
     assert exc_info.value is error
     assert fake.search_shops_call_count == 1
+    assert fake.received_query is None

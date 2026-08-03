@@ -68,7 +68,7 @@ def intent_policy() -> StateIntentPolicy:
                 {"confirm", "deny", "change_info", "cancel_flow", "unknown"}
             ),
             BookingState.BOOKING_FAILED: frozenset(
-                {"confirm", "deny", "unknown"}
+                {"confirm", "deny", "select_time", "unknown"}
             ),
         },
         frozenset(
@@ -428,6 +428,15 @@ def test_time_extraction(
 def test_ambiguous_or_out_of_state_time_is_unknown(nlu: DeterministicNLU) -> None:
     assert nlu.parse(text="7 giờ", state=BookingState.SELECTING_TIME).intent == "unknown"
     assert nlu.parse(text="19h", state=BookingState.SELECTING_DATE).intent == "unknown"
+
+
+def test_time_extraction_recovers_from_booking_failed(
+    nlu: DeterministicNLU,
+) -> None:
+    result = nlu.parse(text="10:00", state=BookingState.BOOKING_FAILED)
+
+    assert result.intent == "select_time"
+    assert result.payload["start_time"] == time(10, 0)
 
 
 @pytest.mark.parametrize(

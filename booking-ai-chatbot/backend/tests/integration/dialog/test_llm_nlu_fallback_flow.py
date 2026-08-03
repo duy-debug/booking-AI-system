@@ -210,7 +210,8 @@ async def test_deterministic_entity_query_does_not_call_llm(
 
     assert gateway.calls == 0
     assert response.state is BookingState.SELECTING_SHOP
-    assert external_requests == []
+    assert len(external_requests) == 1
+    assert external_requests[0].url.path == "/api/shops"
 
 
 @pytest.mark.asyncio

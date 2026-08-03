@@ -118,7 +118,7 @@ def test_real_confirmation_template_renders_complete_context() -> None:
     assert "******4567" in response.text
 
 
-def test_real_completed_template_never_renders_child_reservation_id() -> None:
+def test_real_group_completed_template_without_code_hides_internal_ids() -> None:
     flow = FlowLoader.load(FLOW_PATH)
     template = flow.states[BookingState.COMPLETED].on_enter.instruction_template
     context = complete_context(BookingState.COMPLETED)
@@ -130,17 +130,25 @@ def test_real_completed_template_never_renders_child_reservation_id() -> None:
         customer=CUSTOMER,
         booking_date=date(2026, 8, 2),
         start_time=time(10, 30),
-        reservation_code="RSV-001",
+        num_customer=2,
     )
-    context.child_reservation_ids = (CHILD_ID,)
+    second_child_id = UUID("55555555-5555-5555-5555-555555555555")
+    context.child_reservation_ids = (CHILD_ID, second_child_id)
+    context.reservation_codes = ()
 
     response = InstructionBuilder().build_response(
         result=result(template, BookingState.COMPLETED),
         context=context,
     )
 
-    assert "RSV-001" in response.text
+    assert response.status is DialogTurnStatus.SUCCESS
+    assert response.metadata == {"booking_created": True}
+    assert "Đặt lịch thành công" in response.text
+    assert "đã được ghi nhận" in response.text
+    assert "Mã đặt lịch" not in response.text
+    assert str(BOOKING_ID) not in response.text
     assert str(CHILD_ID) not in response.text
+    assert str(second_child_id) not in response.text
     assert str(CHILD_ID) not in repr(response.metadata)
 
 

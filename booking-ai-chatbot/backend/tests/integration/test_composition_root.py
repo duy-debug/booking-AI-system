@@ -141,7 +141,6 @@ class RecordingBookingGateway:
             num_customer=request.num_customer,
             duration_minutes=request.duration_minutes,
             therapist_preference=request.therapist_preference,
-            reservation_code="RSV-E2E-001",
         )
         children = tuple(
             ChildReservationReference(
@@ -150,11 +149,7 @@ class RecordingBookingGateway:
             )
             for index in range(1, request.num_customer + 1)
         )
-        return CreateBookingResult(
-            booking,
-            reservation_code="RSV-E2E-001",
-            child_reservations=children,
-        )
+        return CreateBookingResult(booking, child_reservations=children)
 
     async def lookup_booking(self, booking_id: UUID) -> Booking:
         raise AssertionError("Unexpected lookup_booking call.")
@@ -529,7 +524,7 @@ async def test_reload_failure_rolls_back_and_does_not_commit_selecting_time() ->
         (3, None),
     ],
 )
-async def test_booking_happy_path_reaches_completed_once_with_booking_code(
+async def test_booking_happy_path_reaches_completed_once_without_user_code(
     monkeypatch: pytest.MonkeyPatch,
     num_customer: int,
     therapist_preference: TherapistPreference | None,
@@ -574,8 +569,16 @@ async def test_booking_happy_path_reaches_completed_once_with_booking_code(
     assert result.executed_actions == ("create_booking",)
     assert context.state is BookingState.COMPLETED
     assert context.booking is not None
-    assert context.reservation_code == "RSV-E2E-001"
-    assert "RSV-E2E-001" in response.text
+    assert context.reservation_code is None
+    assert context.reservation_codes == ()
+    assert "Đặt lịch thành công" in response.text
+    assert "đã được ghi nhận" in response.text
+    assert "Mã đặt lịch" not in response.text
+    assert str(context.booking.booking_id) not in response.text
+    assert all(
+        str(child_id) not in response.text
+        for child_id in context.child_reservation_ids
+    )
     assert response.metadata == {"booking_created": True}
     assert len(gateway.final_requests) == 1
     assert len(gateway.create_requests) == 1
