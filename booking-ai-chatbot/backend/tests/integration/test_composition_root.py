@@ -1,11 +1,13 @@
 """Integration tests for the complete in-process application object graph."""
 
-from datetime import date
+from datetime import date, time
+from decimal import Decimal
 from uuid import UUID
 
 import httpx
 import pytest
 
+from app.application.handlers.check_availability_handler import CheckAvailabilityHandler
 from app.application.handlers.confirm_phone_handler import ConfirmPhoneHandler
 from app.application.ports.booking_gateway import BookingGateway
 from app.core.config import Settings
@@ -13,7 +15,7 @@ from app.dependencies import create_application_container
 from app.dialog.dialog_controller import DialogTurnInput, DialogTurnStatus
 from app.dialog.instruction_builder import DialogResponseDraft
 from app.dialog.tool_bridge import ActionExecutionContext, ActionResult
-from app.domain.booking import Shop
+from app.domain.booking import Service, Shop
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.infrastructure.booking_api.http_booking_gateway import HTTPBookingGateway
@@ -44,6 +46,22 @@ SHOP = Shop(
     name="Shibuya",
     address="Tokyo",
 )
+SERVICE = Service(
+    service_id=UUID("22222222-2222-2222-2222-222222222222"),
+    name="Aromatherapy",
+    duration_minutes=60,
+    price=Decimal("500000.00"),
+)
+
+
+class FailingAvailabilityHandler(CheckAvailabilityHandler):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def execute(self, context: BookingContext) -> tuple[time, ...]:
+        self.calls += 1
+        context.set_available_slots((time(11, 0),))
+        raise RuntimeError("POS unavailable")
 
 
 def shop_response(request: httpx.Request) -> httpx.Response:
@@ -272,6 +290,83 @@ async def test_shop_search_failure_does_not_partially_mutate_context() -> None:
     assert context.shop is None
     assert context.pending_action == "keep"
     assert len(requests) == 1
+
+    await container.close()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_phone_denial_uses_production_binding_and_commits_collection_state() -> None:
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(500, request=request)),
+        base_url="http://pos.test",
+    )
+    container = await create_application_container(settings(), http_client=client)
+    context = BookingContext(
+        conversation_id="conversation-phone",
+        state=BookingState.VERIFYING_PHONE,
+        shop=SHOP,
+        service=SERVICE,
+        booking_date=date(2099, 8, 5),
+        start_time=time(10, 30),
+        num_customer=1,
+        duration_minutes=60,
+        phone="0901234567",
+        phone_confirmed=True,
+        ng_list_checked=True,
+    )
+
+    result = await container.dialog_controller.handle_turn(
+        context,
+        DialogTurnInput(intent="deny", payload={}),
+    )
+
+    assert result.status is DialogTurnStatus.SUCCESS
+    assert result.executed_actions == ("clear_phone_confirmation",)
+    assert context.state is BookingState.COLLECTING_PHONE
+    assert context.phone is None
+    assert context.shop is SHOP
+    assert context.service is SERVICE
+    assert context.start_time == time(10, 30)
+
+    await container.close()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_reload_failure_rolls_back_and_does_not_commit_selecting_time() -> None:
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(500, request=request)),
+        base_url="http://pos.test",
+    )
+    container = await create_application_container(settings(), http_client=client)
+    handler = FailingAvailabilityHandler()
+    container.tool_bridge._check_availability_handler = handler
+    stale_slots = (time(9, 0),)
+    context = BookingContext(
+        conversation_id="conversation-reload-failure",
+        state=BookingState.BOOKING_FAILED,
+        shop=SHOP,
+        service=SERVICE,
+        booking_date=date(2099, 8, 5),
+        start_time=time(9, 0),
+        num_customer=1,
+        duration_minutes=60,
+        available_slots=stale_slots,
+    )
+
+    result = await container.dialog_controller.handle_turn(
+        context,
+        DialogTurnInput(intent="select_time", payload={}),
+    )
+
+    assert result.status is DialogTurnStatus.FAILURE_UNHANDLED
+    assert result.failed_action == "reload_time_slots"
+    assert handler.calls == 1
+    assert context.state is BookingState.BOOKING_FAILED
+    assert context.available_slots == stale_slots
+    assert context.start_time == time(9, 0)
+    assert context.booking is None
 
     await container.close()
     await client.aclose()

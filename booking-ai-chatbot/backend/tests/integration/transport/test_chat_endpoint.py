@@ -3,6 +3,7 @@
 import json
 from collections.abc import Iterator
 from datetime import date, time
+from decimal import Decimal
 from typing import cast
 from uuid import UUID
 
@@ -12,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import app.dependencies as dependencies
+from app.application.handlers.check_availability_handler import CheckAvailabilityHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.application.ports.knowledge_gateway import KnowledgeDocument
 from app.application.ports.llm_gateway import LLMMessage, LLMResponse
@@ -31,7 +33,7 @@ from app.dialog.nlu import (
     NLUResult,
     NLUSource,
 )
-from app.domain.booking import Shop
+from app.domain.booking import Service, Shop
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.main import create_app
@@ -42,6 +44,12 @@ SHOP = Shop(
     name="Shibuya",
     address="Tokyo",
 )
+SERVICE = Service(
+    service_id=UUID("22222222-2222-2222-2222-222222222222"),
+    name="Aromatherapy",
+    duration_minutes=60,
+    price=Decimal("500000.00"),
+)
 
 
 class RecordingSearchShopHandler(SearchShopHandler):
@@ -51,6 +59,17 @@ class RecordingSearchShopHandler(SearchShopHandler):
     async def execute(self, query: str | None = None) -> list[Shop]:
         self.calls.append(query)
         return [SHOP]
+
+
+class RecordingAvailabilityHandler(CheckAvailabilityHandler):
+    def __init__(self) -> None:
+        self.calls: list[BookingContext] = []
+        self.slots = (time(10, 30), time(11, 0))
+
+    async def execute(self, context: BookingContext) -> tuple[time, ...]:
+        self.calls.append(context)
+        context.set_available_slots(self.slots)
+        return self.slots
 
 
 class StaticResolver:
@@ -244,6 +263,96 @@ def test_json_happy_path_reaches_people_without_preload_calls(
     assert context.booking_date == date(2099, 8, 15)
     assert search.calls == [None]
     assert resolver.calls == 1
+    assert outbound_requests == []
+
+
+def test_json_phone_denial_clears_phone_and_returns_to_collection(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    context = BookingContext(
+        "conversation-phone-denial",
+        state=BookingState.VERIFYING_PHONE,
+        shop=SHOP,
+        service=SERVICE,
+        booking_date=date(2099, 8, 15),
+        start_time=time(10, 30),
+        num_customer=1,
+        duration_minutes=60,
+        phone="0901234567",
+        phone_confirmed=True,
+        ng_list_checked=True,
+    )
+    container.memory_cache._contexts[context.conversation_id] = context
+
+    response = post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message="không",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert response.json()["state"] == "collecting_phone"
+    assert context.phone is None
+    assert context.phone_confirmed is False
+    assert context.shop is SHOP
+    assert context.service is SERVICE
+    assert context.booking_date == date(2099, 8, 15)
+    assert context.start_time == time(10, 30)
+    assert outbound_requests == []
+
+
+def test_json_booking_failure_refreshes_slots_without_booking_creation(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    availability = RecordingAvailabilityHandler()
+    container.tool_bridge._check_availability_handler = availability
+    gateway = StaticLLMGateway(
+        json.dumps(
+            {
+                "intent": "select_time",
+                "confidence": 0.9,
+                "entities": {"start_time": "10:30"},
+                "entity_kind": None,
+                "entity_query": None,
+            }
+        )
+    )
+    container.llm_nlu_fallback = LLMNLUFallback(
+        llm_gateway=gateway,
+        intent_policy=container.state_intent_policy,
+    )
+    context = BookingContext(
+        "conversation-reload-slots",
+        state=BookingState.BOOKING_FAILED,
+        shop=SHOP,
+        service=SERVICE,
+        booking_date=date(2099, 8, 15),
+        start_time=time(9, 0),
+        num_customer=1,
+        duration_minutes=60,
+        available_slots=(time(9, 0),),
+    )
+    container.memory_cache._contexts[context.conversation_id] = context
+
+    response = post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message="10:30",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert response.json()["state"] == "selecting_time"
+    assert availability.calls == [context]
+    assert context.available_slots == availability.slots
+    assert context.start_time == time(9, 0)
+    assert context.booking is None
+    assert gateway.calls == 1
     assert outbound_requests == []
 
 

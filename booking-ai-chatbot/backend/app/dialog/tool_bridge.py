@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, fields
 from datetime import date, time
+from functools import partial
 from typing import Protocol, TypeAlias, TypeVar
 
 from app.application.exceptions import (
@@ -512,6 +513,7 @@ class ToolBridge:
             ("skip_therapist", self._skip_therapist),
             ("skip_therapist_for_group", self._skip_therapist_for_group),
             ("clear_date", self._clear_date),
+            ("clear_phone_confirmation", self._clear_phone_confirmation),
             ("validate_phone", self._validate_phone),
         )
         for name, action in bindings:
@@ -522,6 +524,10 @@ class ToolBridge:
             self.register_action("search_shop", self._search_shop)
         if self._check_availability_handler is not None:
             self.register_action("load_time_slots", self._load_time_slots)
+            self.register_action(
+                "reload_time_slots",
+                partial(self._load_time_slots, action_name="reload_time_slots"),
+            )
         if self._collect_customer_handler is not None:
             self.register_action(
                 "handle_phone_collection",
@@ -711,14 +717,23 @@ class ToolBridge:
         BookingRules.validate_phone(phone)
         return ActionResult("validate_phone", phone)
 
+    async def _clear_phone_confirmation(
+        self,
+        context: ActionExecutionContext,
+    ) -> ActionResult:
+        context.booking_context.clear_phone()
+        return ActionResult("clear_phone_confirmation")
+
     async def _load_time_slots(
         self,
         context: ActionExecutionContext,
+        *,
+        action_name: str = "load_time_slots",
     ) -> ActionResult:
         assert self._check_availability_handler is not None
         await self._check_availability_handler.execute(context.booking_context)
         return ActionResult(
-            "load_time_slots",
+            action_name,
             context.booking_context.available_slots,
         )
 

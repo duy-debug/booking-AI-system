@@ -375,13 +375,16 @@ async def test_failing_create_is_called_once_without_automatic_retry() -> None:
 class FakeCheckAvailabilityHandler(CheckAvailabilityHandler):
     """Fake application handler that records availability execution."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, error: Exception | None = None) -> None:
         self.contexts: list[BookingContext] = []
         self.slots = (time(10, 30), time(11, 0))
+        self.error = error
 
     async def execute(self, context: BookingContext) -> tuple[time, ...]:
         self.contexts.append(context)
         context.set_available_slots(self.slots)
+        if self.error is not None:
+            raise self.error
         return self.slots
 
 
@@ -538,6 +541,132 @@ async def test_load_time_slots_binding_stores_slots_only() -> None:
 
 
 @pytest.mark.asyncio
+async def test_clear_phone_confirmation_preserves_booking_fields() -> None:
+    customer_handler = FakeCollectCustomerHandler()
+    bridge = production_bridge(customer=customer_handler)
+    booking_context = BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.VERIFYING_PHONE,
+        shop=SHOP,
+        service=SERVICE,
+        booking_date=date(2099, 8, 5),
+        start_time=time(10, 30),
+        num_customer=1,
+        duration_minutes=60,
+        phone="0901234567",
+        phone_confirmed=True,
+        member_rank="gold",
+        visit_count=2,
+        ng_list_checked=True,
+    )
+
+    result = await bridge.execute_action(
+        "clear_phone_confirmation",
+        execution_context(booking_context=booking_context),
+    )
+
+    assert result.output is None
+    assert booking_context.phone is None
+    assert booking_context.phone_confirmed is False
+    assert booking_context.member_rank is None
+    assert booking_context.visit_count is None
+    assert booking_context.ng_list_checked is False
+    assert booking_context.shop is SHOP
+    assert booking_context.service is SERVICE
+    assert booking_context.booking_date == date(2099, 8, 5)
+    assert booking_context.start_time == time(10, 30)
+    assert booking_context.num_customer == 1
+    assert booking_context.duration_minutes == 60
+
+    await bridge.execute_action(
+        "handle_phone_collection",
+        execution_context(
+            booking_context=booking_context,
+            payload={"phone": "0912345678"},
+        ),
+    )
+
+    assert customer_handler.calls == [(booking_context, "0912345678", None)]
+    assert booking_context.phone == "0912345678"
+
+
+@pytest.mark.asyncio
+async def test_clear_phone_confirmation_rolls_back_with_later_action_failure() -> None:
+    bridge = production_bridge()
+
+    async def fail(context: ActionExecutionContext) -> ActionResult:
+        raise RuntimeError("later action failed")
+
+    bridge.register_action("fail_after_clear", fail)
+    booking_context = BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.VERIFYING_PHONE,
+        phone="0901234567",
+        phone_confirmed=True,
+        member_rank="gold",
+        ng_list_checked=True,
+    )
+
+    with pytest.raises(ActionExecutionError):
+        await bridge.execute_actions(
+            ("clear_phone_confirmation", "fail_after_clear"),
+            execution_context(booking_context=booking_context),
+        )
+
+    assert booking_context.phone == "0901234567"
+    assert booking_context.phone_confirmed is True
+    assert booking_context.member_rank == "gold"
+    assert booking_context.ng_list_checked is True
+
+
+@pytest.mark.asyncio
+async def test_reload_time_slots_alias_refreshes_slots_without_changing_time() -> None:
+    handler = FakeCheckAvailabilityHandler()
+    bridge = production_bridge(availability=handler)
+    booking_context = BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.BOOKING_FAILED,
+        start_time=time(9, 0),
+    )
+
+    result = await bridge.execute_action(
+        "reload_time_slots",
+        execution_context(booking_context=booking_context),
+    )
+
+    assert handler.contexts == [booking_context]
+    assert result.action_name == "reload_time_slots"
+    assert result.output == handler.slots
+    assert booking_context.available_slots == handler.slots
+    assert booking_context.start_time == time(9, 0)
+    assert booking_context.state is BookingState.BOOKING_FAILED
+
+
+@pytest.mark.asyncio
+async def test_reload_time_slots_failure_rolls_back_context() -> None:
+    handler = FakeCheckAvailabilityHandler(error=RuntimeError("POS unavailable"))
+    bridge = production_bridge(availability=handler)
+    stale_slots = (time(9, 0),)
+    booking_context = BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.BOOKING_FAILED,
+        start_time=time(9, 0),
+        available_slots=stale_slots,
+    )
+
+    with pytest.raises(ActionExecutionError):
+        await bridge.execute_action(
+            "reload_time_slots",
+            execution_context(booking_context=booking_context),
+        )
+
+    assert handler.contexts == [booking_context]
+    assert booking_context.available_slots == stale_slots
+    assert booking_context.start_time == time(9, 0)
+    assert booking_context.state is BookingState.BOOKING_FAILED
+
+
+@pytest.mark.asyncio
 async def test_phone_collection_binding_passes_phone_and_optional_name() -> None:
     handler = FakeCollectCustomerHandler()
     bridge = production_bridge(customer=handler)
@@ -679,7 +808,9 @@ def test_injected_handlers_register_only_available_bindings() -> None:
     assert bridge.find_unregistered_actions(
         (
             "load_time_slots",
+            "reload_time_slots",
             "search_shop",
+            "clear_phone_confirmation",
             "handle_phone_collection",
             "mark_phone_confirmed",
             "create_booking",

@@ -557,7 +557,9 @@ def test_tool_bridge_audits_declared_actions_without_reading_json(
     assert {
         "search_shop",
         "load_time_slots",
+        "reload_time_slots",
         "handle_phone_collection",
+        "clear_phone_confirmation",
         "mark_phone_confirmed",
         "create_booking",
     }.isdisjoint(unregistered)
@@ -598,12 +600,10 @@ def test_happy_path_actions_are_bound_with_explicit_non_runtime_allowlists(
         "ask_date",
         "ask_people",
         "clear_course_for_reselect",
-        "clear_phone_confirmation",
         "handle_booking_failure",
         "infer_duration_from_service",
         "no_slots_available",
         "people_too_many",
-        "reload_time_slots",
     }
 
     assert bridge.find_unregistered_actions(happy_path_actions) == ()
