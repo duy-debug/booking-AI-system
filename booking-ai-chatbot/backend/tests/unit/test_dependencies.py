@@ -21,6 +21,9 @@ from app.dialog.flow_loader import FlowDefinition, FlowLoader
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.infrastructure.cache.memory_cache import MemoryCache
+from app.infrastructure.vector_db.qdrant_knowledge_gateway import (
+    QdrantKnowledgeGateway,
+)
 
 
 class FakeLLMGateway:
@@ -41,6 +44,22 @@ class FakeKnowledgeGateway:
         limit: int = 5,
     ) -> list[KnowledgeDocument]:
         return []
+
+
+class FakeQdrantClient:
+    def __init__(self, **kwargs: object) -> None:
+        self.kwargs = kwargs
+        self.query_calls = 0
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class LazyFakeEmbedding:
+    def __init__(self, model_name: str) -> None:
+        self.model_name = model_name
+        self.embed_calls = 0
 
 
 def settings(
@@ -91,6 +110,112 @@ async def test_injected_client_is_not_closed() -> None:
 
     assert not client.is_closed
     await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_feature_disabled_keeps_gateway_none() -> None:
+    container = await dependencies.create_application_container(settings())
+
+    assert container.knowledge_gateway is None
+    assert container.faq_manager._knowledge_gateway is None
+    assert container._qdrant_client is None
+
+    await container.close()
+
+
+@pytest.mark.asyncio
+async def test_disabled_qdrant_does_not_validate_connection_config() -> None:
+    configured = Settings(
+        pos_base_url="http://pos.test",
+        knowledge_qdrant_enabled=False,
+        qdrant_host="",
+        qdrant_port=0,
+        qdrant_collection="",
+    )
+
+    container = await dependencies.create_application_container(configured)
+
+    assert container.knowledge_gateway is None
+    await container.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_feature_enabled_injects_lazy_gateway_without_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clients: list[FakeQdrantClient] = []
+    embeddings: list[LazyFakeEmbedding] = []
+
+    def client_factory(**kwargs: object) -> FakeQdrantClient:
+        client = FakeQdrantClient(**kwargs)
+        clients.append(client)
+        return client
+
+    def embedding_factory(model_name: str) -> LazyFakeEmbedding:
+        embedding = LazyFakeEmbedding(model_name)
+        embeddings.append(embedding)
+        return embedding
+
+    monkeypatch.setattr(dependencies, "QdrantClient", client_factory)
+    monkeypatch.setattr(
+        dependencies,
+        "SentenceTransformerEmbedding",
+        embedding_factory,
+    )
+    configured = Settings(
+        pos_base_url="http://pos.test",
+        knowledge_qdrant_enabled=True,
+        qdrant_host="qdrant.test",
+        qdrant_port=6333,
+        qdrant_api_key="private-key",
+        qdrant_collection="knowledge",
+        embedding_model_name="configured-model",
+    )
+
+    container = await dependencies.create_application_container(configured)
+
+    assert isinstance(container.knowledge_gateway, QdrantKnowledgeGateway)
+    assert container.faq_manager._knowledge_gateway is container.knowledge_gateway
+    assert clients[0].kwargs == {
+        "host": "qdrant.test",
+        "port": 6333,
+        "api_key": "private-key",
+    }
+    assert clients[0].query_calls == 0
+    assert embeddings[0].model_name == "configured-model"
+    assert embeddings[0].embed_calls == 0
+
+    await container.close()
+    assert clients[0].closed
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"qdrant_host": ""}, "host"),
+        ({"qdrant_host": "https://user:secret@qdrant.test"}, "host"),
+        ({"qdrant_port": 0}, "port"),
+        ({"qdrant_collection": "  "}, "collection"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_enabled_qdrant_rejects_invalid_config(
+    overrides: dict[str, object],
+    message: str,
+) -> None:
+    configured = Settings(
+        pos_base_url="http://pos.test",
+        knowledge_qdrant_enabled=True,
+        qdrant_host=cast(str, overrides.get("qdrant_host", "localhost")),
+        qdrant_port=cast(int, overrides.get("qdrant_port", 6333)),
+        qdrant_collection=cast(
+            str,
+            overrides.get("qdrant_collection", "kb_chunks"),
+        ),
+    )
+
+    with pytest.raises(ValueError, match=message):
+        await dependencies.create_application_container(configured)
 
 
 @pytest.mark.parametrize(

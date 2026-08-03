@@ -11,6 +11,28 @@ from app.dependencies import application_container_lifespan
 from app.transport.chat_api import router as chat_router
 
 
+def _environment_bool(name: str, *, default: bool = False) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    normalized = raw_value.strip().casefold()
+    if normalized in {"true", "1", "yes", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean value.")
+
+
+def _enabled_qdrant_port(enabled: bool) -> int:
+    if not enabled:
+        return 6333
+    raw_port = os.getenv("QDRANT_PORT", "6333")
+    try:
+        return int(raw_port)
+    except ValueError as error:
+        raise ValueError("QDRANT_PORT must be an integer.") from error
+
+
 def create_app(settings: Settings) -> FastAPI:
     """Create one application whose container lives for the app lifespan."""
 
@@ -25,6 +47,8 @@ def create_app(settings: Settings) -> FastAPI:
     return application
 
 
+_knowledge_qdrant_enabled = _environment_bool("KNOWLEDGE_QDRANT_ENABLED")
+
 app = create_app(
     Settings(
         pos_base_url=os.getenv("BOOKING_API_URL", "http://localhost:8000"),
@@ -34,5 +58,14 @@ app = create_app(
             "https://openrouter.ai/api/v1",
         ),
         openrouter_model=os.getenv("OPENROUTER_MODEL", "openrouter/free"),
+        embedding_model_name=os.getenv(
+            "EMBED_MODEL_NAME",
+            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        ),
+        qdrant_host=os.getenv("QDRANT_HOST", "localhost"),
+        qdrant_port=_enabled_qdrant_port(_knowledge_qdrant_enabled),
+        qdrant_api_key=os.getenv("QDRANT_API_KEY") or None,
+        qdrant_collection=os.getenv("QDRANT_COLLECTION", "kb_chunks"),
+        knowledge_qdrant_enabled=_knowledge_qdrant_enabled,
     )
 )

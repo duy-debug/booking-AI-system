@@ -5,8 +5,10 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from math import isfinite
+from typing import cast
 
 import httpx
+from qdrant_client import QdrantClient
 
 from app.application.handlers.check_availability_handler import (
     CheckAvailabilityHandler,
@@ -36,6 +38,11 @@ from app.domain.booking_context import BookingContext
 from app.infrastructure.booking_api.http_booking_gateway import HTTPBookingGateway
 from app.infrastructure.cache.memory_cache import MemoryCache
 from app.infrastructure.llm.openrouter_llm_gateway import OpenRouterLLMGateway
+from app.infrastructure.vector_db.qdrant_knowledge_gateway import (
+    QdrantKnowledgeGateway,
+    QdrantQueryClient,
+)
+from app.rag.semantic_embedding import SentenceTransformerEmbedding
 from app.sidecar.faq_manager import FAQManager
 
 _MAX_CONVERSATION_ID_LENGTH = 128
@@ -126,8 +133,10 @@ class ApplicationContainer:
     llm_gateway: LLMGateway
     llm_nlu_fallback: LLMNLUFallback
     faq_manager: FAQManager
+    knowledge_gateway: KnowledgeGateway | None
     _handlers: tuple[object, ...] = field(repr=False)
     _owns_http_client: bool = field(repr=False)
+    _qdrant_client: QdrantClient | None = field(default=None, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
 
     async def close(self) -> None:
@@ -137,6 +146,8 @@ class ApplicationContainer:
         self._closed = True
         if self._owns_http_client:
             await self.http_client.aclose()
+        if self._qdrant_client is not None:
+            self._qdrant_client.close()
 
 
 async def create_application_container(
@@ -153,6 +164,7 @@ async def create_application_container(
         base_url=settings.pos_base_url.strip(),
         timeout=settings.pos_timeout_seconds,
     )
+    qdrant_client: QdrantClient | None = None
 
     try:
         flow_definition = FlowLoader.load(settings.booking_flow_path)
@@ -207,6 +219,20 @@ async def create_application_container(
         )
         memory_cache = MemoryCache()
         instruction_builder = InstructionBuilder()
+        configured_knowledge_gateway = knowledge_gateway
+        if configured_knowledge_gateway is None and settings.knowledge_qdrant_enabled:
+            qdrant_client = QdrantClient(
+                host=settings.qdrant_host,
+                port=settings.qdrant_port,
+                api_key=settings.qdrant_api_key,
+            )
+            configured_knowledge_gateway = QdrantKnowledgeGateway(
+                client=cast(QdrantQueryClient, qdrant_client),
+                embedding=SentenceTransformerEmbedding(
+                    settings.embedding_model_name
+                ),
+                collection_name=settings.qdrant_collection,
+            )
         return ApplicationContainer(
             http_client=client,
             booking_gateway=booking_gateway,
@@ -231,13 +257,17 @@ async def create_application_container(
                 enabled=settings.enable_llm_nlu_fallback,
             ),
             faq_manager=FAQManager(
-                knowledge_gateway=knowledge_gateway,
+                knowledge_gateway=configured_knowledge_gateway,
                 instruction_builder=instruction_builder,
             ),
+            knowledge_gateway=configured_knowledge_gateway,
             _handlers=handlers,
             _owns_http_client=owns_http_client,
+            _qdrant_client=qdrant_client,
         )
     except BaseException:
+        if qdrant_client is not None:
+            qdrant_client.close()
         if owns_http_client:
             await client.aclose()
         raise
@@ -307,3 +337,21 @@ def _validate_settings(settings: Settings) -> None:
         raise ValueError("OpenRouter base URL must not be empty.")
     if not settings.openrouter_model.strip():
         raise ValueError("OpenRouter model must not be empty.")
+    if not settings.embedding_model_name.strip():
+        raise ValueError("Embedding model name must not be empty.")
+    if type(settings.knowledge_qdrant_enabled) is not bool:
+        raise ValueError("Knowledge Qdrant enabled flag must be boolean.")
+    if settings.knowledge_qdrant_enabled:
+        host = settings.qdrant_host.strip()
+        if (
+            not host
+            or "://" in host
+            or "/" in host
+            or "@" in host
+            or any(character.isspace() for character in host)
+        ):
+            raise ValueError("Qdrant host must be a hostname or IP address.")
+        if type(settings.qdrant_port) is not int or not 1 <= settings.qdrant_port <= 65535:
+            raise ValueError("Qdrant port must be between 1 and 65535.")
+        if not settings.qdrant_collection.strip():
+            raise ValueError("Qdrant collection name must not be empty.")
