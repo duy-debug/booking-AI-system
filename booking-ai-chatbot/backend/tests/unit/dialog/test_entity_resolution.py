@@ -441,11 +441,11 @@ async def test_course_handler_exception_becomes_safe_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_therapist_name_is_unsupported_and_gender_maps_without_handlers() -> None:
+async def test_therapist_name_needs_gateway_and_gender_maps_without_handlers() -> None:
     name_result = await coordinator().resolve(
         nlu_result=entity_request(NLUEntityKind.THERAPIST, "lan"),
         state=BookingState.SELECTING_THERAPIST,
-        context=BookingContext("conversation-1"),
+        context=BookingContext("conversation-1", num_customer=1),
     )
     gender_result = await coordinator().resolve(
         nlu_result=entity_request(NLUEntityKind.THERAPIST, "female"),
@@ -453,8 +453,8 @@ async def test_therapist_name_is_unsupported_and_gender_maps_without_handlers() 
         context=BookingContext("conversation-1"),
     )
 
-    assert name_result.status is EntityResolutionStatus.UNSUPPORTED
-    assert name_result.failure_code == "therapist_lookup_not_supported"
+    assert name_result.status is EntityResolutionStatus.FAILED
+    assert name_result.failure_code == "therapist_resolution_unavailable"
     assert gender_result.status is EntityResolutionStatus.RESOLVED
     preference = gender_result.dispatch_payload["therapist_preference"]
     assert preference == TherapistPreference(TherapistPreferenceType.FEMALE)

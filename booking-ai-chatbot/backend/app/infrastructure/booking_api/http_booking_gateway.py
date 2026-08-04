@@ -14,6 +14,7 @@ import httpx
 from app.application.exceptions import SlotConflictError
 from app.application.ports.booking_gateway import (
     AvailabilityRequest,
+    AvailableTherapistRequest,
     ChildReservationReference,
     CourseSearchRequest,
     CreateBookingRequest,
@@ -31,6 +32,7 @@ from app.domain.booking import (
     Service,
     Shop,
     TherapistPreference,
+    TherapistPreferenceType,
 )
 from app.domain.exceptions import CustomerNotAllowedError
 from app.infrastructure.booking_api.exceptions import (
@@ -142,6 +144,44 @@ class HTTPBookingGateway:
             duration_minutes=request.duration_minutes,
         )
         return tuple(slot.start_time for slot in slots if slot.available)
+
+    async def search_available_therapists(
+        self,
+        request: AvailableTherapistRequest,
+    ) -> list[TherapistPreference]:
+        """Return therapists available for the selected POS booking window."""
+        params = {
+            "booking_date": request.booking_date.isoformat(),
+            "start_time": request.start_time.isoformat(timespec="minutes"),
+            "end_time": request.end_time.isoformat(timespec="minutes"),
+        }
+        if request.gender in {
+            TherapistPreferenceType.MALE,
+            TherapistPreferenceType.FEMALE,
+        }:
+            params["gender"] = request.gender.value
+        payload = await self._request_json(
+            operation="search_available_therapists",
+            method="GET",
+            path=f"/api/shops/{request.shop_id}/available-therapists",
+            params=params,
+        )
+        items = _list(_mapping(payload, "available therapist response"), "data")
+        preferences: list[TherapistPreference] = []
+        for index, item in enumerate(items):
+            mapped = _mapping(item, f"available therapist {index}")
+            therapist_id = _uuid(mapped, "therapist_id")
+            name = _string(mapped, "name")
+            if not _boolean(mapped, "available"):
+                continue
+            preferences.append(
+                TherapistPreference(
+                    TherapistPreferenceType.PERSONAL,
+                    therapist_id=str(therapist_id),
+                    therapist_name=name,
+                )
+            )
+        return preferences
 
     async def verify_customer(
         self,
@@ -452,7 +492,7 @@ def _parse_customer_verification(payload: object) -> CustomerVerificationResult:
     if _string(customer, "customer_type") != "existing":
         raise POSResponseMappingError("POS eligibility customer has an unknown customer_type.")
     customer_id = str(_uuid(customer, "customer_id"))
-    _optional_string(customer, "name")
+    customer_name = _optional_string(customer, "name")
     _boolean(customer, "is_member")
     member_rank = _optional_string(customer, "member_rank")
     visit_count = _integer(customer, "visit_count")
@@ -463,6 +503,7 @@ def _parse_customer_verification(payload: object) -> CustomerVerificationResult:
         visit_count=visit_count,
         ng_list_checked=True,
         is_ng_customer=False,
+        customer_name=customer_name,
     )
 
 
@@ -473,6 +514,7 @@ def _parse_create_booking_result(
     root = _mapping(payload, "create booking response")
     data = _mapping(_required(root, "data"), "create booking data")
     booking_id = _uuid(data, "booking_id")
+    booking_code = _optional_string(data, "booking_code")
     shop_id = _uuid(data, "shop_id")
     if shop_id != request.shop_id:
         raise POSResponseMappingError("POS create response contains a different shop_id.")
@@ -526,9 +568,11 @@ def _parse_create_booking_result(
         duration_minutes=duration_minutes,
         therapist_preference=request.therapist_preference,
         addons=addons,
+        reservation_code=booking_code,
     )
     return CreateBookingResult(
         booking=booking,
+        reservation_code=booking_code,
         child_reservations=tuple(item.reference for item in reservations),
     )
 

@@ -35,6 +35,7 @@ PARSER_OUTPUT_INTENTS = {
     "deny",
     "greeting",
     "provide_phone",
+    "provide_name",
     "select_date",
     "select_duration",
     "select_people",

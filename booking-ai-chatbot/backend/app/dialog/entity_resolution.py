@@ -3,12 +3,17 @@
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from types import MappingProxyType
 
 from app.application.handlers.search_service_handler import SearchServiceHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
+from app.application.ports.booking_gateway import (
+    AvailableTherapistRequest,
+    TherapistAvailabilityGateway,
+)
 from app.dialog.dialog_controller import DialogTurnInput
 from app.dialog.nlu import (
     NLUEntityKind,
@@ -29,7 +34,7 @@ from app.domain.booking_state import BookingState
 from app.domain.exceptions import InvalidCourseSelectionError
 
 _SAFE_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
-_SELECTION_KEY_PATTERN = re.compile(r"^(?:shop|course):\d+$")
+_SELECTION_KEY_PATTERN = re.compile(r"^(?:shop|course|therapist):\d+$")
 _SAFE_METADATA_KEYS = frozenset(
     {"address", "duration_minutes", "price", "course_type"}
 )
@@ -167,9 +172,11 @@ class EntityResolutionCoordinator:
         *,
         search_shop_handler: SearchShopHandler,
         search_service_handler: SearchServiceHandler,
+        booking_gateway: TherapistAvailabilityGateway | None = None,
     ) -> None:
         self._search_shop_handler = search_shop_handler
         self._search_service_handler = search_service_handler
+        self._booking_gateway = booking_gateway
 
     async def resolve(
         self,
@@ -188,7 +195,7 @@ class EntityResolutionCoordinator:
                 context,
                 change=change_target == "service",
             )
-        return self._resolve_therapist(query)
+        return await self._resolve_therapist(query, context)
 
     def select_candidate(
         self,
@@ -337,25 +344,73 @@ class EntityResolutionCoordinator:
             tuple(dispatches),
         )
 
-    @staticmethod
-    def _resolve_therapist(query: str) -> EntityResolutionResult:
+    async def _resolve_therapist(
+        self,
+        query: str,
+        context: BookingContext,
+    ) -> EntityResolutionResult:
         preference_type = {
             "male": TherapistPreferenceType.MALE,
             "female": TherapistPreferenceType.FEMALE,
         }.get(query)
-        if preference_type is None:
-            return _unsupported(
+        if preference_type is not None:
+            preference = TherapistPreference(preference_type)
+            return _resolved_result(
                 NLUEntityKind.THERAPIST,
-                "therapist_lookup_not_supported",
+                _CandidateDispatch(
+                    "select_therapist",
+                    {"therapist_preference": preference},
+                ),
             )
-        preference = TherapistPreference(preference_type)
-        return _resolved_result(
-            NLUEntityKind.THERAPIST,
-            _CandidateDispatch(
-                "select_therapist",
-                {"therapist_preference": preference},
-            ),
+        if context.num_customer != 1:
+            return _unsupported(NLUEntityKind.THERAPIST, "personal_therapist_group_forbidden")
+        if (
+            self._booking_gateway is None
+            or context.shop is None
+            or context.booking_date is None
+            or context.start_time is None
+            or context.total_duration_minutes is None
+        ):
+            return _failure(NLUEntityKind.THERAPIST, "therapist_resolution_unavailable")
+        end_time = (
+            datetime.combine(context.booking_date, context.start_time)
+            + timedelta(minutes=context.total_duration_minutes)
+        ).time()
+        try:
+            therapists = await self._booking_gateway.search_available_therapists(
+                AvailableTherapistRequest(
+                    shop_id=context.shop.shop_id,
+                    booking_date=context.booking_date,
+                    start_time=context.start_time,
+                    end_time=end_time,
+                )
+            )
+        except Exception:
+            return _failure(NLUEntityKind.THERAPIST, "therapist_resolution_unavailable")
+        normalized_query = query.casefold().strip()
+        matches = [
+            therapist
+            for therapist in therapists
+            if therapist.therapist_name is not None
+            and normalized_query in therapist.therapist_name.casefold()
+        ]
+        if not matches:
+            return _not_found(NLUEntityKind.THERAPIST, "therapist_not_found")
+        dispatches = tuple(
+            _CandidateDispatch("select_therapist", {"therapist_preference": item})
+            for item in matches
         )
+        if len(matches) == 1:
+            return _resolved_result(NLUEntityKind.THERAPIST, dispatches[0])
+        candidates = tuple(
+            EntityCandidate(
+                kind=NLUEntityKind.THERAPIST,
+                display_name=item.therapist_name or "Kỹ thuật viên",
+                selection_key=f"therapist:{index}",
+            )
+            for index, item in enumerate(matches)
+        )
+        return _ambiguous_result(NLUEntityKind.THERAPIST, candidates, dispatches)
 
 
 def entity_resolution_to_dialog_turn_input(

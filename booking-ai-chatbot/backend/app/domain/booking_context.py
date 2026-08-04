@@ -46,6 +46,7 @@ class BookingContext:
     service: Service | None = None
     service_selection_mode: ServiceSelectionMode = ServiceSelectionMode.NONE
     customer: Customer | None = None
+    customer_id: str | None = None
     booking_date: date | None = None
     start_time: time | None = None
     num_customer: int | None = None
@@ -207,7 +208,7 @@ class BookingContext:
             self.num_customer is not None
             and self.num_customer >= 2
             and preference is not None
-            and preference.preference_type is not TherapistPreferenceType.NONE
+            and preference.preference_type is TherapistPreferenceType.PERSONAL
         ):
             raise TherapistNotAllowedForGroupError(
                 "Group bookings cannot specify a therapist preference."
@@ -232,6 +233,8 @@ class BookingContext:
     def set_phone(self, phone: str) -> None:
         """Store a phone number and reset all customer verification."""
         self.phone = phone
+        self.customer = None
+        self.customer_id = None
         self.phone_confirmed = False
         self.member_rank = None
         self.visit_count = None
@@ -351,7 +354,7 @@ class BookingContext:
             self.num_customer is not None
             and self.num_customer >= 2
             and preference is not None
-            and preference.preference_type is not TherapistPreferenceType.NONE
+            and preference.preference_type is TherapistPreferenceType.PERSONAL
         ):
             raise TherapistNotAllowedForGroupError(
                 "Group bookings cannot specify a therapist preference."
@@ -363,6 +366,7 @@ class BookingContext:
     def change_phone(self, phone: str | None) -> None:
         """Replace customer phone data without clearing booking selections."""
         self.customer = None
+        self.customer_id = None
         self.clear_phone()
         if phone is not None:
             self.phone = phone

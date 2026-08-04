@@ -121,7 +121,7 @@ def test_flow_loads_all_booking_states(flow: FlowDefinition) -> None:
     assert flow.name == "booking-flow"
     assert flow.initial_state is BookingState.IDLE
     assert set(flow.states) == set(BookingState)
-    assert len(flow.states) == 15
+    assert len(flow.states) == 16
     assert "selecting_options" not in {state.value for state in flow.states}
 
 
@@ -163,6 +163,11 @@ def test_flow_loads_all_booking_states(flow: FlowDefinition) -> None:
         (
             BookingState.COLLECTING_PHONE,
             "provide_phone",
+            BookingState.COLLECTING_NAME,
+        ),
+        (
+            BookingState.COLLECTING_NAME,
+            "provide_name",
             BookingState.VERIFYING_PHONE,
         ),
         (
@@ -192,7 +197,7 @@ def test_complete_happy_path(
 
 
 @pytest.mark.parametrize("num_customer", [2, 3])
-def test_group_booking_auto_skips_therapist(
+def test_group_booking_waits_for_gender_or_no_preference(
     flow: FlowDefinition,
     num_customer: int,
 ) -> None:
@@ -204,9 +209,7 @@ def test_group_booking_auto_skips_therapist(
 
     auto = StateMachine(flow).resolve_auto_transition(context)
 
-    assert auto is not None
-    assert auto.target is BookingState.COLLECTING_PHONE
-    assert auto.actions == ("skip_therapist_for_group",)
+    assert auto is None
     assert context.state is BookingState.SELECTING_THERAPIST
 
 
@@ -218,7 +221,22 @@ def test_single_booking_does_not_auto_skip_therapist(flow: FlowDefinition) -> No
     )
 
     assert StateMachine(flow).resolve_auto_transition(context) is None
-    assert context.state is BookingState.SELECTING_THERAPIST
+
+
+def test_customer_name_step_skips_only_for_existing_customer(flow: FlowDefinition) -> None:
+    machine = StateMachine(flow)
+    existing = BookingContext(
+        "existing",
+        state=BookingState.COLLECTING_NAME,
+        customer_id="customer-1",
+    )
+    first_time = BookingContext("new", state=BookingState.COLLECTING_NAME)
+
+    transition = machine.resolve_auto_transition(existing)
+
+    assert transition is not None
+    assert transition.target is BookingState.VERIFYING_PHONE
+    assert machine.resolve_auto_transition(first_time) is None
 
 
 def test_booking_result_resolves_success_auto_transition(

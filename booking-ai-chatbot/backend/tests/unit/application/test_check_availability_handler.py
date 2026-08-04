@@ -35,7 +35,6 @@ from app.domain.exceptions import (
     BookingContextNotReadyError,
     InvalidBookingDataError,
     InvalidCourseSelectionError,
-    TherapistNotAllowedForGroupError,
 )
 
 SHOP_ID = UUID("11111111-1111-1111-1111-111111111111")
@@ -194,17 +193,18 @@ async def test_group_request_has_no_specified_therapist(group_size: int) -> None
 
 
 @pytest.mark.asyncio
-async def test_group_with_specified_therapist_is_rejected_before_gateway() -> None:
+async def test_group_with_gender_preference_reaches_gateway() -> None:
     context = make_context(
         num_customer=2,
         therapist=TherapistPreference(TherapistPreferenceType.FEMALE),
     )
     fake = FakeBookingGateway()
 
-    with pytest.raises(TherapistNotAllowedForGroupError):
-        await make_handler(fake).execute(context)
+    await make_handler(fake).execute(context)
 
-    assert fake.availability_requests == []
+    assert fake.availability_requests[0].therapist_preference == TherapistPreference(
+        TherapistPreferenceType.FEMALE
+    )
 
 
 @pytest.mark.parametrize("missing_field", ["booking_date", "service"])

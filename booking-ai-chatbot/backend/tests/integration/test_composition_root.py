@@ -202,6 +202,8 @@ async def advance_to_awaiting_confirmation(
                 "select_therapist",
                 {"therapist_preference": therapist_preference},
             )
+    else:
+        await turn("deny", {})
     await turn("provide_phone", {"phone": "0901234567", "name": "Nguyen An"})
     await turn("confirm", {})
     return context, tuple(states)
@@ -608,8 +610,9 @@ async def test_booking_happy_path_reaches_completed_once_without_user_code(
     assert len(context.child_reservation_ids) == num_customer
     assert gateway.create_requests[0].num_customer == num_customer
     if num_customer >= 2:
-        assert context.therapist_preference is None
-        assert gateway.create_requests[0].therapist_preference is None
+        expected = TherapistPreference(TherapistPreferenceType.NONE)
+        assert context.therapist_preference == expected
+        assert gateway.create_requests[0].therapist_preference == expected
     else:
         assert context.therapist_preference == (
             therapist_preference

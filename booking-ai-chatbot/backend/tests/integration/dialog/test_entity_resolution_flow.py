@@ -180,11 +180,12 @@ async def test_non_resolved_shop_result_never_maps_to_dialog_turn(
 
 
 @pytest.mark.asyncio
-async def test_therapist_name_is_unsupported_without_search_handler_or_network() -> None:
+async def test_therapist_name_fails_safely_without_availability_gateway() -> None:
     parser, resolver, _, shop_handler, service_handler = components([SHOP], [SERVICE])
     context = BookingContext(
         "conversation-1",
         state=BookingState.SELECTING_THERAPIST,
+        num_customer=1,
     )
     parsed = parser.parse(text="chọn chị Lan", state=context.state)
 
@@ -194,7 +195,7 @@ async def test_therapist_name_is_unsupported_without_search_handler_or_network()
         context=context,
     )
 
-    assert result.status is EntityResolutionStatus.UNSUPPORTED
-    assert result.failure_code == "therapist_lookup_not_supported"
+    assert result.status is EntityResolutionStatus.FAILED
+    assert result.failure_code == "therapist_resolution_unavailable"
     assert shop_handler.calls == 0
     assert service_handler.calls == 0

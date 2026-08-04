@@ -194,11 +194,18 @@ def test_validate_create_context_rejects_ng_customer() -> None:
         BookingRules.validate_create_context(context)
 
 
-def test_validate_create_context_rejects_group_therapist() -> None:
+def test_validate_create_context_accepts_group_gender_but_rejects_personal() -> None:
     context = make_valid_context()
     context.num_customer = 2
     context.therapist_preference = TherapistPreference(
         TherapistPreferenceType.FEMALE
+    )
+
+    BookingRules.validate_create_context(context)
+
+    context.therapist_preference = TherapistPreference(
+        TherapistPreferenceType.PERSONAL,
+        therapist_name="Mai",
     )
 
     with pytest.raises(TherapistNotAllowedForGroupError):

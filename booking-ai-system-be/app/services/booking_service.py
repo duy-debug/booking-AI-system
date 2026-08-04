@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 from random import SystemRandom
 from uuid import UUID
 
@@ -11,25 +11,30 @@ from app.db.models.booking import Booking
 from app.db.models.customer import Customer
 from app.db.models.reservation import Reservation
 from app.db.models.reservation_course import ReservationCourse
+from app.mappers.booking_mapper import booking_to_detail
 from app.repositories import (
     BookingRepository,
-    ShopRepository,
     CourseRepository,
     CustomerRepository,
     ReservationRepository,
     ShiftRepository,
+    ShopRepository,
     TherapistRepository,
 )
 from app.schemas.booking import (
     BookingCreate,
     BookingPatchInput,
 )
-from app.mappers.booking_mapper import booking_to_detail
 from app.services.booking_time import validate_booking_start
 from app.services.therapist_availability_service import TherapistAvailabilityService
 
-
 _secure_random = SystemRandom()
+_BOOKING_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def _new_booking_code(booking_date: date) -> str:
+    suffix = "".join(_secure_random.choices(_BOOKING_CODE_ALPHABET, k=8))
+    return f"KMB-{booking_date:%Y%m%d}-{suffix}"
 
 
 # Cộng số phút vào một thời điểm và tự quay vòng sang ngày mới nếu vượt quá 24 giờ.
@@ -159,6 +164,7 @@ class BookingService:
 
         # Tạo booking
         booking = Booking(
+            pos_booking_code=_new_booking_code(body.booking_date),
             shop_id=body.shop_id,
             customer_id=customer.customer_id,
             booking_date=body.booking_date,

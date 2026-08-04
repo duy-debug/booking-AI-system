@@ -264,6 +264,7 @@ class InstructionBuilder:
             ("ask_therapist", self._ask_therapist),
             ("therapist_unavailable", self._therapist_unavailable),
             ("ask_phone", self._ask_phone),
+            ("ask_customer_name", self._ask_customer_name),
             ("phone_invalid", self._phone_invalid),
             ("customer_not_allowed", self._customer_not_allowed),
             ("customer_verification_failed", self._customer_verification_failed),
@@ -375,6 +376,7 @@ class InstructionBuilder:
             BookingState.SELECTING_TIME: self._suggest_time_slots,
             BookingState.SELECTING_THERAPIST: self._ask_therapist,
             BookingState.COLLECTING_PHONE: self._ask_phone,
+            BookingState.COLLECTING_NAME: self._ask_customer_name,
             BookingState.VERIFYING_PHONE: self._readback_phone,
             BookingState.AWAITING_CONFIRMATION: self._final_confirmation,
             BookingState.BOOKING_EXECUTING: self._booking_processing,
@@ -528,10 +530,12 @@ class InstructionBuilder:
     ) -> DialogResponseDraft:
         if context.num_customer in (2, 3):
             return DialogResponseDraft(
-                "Đặt nhóm sẽ không hỗ trợ chỉ định kỹ thuật viên."
+                "Đặt nhóm không hỗ trợ chọn kỹ thuật viên theo tên. "
+                "Bạn có thể yêu cầu giới tính kỹ thuật viên hoặc không yêu cầu.",
+                ("Không yêu cầu", "Nam", "Nữ"),
             )
         return DialogResponseDraft(
-            "Bạn có muốn chọn kỹ thuật viên không?",
+            "Bạn có thể nhập tên kỹ thuật viên cụ thể, chọn giới tính hoặc bỏ qua.",
             ("Không yêu cầu", "Nam", "Nữ"),
         )
 
@@ -551,6 +555,15 @@ class InstructionBuilder:
     ) -> DialogResponseDraft:
         return DialogResponseDraft(
             "Vui lòng nhập số điện thoại để kiểm tra thông tin khách hàng."
+        )
+
+    @staticmethod
+    def _ask_customer_name(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        return DialogResponseDraft(
+            "Đây là lần đầu số điện thoại này đặt lịch. Vui lòng cho biết tên khách hàng."
         )
 
     @staticmethod

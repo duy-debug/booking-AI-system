@@ -32,6 +32,17 @@ class CourseSearchRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class AvailableTherapistRequest:
+    """Contains the selected booking window used to list available therapists."""
+
+    shop_id: UUID
+    booking_date: date
+    start_time: time
+    end_time: time
+    gender: TherapistPreferenceType | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class CustomerVerificationRequest:
     """Contains the shop and normalized phone required by POS eligibility."""
 
@@ -67,7 +78,7 @@ def _validate_booking_shape(
     if (
         num_customer >= 2
         and therapist_preference is not None
-        and therapist_preference.preference_type is not TherapistPreferenceType.NONE
+        and therapist_preference.preference_type is TherapistPreferenceType.PERSONAL
     ):
         raise TherapistNotAllowedForGroupError(
             "Group bookings cannot specify a therapist preference."
@@ -106,6 +117,7 @@ class CustomerVerificationResult:
     visit_count: int | None
     ng_list_checked: bool
     is_ng_customer: bool
+    customer_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,6 +249,7 @@ class BookingGateway(Protocol):
         """Return authoritative member and NG-list verification."""
         ...
 
+
     async def check_final_availability(
         self,
         request: FinalAvailabilityRequest,
@@ -266,4 +279,15 @@ class BookingGateway(Protocol):
 
     async def cancel_booking(self, booking_id: UUID) -> Booking:
         """Cancel and return the updated official booking."""
+        ...
+
+
+class TherapistAvailabilityGateway(Protocol):
+    """Optional POS capability for resolving therapists after time selection."""
+
+    async def search_available_therapists(
+        self,
+        request: AvailableTherapistRequest,
+    ) -> list[TherapistPreference]:
+        """Return POS-authoritative therapists available for one selected window."""
         ...

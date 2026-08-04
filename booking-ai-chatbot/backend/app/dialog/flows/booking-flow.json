@@ -447,13 +447,6 @@
         {
           "intent": "select_therapist",
           "target": "collecting_phone",
-          "conditions": [
-            {
-              "field": "num_customer",
-              "op": "eq",
-              "value": 1
-            }
-          ],
           "actions": ["handle_therapist_selection"],
           "on_fail": [
             {
@@ -498,16 +491,7 @@
           "target": "selecting_therapist",
           "actions": ["log_unhandled", "ask_to_clarify"]
         }
-      ],
-      "auto_transition": {
-        "condition": {
-          "field": "num_customer",
-          "op": "gte",
-          "value": 2
-        },
-        "target": "collecting_phone",
-        "actions": ["skip_therapist_for_group"]
-      }
+      ]
     },
     "collecting_phone": {
       "description": "Waiting for a customer phone number.",
@@ -517,7 +501,7 @@
       "transitions": [
         {
           "intent": "provide_phone",
-          "target": "verifying_phone",
+          "target": "collecting_name",
           "actions": ["handle_phone_collection", "validate_phone"],
           "on_fail": [
             {
@@ -567,6 +551,42 @@
         "segment_count": 3,
         "max_full_resets": 3,
         "silence_timeout_ms": 5000
+      }
+    },
+    "collecting_name": {
+      "description": "Waiting for a first-time customer's name.",
+      "on_enter": {
+        "instruction_template": "ask_customer_name"
+      },
+      "transitions": [
+        {
+          "intent": "provide_name",
+          "target": "verifying_phone",
+          "actions": ["handle_customer_name"]
+        },
+        {
+          "intent": "provide_phone",
+          "target": "collecting_name",
+          "actions": ["handle_phone_collection", "validate_phone"]
+        },
+        {
+          "intent": "cancel_flow",
+          "target": "cancelled",
+          "actions": []
+        },
+        {
+          "intent": "*",
+          "target": "collecting_name",
+          "actions": ["ask_to_clarify"]
+        }
+      ],
+      "auto_transition": {
+        "condition": {
+          "field": "customer_id",
+          "op": "not_null"
+        },
+        "target": "verifying_phone",
+        "actions": []
       }
     },
     "verifying_phone": {

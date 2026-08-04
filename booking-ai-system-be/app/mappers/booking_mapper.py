@@ -40,6 +40,7 @@ def reservation_to_response(reservation: Reservation) -> ReservationResponse:
 def booking_to_public_response(booking: Booking) -> PublicBookingResponse:
     return PublicBookingResponse.model_validate({
         "booking_id": booking.booking_id,
+        "booking_code": booking.pos_booking_code,
         "shop_id": booking.shop_id,
         "shop_name": booking.shop.name,
         "customer_id": booking.customer_id,

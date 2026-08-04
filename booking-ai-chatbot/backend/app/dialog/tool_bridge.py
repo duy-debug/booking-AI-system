@@ -29,6 +29,7 @@ from app.dialog.flow_loader import (
 )
 from app.domain.booking import (
     CourseSelection,
+    Customer,
     Shop,
     TherapistPreference,
     TherapistPreferenceType,
@@ -553,6 +554,7 @@ class ToolBridge:
             ("clear_date", self._clear_date),
             ("clear_phone_confirmation", self._clear_phone_confirmation),
             ("validate_phone", self._validate_phone),
+            ("handle_customer_name", self._handle_customer_name),
         )
         for name, action in bindings:
             self.register_action(name, action)
@@ -812,6 +814,19 @@ class ToolBridge:
         assert self._confirm_phone_handler is not None
         self._confirm_phone_handler.execute(context.booking_context)
         return ActionResult("mark_phone_confirmed")
+
+    async def _handle_customer_name(
+        self,
+        context: ActionExecutionContext,
+    ) -> ActionResult:
+        name = _require_payload_value(context, "name", str).strip()
+        if not name:
+            raise InvalidActionInputError("Customer name must not be empty.")
+        phone = context.booking_context.phone
+        if phone is None:
+            raise InvalidActionInputError("Customer phone is required before name.")
+        context.booking_context.customer = Customer(phone=phone, name=name)
+        return ActionResult("handle_customer_name", name)
 
     async def _create_booking(
         self,

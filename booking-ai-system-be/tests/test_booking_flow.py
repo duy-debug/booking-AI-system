@@ -93,6 +93,7 @@ class TestCreateBooking:
         )
         assert r.status_code == 201, f"Create booking fail: {r.text}"
         TestCreateBooking.BOOKING_ID = r.json()["data"]["booking_id"]
+        assert r.json()["data"]["booking_code"].startswith("KMB-20260720-")
         assert r.json()["data"]["status"] == "confirmed"
         assert len(r.json()["data"]["reservations"]) > 0
         assert len(r.json()["data"]["reservations"][0]["courses"]) > 0

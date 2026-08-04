@@ -8,6 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+
 # Course trong booking — gồm course_id và vai trò (main/addon)
 class BookingCourseInput(BaseModel):
     course_id: UUID
@@ -159,6 +160,7 @@ class PublicBookingResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     booking_id: UUID
+    booking_code: str | None = None
     shop_id: UUID
     shop_name: str
     customer_id: UUID

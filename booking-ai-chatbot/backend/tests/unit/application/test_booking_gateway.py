@@ -33,7 +33,6 @@ from app.domain.exceptions import (
     InvalidCourseSelectionError,
     InvalidCustomerCountError,
     InvalidDurationError,
-    TherapistNotAllowedForGroupError,
 )
 
 SHOP_ID = UUID("11111111-1111-1111-1111-111111111111")
@@ -231,18 +230,19 @@ def test_availability_request_rejects_duplicate_service_ids() -> None:
         )
 
 
-def test_availability_request_rejects_group_therapist() -> None:
-    with pytest.raises(TherapistNotAllowedForGroupError):
-        AvailabilityRequest(
-            SHOP_ID,
-            BOOKING_DATE,
-            2,
-            60,
-            SERVICE_ID,
-            therapist_preference=TherapistPreference(
-                TherapistPreferenceType.FEMALE
-            ),
-        )
+def test_availability_request_accepts_group_gender_preference() -> None:
+    request = AvailabilityRequest(
+        SHOP_ID,
+        BOOKING_DATE,
+        2,
+        60,
+        SERVICE_ID,
+        therapist_preference=TherapistPreference(TherapistPreferenceType.FEMALE),
+    )
+
+    assert request.therapist_preference == TherapistPreference(
+        TherapistPreferenceType.FEMALE
+    )
 
 
 def test_create_result_rejects_duplicate_reservation_codes() -> None:

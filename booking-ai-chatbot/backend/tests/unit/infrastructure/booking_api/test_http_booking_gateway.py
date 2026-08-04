@@ -14,6 +14,7 @@ import pytest
 from app.application.exceptions import SlotConflictError
 from app.application.ports.booking_gateway import (
     AvailabilityRequest,
+    AvailableTherapistRequest,
     BookingGateway,
     CourseSearchRequest,
     CreateBookingRequest,
@@ -190,6 +191,7 @@ def _create_payload(
     return {
         "data": {
             "booking_id": str(BOOKING_ID),
+            "booking_code": "KMB-20260720-ABCDEFGH",
             "shop_id": str(SHOP_ID),
             "shop_name": "Komorebi",
             "customer_id": "550e8400-e29b-41d4-a716-446655440301",
@@ -367,6 +369,47 @@ async def test_availability_sends_complete_none_preference_query_and_preserves_o
     timeout = request.extensions["timeout"]
     assert isinstance(timeout, dict)
     assert timeout["read"] == 2.5
+
+
+@pytest.mark.asyncio
+async def test_available_therapist_response_maps_name_and_uuid() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == f"/api/shops/{SHOP_ID}/available-therapists"
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "therapist_id": str(THERAPIST_ID),
+                        "shop_id": str(SHOP_ID),
+                        "name": "Nguyen Lan",
+                        "gender": "female",
+                        "available": True,
+                    }
+                ]
+            },
+        )
+
+    client, gateway = _gateway(handler)
+    try:
+        result = await gateway.search_available_therapists(
+            AvailableTherapistRequest(
+                shop_id=SHOP_ID,
+                booking_date=BOOKING_DATE,
+                start_time=time(10, 0),
+                end_time=time(11, 15),
+            )
+        )
+    finally:
+        await client.aclose()
+
+    assert result == [
+        TherapistPreference(
+            TherapistPreferenceType.PERSONAL,
+            therapist_id=str(THERAPIST_ID),
+            therapist_name="Nguyen Lan",
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -807,7 +850,8 @@ async def test_create_booking_sends_exact_payload_and_maps_child_reservations() 
     assert result.booking.addons[0].service_id == ADDON_COURSE_ID
     assert result.child_reservations[0].reservation_id == RESERVATION_IDS[0]
     assert result.child_reservations[0].participant_index == 1
-    assert result.reservation_code is None
+    assert result.reservation_code == "KMB-20260720-ABCDEFGH"
+    assert result.booking.reservation_code == "KMB-20260720-ABCDEFGH"
     assert result.reservation_codes == ()
 
 

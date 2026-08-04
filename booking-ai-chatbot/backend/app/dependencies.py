@@ -18,7 +18,7 @@ from app.application.handlers.confirm_phone_handler import ConfirmPhoneHandler
 from app.application.handlers.create_booking_handler import CreateBookingHandler
 from app.application.handlers.search_service_handler import SearchServiceHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
-from app.application.ports.booking_gateway import BookingGateway
+from app.application.ports.booking_gateway import BookingGateway, TherapistAvailabilityGateway
 from app.application.ports.knowledge_gateway import KnowledgeGateway
 from app.application.ports.llm_gateway import LLMGateway
 from app.core.config import Settings
@@ -195,6 +195,7 @@ async def create_application_container(
         entity_resolution_coordinator = EntityResolutionCoordinator(
             search_shop_handler=search_shop_handler,
             search_service_handler=search_service_handler,
+            booking_gateway=cast(TherapistAvailabilityGateway, booking_gateway),
         )
         configured_llm_gateway = llm_gateway or GeminiLLMGateway(
             client=client,

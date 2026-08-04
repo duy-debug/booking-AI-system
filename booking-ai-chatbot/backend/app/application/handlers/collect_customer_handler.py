@@ -54,7 +54,13 @@ class CollectCustomerHandler:
                 "Customer verification returned a different phone."
             )
 
-        context.customer = Customer(phone=normalized_phone, name=normalized_name)
+        authoritative_name = (
+            result.customer_name or normalized_name
+            if result.customer_id is not None
+            else normalized_name
+        )
+        context.customer_id = result.customer_id
+        context.customer = Customer(phone=normalized_phone, name=authoritative_name)
         if result.ng_list_checked:
             context.set_customer_verification(
                 member_rank=result.member_rank,

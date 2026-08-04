@@ -4,6 +4,7 @@ import logging
 import os
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import fields
+from datetime import datetime, timedelta
 from time import perf_counter
 from typing import Annotated, cast
 
@@ -13,6 +14,10 @@ from fastapi.responses import StreamingResponse
 from app.application.handlers.check_availability_handler import CheckAvailabilityHandler
 from app.application.handlers.search_service_handler import SearchServiceHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
+from app.application.ports.booking_gateway import (
+    AvailableTherapistRequest,
+    TherapistAvailabilityGateway,
+)
 from app.core.logging import (
     bind_conversation,
     bind_correlation_id,
@@ -42,7 +47,7 @@ from app.dialog.nlu import (
     NLUResult,
     to_dialog_turn_input,
 )
-from app.domain.booking import CourseType, Service, Shop
+from app.domain.booking import CourseType, Service, Shop, TherapistPreference
 from app.domain.booking_context import BookingContext, ServiceSelectionMode
 from app.domain.booking_state import BookingState
 from app.transport.schemas import ChatRequest, ChatResponse
@@ -73,6 +78,7 @@ _UNRESOLVED_TEXT = {
     BookingState.SELECTING_TIME: ("Vui lòng nhập giờ rõ ràng, ví dụ: 19:00 hoặc 7 giờ tối."),
     BookingState.SELECTING_THERAPIST: ("Bạn có thể chọn Nam, Nữ hoặc Không yêu cầu."),
     BookingState.COLLECTING_PHONE: "Vui lòng nhập số điện thoại hợp lệ.",
+    BookingState.COLLECTING_NAME: "Vui lòng nhập tên khách hàng.",
 }
 _AMBIGUOUS_TEXT = {
     NLUEntityKind.SHOP: ("Đã tìm thấy nhiều cửa hàng phù hợp. Vui lòng chọn một cửa hàng."),
@@ -663,6 +669,27 @@ async def _with_proactive_suggestions(
                 services,
                 course_type=course_type,
             )
+
+        if context.state is BookingState.SELECTING_THERAPIST and context.num_customer == 1:
+            therapists = await _available_therapists(container, context)
+            names = tuple(
+                item.therapist_name
+                for item in therapists[:8]
+                if item.therapist_name is not None
+            )
+            if names:
+                return DialogResponse(
+                    text=(
+                        "Kỹ thuật viên đang phù hợp với khung giờ đã chọn:\n"
+                        + "\n".join(f"{index}. {name}" for index, name in enumerate(names, 1))
+                        + "\nBạn có thể chọn theo tên, giới tính hoặc không yêu cầu."
+                    ),
+                    instruction_template=response.instruction_template,
+                    state=context.state,
+                    status=response.status,
+                    quick_replies=names + ("Không yêu cầu", "Nam", "Nữ"),
+                    metadata=response.metadata,
+                )
     except Exception as error:
         trace_log(
             logger,
@@ -673,6 +700,32 @@ async def _with_proactive_suggestions(
             error_code=type(error).__name__,
         )
     return response
+
+
+async def _available_therapists(
+    container: ApplicationContainer,
+    context: BookingContext,
+) -> list[TherapistPreference]:
+    if (
+        context.shop is None
+        or context.booking_date is None
+        or context.start_time is None
+        or context.total_duration_minutes is None
+    ):
+        return []
+    end_time = (
+        datetime.combine(context.booking_date, context.start_time)
+        + timedelta(minutes=context.total_duration_minutes)
+    ).time()
+    gateway = cast(TherapistAvailabilityGateway, container.booking_gateway)
+    return await gateway.search_available_therapists(
+        AvailableTherapistRequest(
+            shop_id=context.shop.shop_id,
+            booking_date=context.booking_date,
+            start_time=context.start_time,
+            end_time=end_time,
+        )
+    )
 
 
 def _log_instruction(response: DialogResponse) -> None:

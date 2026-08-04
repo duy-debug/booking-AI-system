@@ -36,7 +36,6 @@ from app.domain.exceptions import (
     CustomerVerificationRequiredError,
     InvalidBookingDataError,
     PhoneNotConfirmedError,
-    TherapistNotAllowedForGroupError,
 )
 
 SHOP_ID = UUID("11111111-1111-1111-1111-111111111111")
@@ -206,7 +205,7 @@ async def test_unready_context_never_calls_gateway(
 
 
 @pytest.mark.asyncio
-async def test_group_with_therapist_never_calls_gateway() -> None:
+async def test_group_with_gender_preference_reaches_gateway() -> None:
     context = make_context()
     context.num_customer = 2
     context.therapist_preference = TherapistPreference(
@@ -214,11 +213,14 @@ async def test_group_with_therapist_never_calls_gateway() -> None:
     )
     fake = FakeBookingGateway()
 
-    with pytest.raises(TherapistNotAllowedForGroupError):
-        await make_handler(fake).execute(context, "attempt-1")
+    await make_handler(fake).execute(context, "attempt-1")
 
-    assert fake.final_availability_requests == []
-    assert fake.create_booking_requests == []
+    assert fake.final_availability_requests[0].therapist_preference == TherapistPreference(
+        TherapistPreferenceType.FEMALE
+    )
+    assert fake.create_booking_requests[0].therapist_preference == TherapistPreference(
+        TherapistPreferenceType.FEMALE
+    )
 
 
 @pytest.mark.parametrize("key", ["", "   "])

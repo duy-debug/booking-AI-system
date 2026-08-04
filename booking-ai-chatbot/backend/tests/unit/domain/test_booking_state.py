@@ -14,6 +14,7 @@ EXPECTED_STATES = {
     BookingState.SELECTING_TIME: "selecting_time",
     BookingState.SELECTING_THERAPIST: "selecting_therapist",
     BookingState.COLLECTING_PHONE: "collecting_phone",
+    BookingState.COLLECTING_NAME: "collecting_name",
     BookingState.VERIFYING_PHONE: "verifying_phone",
     BookingState.AWAITING_CONFIRMATION: "awaiting_confirmation",
     BookingState.BOOKING_EXECUTING: "booking_executing",
@@ -43,7 +44,7 @@ def test_invalid_string_raises_value_error() -> None:
 
 
 def test_booking_state_has_expected_number_of_members() -> None:
-    assert len(BookingState) == 15
+    assert len(BookingState) == 16
 
 
 def test_booking_state_values_are_unique() -> None:

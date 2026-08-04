@@ -613,6 +613,16 @@ class DeterministicNLU:
                     "phone_candidate",
                 )
 
+        if state is BookingState.COLLECTING_NAME and text.strip():
+            return _resolved(
+                self._intent_policy,
+                state,
+                "provide_name",
+                {"name": text.strip()},
+                0.95,
+                "customer_name_state",
+            )
+
         return None
 
     def _parse_entity_for_state(
@@ -1149,6 +1159,16 @@ def _extract_therapist_result(
             kind=NLUEntityKind.THERAPIST,
             confidence=0.8,
             matched_rule="therapist_query_state",
+        )
+    if text:
+        return _entity_required(
+            policy,
+            state,
+            required_intent="select_therapist",
+            query=text,
+            kind=NLUEntityKind.THERAPIST,
+            confidence=0.8,
+            matched_rule="therapist_name_state",
         )
     return None
 

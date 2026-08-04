@@ -402,12 +402,23 @@ def test_changing_to_group_clears_therapist_time_and_slots() -> None:
         assert context.available_slots is None
 
 
-def test_group_rejects_new_therapist_preference() -> None:
+def test_group_accepts_gender_but_rejects_personal_therapist() -> None:
     context = BookingContext(conversation_id="conversation-1", num_customer=2)
+
+    context.set_therapist_preference(
+        TherapistPreference(TherapistPreferenceType.FEMALE)
+    )
+
+    assert context.therapist_preference == TherapistPreference(
+        TherapistPreferenceType.FEMALE
+    )
 
     with pytest.raises(TherapistNotAllowedForGroupError):
         context.set_therapist_preference(
-            TherapistPreference(TherapistPreferenceType.FEMALE)
+            TherapistPreference(
+                TherapistPreferenceType.PERSONAL,
+                therapist_name="Mai",
+            )
         )
 
 

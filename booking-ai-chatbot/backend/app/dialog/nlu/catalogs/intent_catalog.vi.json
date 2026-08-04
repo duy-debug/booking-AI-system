@@ -275,6 +275,19 @@
       "mutates_context": true
     },
     {
+      "intent": "provide_name",
+      "priority": 96,
+      "enabled": true,
+      "examples": ["Nguyễn Văn An"],
+      "exact_phrases": ["Nguyễn Văn An"],
+      "required_any_phrases": [],
+      "optional_phrases": [],
+      "excluded_phrases": [],
+      "allowed_states": ["collecting_name"],
+      "entity_hints": ["customer_name"],
+      "mutates_context": true
+    },
+    {
       "intent": "ask_why",
       "priority": 89,
       "enabled": true,

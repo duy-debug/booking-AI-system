@@ -346,7 +346,6 @@ def test_single_booking_accepts_personal_therapist() -> None:
     ("num_customer", "preference_type"),
     [
         (2, TherapistPreferenceType.PERSONAL),
-        (3, TherapistPreferenceType.FEMALE),
     ],
 )
 def test_group_booking_rejects_therapist_preference(
@@ -369,6 +368,14 @@ def test_booking_accepts_none_preference_for_group() -> None:
     preference = TherapistPreference(TherapistPreferenceType.NONE)
 
     booking = make_booking(num_customer=2, therapist_preference=preference)
+
+    assert booking.therapist_preference is preference
+
+
+def test_booking_accepts_gender_preference_for_group() -> None:
+    preference = TherapistPreference(TherapistPreferenceType.FEMALE)
+
+    booking = make_booking(num_customer=3, therapist_preference=preference)
 
     assert booking.therapist_preference is preference
 

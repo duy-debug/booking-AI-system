@@ -184,7 +184,7 @@ def test_time_slots_keep_pos_order_and_are_limited() -> None:
     assert response.metadata == {"available_slot_count": len(slots)}
 
 
-def test_group_therapist_renderer_does_not_offer_selection() -> None:
+def test_group_therapist_renderer_offers_gender_but_not_names() -> None:
     context = BookingContext("conversation-1", num_customer=2)
 
     response = InstructionBuilder().build_response(
@@ -192,8 +192,8 @@ def test_group_therapist_renderer_does_not_offer_selection() -> None:
         context=context,
     )
 
-    assert response.text == "Đặt nhóm sẽ không hỗ trợ chỉ định kỹ thuật viên."
-    assert response.quick_replies == ()
+    assert "không hỗ trợ chọn kỹ thuật viên theo tên" in response.text
+    assert response.quick_replies == ("Không yêu cầu", "Nam", "Nữ")
 
 
 def test_phone_readback_masks_phone_and_never_adds_it_to_metadata() -> None:

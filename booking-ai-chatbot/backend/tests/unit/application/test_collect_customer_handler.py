@@ -148,6 +148,46 @@ async def test_execute_normalizes_phone_and_stores_customer_verification() -> No
 
 
 @pytest.mark.asyncio
+async def test_existing_customer_uses_pos_name_while_new_customer_waits_for_name() -> None:
+    existing_context = BookingContext("existing", shop=SHOP)
+    existing = verification()
+    existing = CustomerVerificationResult(
+        phone=existing.phone,
+        customer_id=existing.customer_id,
+        member_rank=existing.member_rank,
+        visit_count=existing.visit_count,
+        ng_list_checked=existing.ng_list_checked,
+        is_ng_customer=existing.is_ng_customer,
+        customer_name="POS Customer",
+    )
+    await make_handler(FakeBookingGateway(existing)).execute(
+        existing_context,
+        existing.phone,
+    )
+
+    new_context = BookingContext("new", shop=SHOP)
+    new_customer = CustomerVerificationResult(
+        phone="0912345678",
+        customer_id=None,
+        member_rank=None,
+        visit_count=None,
+        ng_list_checked=True,
+        is_ng_customer=False,
+    )
+    await make_handler(FakeBookingGateway(new_customer)).execute(
+        new_context,
+        new_customer.phone,
+    )
+
+    assert existing_context.customer_id == "customer-1"
+    assert existing_context.customer is not None
+    assert existing_context.customer.name == "POS Customer"
+    assert new_context.customer_id is None
+    assert new_context.customer is not None
+    assert new_context.customer.name is None
+
+
+@pytest.mark.asyncio
 async def test_invalid_phone_does_not_call_gateway_or_mutate_context() -> None:
     context = BookingContext(
         conversation_id="conversation-1",

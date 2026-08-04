@@ -94,7 +94,7 @@ class BookingRules:
             context.num_customer >= 2
             and context.therapist_preference is not None
             and context.therapist_preference.preference_type
-            is not TherapistPreferenceType.NONE
+            is TherapistPreferenceType.PERSONAL
         ):
             raise TherapistNotAllowedForGroupError(
                 "Group bookings cannot specify a therapist preference."

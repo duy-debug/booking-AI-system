@@ -35,6 +35,7 @@ class Intent(StrEnum):
     SELECT_TIME = "select_time"
     SELECT_THERAPIST = "select_therapist"
     PROVIDE_PHONE = "provide_phone"
+    PROVIDE_NAME = "provide_name"
     CONFIRM = "confirm"
     DENY = "deny"
     CHANGE_INFO = "change_info"
