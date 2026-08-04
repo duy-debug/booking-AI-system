@@ -280,6 +280,17 @@ def test_reset_preserves_conversation_id() -> None:
     assert context.conversation_id == "conversation-1"
 
 
+def test_turn_sequence_increments_and_survives_booking_reset() -> None:
+    context = BookingContext(conversation_id="conversation-1")
+
+    assert context.begin_turn() == 1
+    assert context.begin_turn() == 2
+
+    context.reset()
+
+    assert context.turn_sequence == 2
+
+
 def test_context_data_is_mutable() -> None:
     context = BookingContext(conversation_id="conversation-1")
 

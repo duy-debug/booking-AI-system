@@ -3,6 +3,7 @@
 import logging
 import os
 from collections.abc import AsyncIterator, Mapping
+from dataclasses import fields
 from time import perf_counter
 from typing import Annotated, cast
 
@@ -15,9 +16,11 @@ from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.core.logging import (
     bind_conversation,
     bind_correlation_id,
+    bind_turn,
     elapsed_ms,
     reset_conversation,
     reset_correlation_id,
+    reset_turn,
     trace_log,
 )
 from app.dependencies import (
@@ -222,10 +225,19 @@ async def _process_chat_message(
     correlation_token = bind_correlation_id(correlation_id)
     started_at = perf_counter()
     context = await container.conversation_context_store.get_or_create(request.conversation_id)
+    turn_token = bind_turn(context.begin_turn())
+    context_before = _context_snapshot(context)
     initial_state = context.state
     trace_log(logger, logging.INFO, "Turn", "started", state=initial_state.value)
     if _local_debug_enabled("LOG_RAW_CHAT_MESSAGES"):
-        trace_log(logger, logging.DEBUG, "Turn", "message", raw_message=request.message)
+        trace_log(
+            logger,
+            logging.DEBUG,
+            "Turn",
+            "user_message",
+            function="_process_chat_message",
+            user_message=request.message[:500],
+        )
     try:
         response = await _process_bound_chat_message(
             request=request,
@@ -233,6 +245,26 @@ async def _process_chat_message(
             context=context,
         )
         _log_instruction(response)
+        _trace_context_diff(context_before, context)
+        trace_log(
+            logger,
+            logging.INFO,
+            "Response",
+            "prepared",
+            state=response.state.value,
+            status=response.status.value,
+            quick_reply_count=len(response.quick_replies),
+            instruction_template=response.instruction_template or "none",
+        )
+        if _local_debug_enabled("LOG_RAW_CHAT_RESPONSES"):
+            trace_log(
+                logger,
+                logging.DEBUG,
+                "Response",
+                "assistant_message",
+                function="_process_chat_message",
+                assistant_message=response.text[:1000],
+            )
         trace_log(
             logger,
             logging.INFO,
@@ -255,6 +287,7 @@ async def _process_chat_message(
         )
         raise
     finally:
+        reset_turn(turn_token)
         reset_correlation_id(correlation_token)
         reset_conversation(token)
 
@@ -277,6 +310,7 @@ async def _process_bound_chat_message(
         state=context.state,
     )
     resolver = "deterministic"
+    used_llm_fallback = False
 
     if context.state in {
         BookingState.COMPLETED,
@@ -290,6 +324,7 @@ async def _process_bound_chat_message(
             state=context.state,
         )
         resolver = "llm"
+        used_llm_fallback = True
 
     trace_log(
         logger,
@@ -299,9 +334,16 @@ async def _process_bound_chat_message(
         intent=nlu_result.intent or "unresolved",
         resolver=resolver,
         entity=nlu_result.entity_kind.value if nlu_result.entity_kind else "none",
+        function="parse",
+        input_summary=f"state={context.state.value}, chars={len(request.message)}",
+        output_summary=(
+            f"status={nlu_result.resolution_status.value}, rule={nlu_result.matched_rule or 'none'}"
+        ),
+        status=nlu_result.resolution_status.value,
     )
 
     if nlu_result.intent in {"greeting", "thanks", "ask_why", "repeat_last_question"}:
+        _trace_route("global_intent", "global_intent", nlu_result, context)
         if (
             nlu_result.intent == "repeat_last_question"
             and context.last_failure_code in {"slot_api_error", "no_slots_available"}
@@ -310,6 +352,7 @@ async def _process_bound_chat_message(
         return _global_intent_response(nlu_result.intent, context)
 
     if nlu_result.intent == "restart_booking":
+        _trace_route("restart", "deterministic_match", nlu_result, context)
         context.reset()
         context.state = BookingState.SELECTING_SHOP
         response = _global_intent_response("restart_booking", context)
@@ -319,9 +362,11 @@ async def _process_bound_chat_message(
             context=context,
         )
         await container.conversation_context_store.save(request.conversation_id, context)
+        _trace_context_saved(context)
         return response
 
     if nlu_result.intent in _DISCOVERY_INTENTS:
+        _trace_route("discovery", "deterministic_match", nlu_result, context)
         response = await _handle_discovery(
             nlu_result=nlu_result,
             container=container,
@@ -331,9 +376,16 @@ async def _process_bound_chat_message(
             request.conversation_id,
             context,
         )
+        _trace_context_saved(context)
         return response
 
     if nlu_result.intent == "ask_question":
+        _trace_route(
+            "faq",
+            "llm_fallback" if used_llm_fallback else "deterministic_match",
+            nlu_result,
+            context,
+        )
         faq_turn = to_dialog_turn_input(
             nlu_result,
             state=context.state,
@@ -359,12 +411,17 @@ async def _process_bound_chat_message(
         return response
 
     if nlu_result.resolution_status is NLUResolutionStatus.UNRESOLVED:
+        _trace_route("unresolved_recovery", "unresolved_recovery", nlu_result, context)
         return _handled_response(
             context,
             _UNRESOLVED_TEXT.get(context.state, _DEFAULT_UNRESOLVED_TEXT),
         )
 
     if nlu_result.resolution_status is NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED:
+        _trace_route("entity_resolution", "state_expected_entity", nlu_result, context)
+        entity_kind = nlu_result.entity_kind
+        assert entity_kind is not None
+        resolution_started = perf_counter()
         resolution = await container.entity_resolution_coordinator.resolve(
             nlu_result=nlu_result,
             state=context.state,
@@ -372,13 +429,30 @@ async def _process_bound_chat_message(
         )
         trace_log(
             logger,
-            logging.DEBUG,
-            "NLU",
-            "entity_resolution",
+            logging.INFO,
+            "EntityResolver",
+            "completed",
             entity=resolution.entity_kind.value,
             resolution_status=resolution.status.value,
             candidate_count=len(resolution.candidates),
+            function="resolve",
+            input_summary=f"state={context.state.value}, entity={entity_kind.value}",
+            output_summary=f"matched={_matched_display_name(resolution)}",
+            search_scope=context.state.value,
+            error_code=resolution.failure_code or "none",
+            duration_ms=elapsed_ms(resolution_started),
         )
+        if _local_debug_enabled("LOG_RAW_CHAT_MESSAGES"):
+            trace_log(
+                logger,
+                logging.DEBUG,
+                "EntityResolver",
+                "query",
+                function="resolve",
+                query=request.message[:500],
+                entity_type=entity_kind.value,
+                search_scope=context.state.value,
+            )
         if resolution.status is not EntityResolutionStatus.RESOLVED:
             return await _entity_response(context, resolution, container)
         turn = entity_resolution_to_dialog_turn_input(
@@ -388,6 +462,12 @@ async def _process_bound_chat_message(
             idempotency_key=request.idempotency_key,
         )
     else:
+        _trace_route(
+            "dialog",
+            "llm_fallback" if used_llm_fallback else "deterministic_match",
+            nlu_result,
+            context,
+        )
         turn = to_dialog_turn_input(
             nlu_result,
             state=context.state,
@@ -396,6 +476,15 @@ async def _process_bound_chat_message(
             raw_message=request.message,
         )
 
+    trace_log(
+        logger,
+        logging.INFO,
+        "DialogCtrl",
+        "dispatch",
+        intent=turn.intent,
+        state=context.state.value,
+    )
+    controller_started = perf_counter()
     result = await container.dialog_controller.handle_turn(context, turn)
     trace_log(
         logger,
@@ -406,6 +495,14 @@ async def _process_bound_chat_message(
         to_state=result.final_state.value,
         intent=result.intent,
         status=result.status.value,
+        function="handle_turn",
+        input_summary=(
+            f"intent={turn.intent}, "
+            f"payload_keys={','.join(sorted(turn.payload)) or 'none'}"
+        ),
+        output_summary=f"actions={','.join(result.executed_actions) or 'none'}",
+        error_code=result.failure_code or "none",
+        duration_ms=elapsed_ms(controller_started),
     )
     trace_log(
         logger,
@@ -415,9 +512,17 @@ async def _process_bound_chat_message(
         from_state=result.initial_state.value,
         to_state=result.final_state.value,
     )
-    for action in result.executed_actions:
-        trace_log(logger, logging.INFO, "ToolBridge", "action", action=action)
-        trace_log(logger, logging.INFO, "Handler", "called", action=action)
+    if result.executed_actions:
+        trace_log(
+            logger,
+            logging.INFO,
+            "ToolBridge",
+            "completed",
+            function="execute_actions",
+            input_summary=f"action_count={len(result.executed_actions)}",
+            output_summary=",".join(result.executed_actions),
+            status=result.status.value,
+        )
     if result.failure_code is not None:
         trace_log(
             logger,
@@ -442,7 +547,80 @@ async def _process_bound_chat_message(
             request.conversation_id,
             context,
         )
+        _trace_context_saved(context)
     return response
+
+
+def _trace_route(
+    route: str,
+    reason: str,
+    result: NLUResult,
+    context: BookingContext,
+) -> None:
+    trace_log(
+        logger,
+        logging.INFO,
+        "Router",
+        "dispatch",
+        route=route,
+        reason=reason,
+        intent=result.intent or "unresolved",
+        state=context.state.value,
+    )
+
+
+def _context_snapshot(context: BookingContext) -> dict[str, object]:
+    return {
+        item.name: getattr(context, item.name)
+        for item in fields(context)
+        if item.name not in {"conversation_id", "turn_sequence"}
+    }
+
+
+def _trace_context_diff(before: Mapping[str, object], context: BookingContext) -> None:
+    after = _context_snapshot(context)
+    changed = sorted(name for name, value in after.items() if value != before[name])
+    cleared = sorted(
+        name for name in changed if before[name] is not None and after[name] is None
+    )
+    preserved = sorted(
+        name
+        for name, value in after.items()
+        if _is_meaningful_context_value(value) and value == before[name]
+    )
+    trace_log(
+        logger,
+        logging.INFO,
+        "DialogCtrl",
+        "context_diff",
+        function="handle_turn",
+        fields_changed=changed,
+        fields_preserved=preserved,
+        fields_cleared=cleared,
+        status="changed" if changed else "unchanged",
+    )
+
+
+def _is_meaningful_context_value(value: object) -> bool:
+    return value is not None and value is not False and value != () and value != "none"
+
+
+def _matched_display_name(resolution: EntityResolutionResult) -> str:
+    for value in resolution.dispatch_payload.values():
+        display_name = getattr(value, "name", None)
+        if isinstance(display_name, str):
+            return display_name
+    return "none"
+
+
+def _trace_context_saved(context: BookingContext) -> None:
+    trace_log(
+        logger,
+        logging.DEBUG,
+        "Context",
+        "saved",
+        state=context.state.value,
+    )
 
 
 async def _with_proactive_suggestions(

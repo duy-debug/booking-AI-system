@@ -58,3 +58,4 @@ class Settings:
     log_backup_count: int = 5
     log_full_instructions: bool = False
     log_raw_chat_messages: bool = False
+    log_raw_chat_responses: bool = False

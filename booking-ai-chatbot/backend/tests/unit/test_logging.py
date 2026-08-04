@@ -15,9 +15,11 @@ import pytest
 from app.core.logging import (
     JsonFormatter,
     bind_conversation,
+    bind_turn,
     configure_logging,
     mask_conversation_id,
     reset_conversation,
+    reset_turn,
     trace_log,
 )
 
@@ -162,6 +164,36 @@ def test_console_trace_redacts_phone_authorization_and_idempotency(
     assert "full-idempotency-key" not in output
     assert "[conv:" in output
     assert "[Turn] started" in output
+
+
+def test_console_trace_includes_bound_turn_sequence(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    configure_logging(level="INFO", log_format="console")
+    conversation_token = bind_conversation("conversation-a")
+    turn_token = bind_turn(3)
+    try:
+        trace_log(logging.getLogger("app.trace"), logging.INFO, "NLU", "resolved")
+    finally:
+        reset_turn(turn_token)
+        reset_conversation(conversation_token)
+
+    output = capsys.readouterr().out
+    assert "[NLU #3] resolved" in output
+
+
+def test_redaction_masks_phone_but_preserves_uuid(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    configure_logging(level="INFO", log_format="console")
+    logging.getLogger("app.trace").info(
+        "phone=0901234567 shop_id=11111111-1111-1111-1111-111111111111"
+    )
+
+    output = capsys.readouterr().out
+    assert "0901234567" not in output
+    assert "[REDACTED_PHONE]" in output
+    assert "11111111-1111-1111-1111-111111111111" in output
 
 
 def test_console_redaction_preserves_iso_timestamp(

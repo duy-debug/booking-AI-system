@@ -58,6 +58,7 @@ _log_max_bytes = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))
 _log_backup_count = int(os.getenv("LOG_BACKUP_COUNT", "5"))
 _log_full_instructions = _environment_bool("LOG_FULL_INSTRUCTIONS")
 _log_raw_chat_messages = _environment_bool("LOG_RAW_CHAT_MESSAGES")
+_log_raw_chat_responses = _environment_bool("LOG_RAW_CHAT_RESPONSES")
 
 configure_logging(
     level=_log_level,
@@ -100,5 +101,6 @@ app = create_app(
         log_backup_count=_log_backup_count,
         log_full_instructions=_log_full_instructions,
         log_raw_chat_messages=_log_raw_chat_messages,
+        log_raw_chat_responses=_log_raw_chat_responses,
     )
 )

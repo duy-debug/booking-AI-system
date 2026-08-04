@@ -15,7 +15,11 @@ from time import perf_counter
 _CONSOLE_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 _VALID_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 _VALID_FORMATS = {"console", "json"}
-_PHONE_PATTERN = re.compile(r"(?<![\d-])(?!\d{4}-\d{2}-\d{2})\+?\d(?:[ -]?\d){8,14}(?!\d)")
+_PHONE_PATTERN = re.compile(
+    r"(?<![\d-])"
+    r"(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+    r"(?!\d{4}-\d{2}-\d{2})\+?\d(?:[ -]?\d){8,14}(?!\d)"
+)
 _BEARER_PATTERN = re.compile(r"(?i)\bBearer\s+[^\s,;]+")
 _SECRET_ASSIGNMENT_PATTERN = re.compile(
     r"(?i)\b(api[_-]?key|authorization|idempotency[_-]?key|password|secret|token)"
@@ -44,6 +48,7 @@ _RESERVED_RECORD_FIELDS = frozenset(std_logging.LogRecord("", 0, "", 0, "", (), 
 }
 _conversation_marker: ContextVar[str] = ContextVar("conversation_marker", default="-")
 _correlation_marker: ContextVar[str] = ContextVar("correlation_marker", default="-")
+_turn_marker: ContextVar[int | None] = ContextVar("turn_marker", default=None)
 
 
 class SafeConsoleFormatter(std_logging.Formatter):
@@ -68,6 +73,18 @@ def reset_conversation(token: Token[str]) -> None:
     _conversation_marker.reset(token)
 
 
+def bind_turn(turn_sequence: int) -> Token[int | None]:
+    """Bind a positive conversation-local turn number for nested trace logs."""
+    if type(turn_sequence) is not int or turn_sequence < 1:
+        raise ValueError("Turn sequence must be a positive integer.")
+    return _turn_marker.set(turn_sequence)
+
+
+def reset_turn(token: Token[int | None]) -> None:
+    """Restore the prior turn logging context."""
+    _turn_marker.reset(token)
+
+
 def bind_correlation_id(correlation_id: str | None) -> Token[str]:
     """Bind a safe correlation marker supplied by the current transport."""
     marker = mask_conversation_id(correlation_id) if correlation_id else "-"
@@ -89,9 +106,11 @@ def trace_log(
     """Write one safe component trace with structured fields."""
     marker = _conversation_marker.get()
     correlation = _correlation_marker.get()
+    turn = _turn_marker.get()
     safe_fields = {key: _sanitize_value(key, value) for key, value in fields.items()}
     details = " ".join(f"{key}={value}" for key, value in safe_fields.items())
-    message = f"[conv:{marker}] [{component}] {event}"
+    component_marker = f"{component} #{turn}" if turn is not None else component
+    message = f"[conv:{marker}] [{component_marker}] {event}"
     if details:
         message = f"{message} {details}"
     if correlation != "-":
@@ -104,6 +123,7 @@ def trace_log(
             "correlation": correlation,
             "component": component,
             "event": event,
+            "turn_sequence": turn,
             **safe_fields,
         },
     )

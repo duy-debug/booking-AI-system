@@ -1,11 +1,13 @@
 """Registry and sequential executor for declarative dialog actions."""
 
+import logging
 import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, fields
 from datetime import date, time
 from functools import partial
+from time import perf_counter
 from typing import Protocol, TypeAlias, TypeVar
 
 from app.application.exceptions import (
@@ -20,6 +22,7 @@ from app.application.handlers.collect_customer_handler import CollectCustomerHan
 from app.application.handlers.confirm_phone_handler import ConfirmPhoneHandler
 from app.application.handlers.create_booking_handler import CreateBookingHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
+from app.core.logging import elapsed_ms, trace_log
 from app.dialog.flow_loader import (
     FlowFailure,
     InvalidFlowConditionError,
@@ -457,6 +460,22 @@ class ToolBridge:
         action: ActionCallable,
         context: ActionExecutionContext,
     ) -> ActionResult:
+        started_at = perf_counter()
+        function_name = getattr(action, "__name__", type(action).__name__)
+        trace_log(
+            logging.getLogger(__name__),
+            logging.DEBUG,
+            "Handler",
+            "started",
+            function=function_name,
+            action=action_name,
+            input_summary={
+                "intent": context.intent,
+                "payload_keys": sorted(context.payload),
+                "state": context.booking_context.state.value,
+            },
+            status="started",
+        )
         try:
             result = await action(context)
             if not isinstance(result, ActionResult):
@@ -469,8 +488,34 @@ class ToolBridge:
                     f"Action '{action_name}' returned result for "
                     f"'{result.action_name}'."
                 )
+            trace_log(
+                logging.getLogger(__name__),
+                logging.INFO,
+                "Handler",
+                "completed",
+                function=function_name,
+                action=action_name,
+                output_summary=(
+                    type(result.output).__name__
+                    if result.output is not None
+                    else "none"
+                ),
+                status="success",
+                duration_ms=elapsed_ms(started_at),
+            )
             return result
         except Exception as error:
+            trace_log(
+                logging.getLogger(__name__),
+                logging.WARNING,
+                "Handler",
+                "failed",
+                function=function_name,
+                action=action_name,
+                status="failure",
+                error_code=type(error).__name__,
+                duration_ms=elapsed_ms(started_at),
+            )
             raise ActionExecutionError(action_name, (), error) from error
 
     @staticmethod

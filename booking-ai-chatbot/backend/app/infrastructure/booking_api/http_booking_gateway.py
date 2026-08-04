@@ -242,6 +242,18 @@ class HTTPBookingGateway:
     ) -> object:
         url = f"{self._base_url}{path}"
         started_at = perf_counter()
+        trace_log(
+            logging.getLogger(__name__),
+            logging.DEBUG,
+            "POS",
+            "request",
+            operation=operation,
+            function="_request_json",
+            method=method,
+            endpoint=operation,
+            input_summary={"params": params or {}, "body_keys": sorted(json_body or {})},
+            status="started",
+        )
         try:
             if self._timeout_seconds is None:
                 response = await self._client.request(

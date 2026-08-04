@@ -1,6 +1,6 @@
 """Temporary booking data collected during a conversation."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, time
 from enum import StrEnum
 from uuid import UUID
@@ -39,6 +39,7 @@ class BookingContext:
 
     conversation_id: str
     state: BookingState = BookingState.IDLE
+    turn_sequence: int = field(default=0, compare=False)
     shop: Shop | None = None
     suggested_shops: tuple[Shop, ...] = ()
     suggested_shops_loaded: bool = False
@@ -108,6 +109,11 @@ class BookingContext:
             and self.therapist_preference.preference_type
             is not TherapistPreferenceType.NONE
         )
+
+    def begin_turn(self) -> int:
+        """Advance and return the conversation-local trace sequence."""
+        self.turn_sequence += 1
+        return self.turn_sequence
 
     @property
     def course_selection(self) -> CourseSelection | None:
@@ -386,6 +392,7 @@ class BookingContext:
 
     def reset(self) -> None:
         """Clear temporary booking data while preserving the conversation ID."""
+        turn_sequence = self.turn_sequence
         self.state = BookingState.IDLE
         self.shop = None
         self.service = None
@@ -413,3 +420,4 @@ class BookingContext:
         self.pending_action = None
         self.service_selection_mode = ServiceSelectionMode.NONE
         self.last_failure_code = None
+        self.turn_sequence = turn_sequence

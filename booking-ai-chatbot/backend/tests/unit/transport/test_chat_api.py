@@ -129,6 +129,26 @@ class FailedChangeController(FakeController):
         )
 
 
+class StateChangingController(FakeController):
+    async def handle_turn(
+        self,
+        context: BookingContext,
+        turn: DialogTurnInput,
+    ) -> DialogTurnResult:
+        self.calls.append((context, turn))
+        initial_state = context.state
+        context.state = BookingState.SELECTING_SHOP
+        return DialogTurnResult(
+            status=DialogTurnStatus.SUCCESS,
+            initial_state=initial_state,
+            final_state=context.state,
+            intent=turn.intent,
+            instruction_template="greeting",
+            executed_actions=(),
+            auto_transition_count=0,
+        )
+
+
 class FakeBuilder:
     def __init__(self) -> None:
         self.calls: list[tuple[DialogTurnResult, BookingContext]] = []
@@ -344,16 +364,97 @@ async def test_turn_trace_logs_lifecycle_intent_transition_without_raw_content(
         )
 
     output = caplog.text
-    assert "[Turn] started" in output
-    assert "[Turn] completed" in output
-    assert "[NLU] resolved intent=start_booking resolver=deterministic" in output
-    assert "[DialogCtrl] transition" in output
-    assert "[StateMachine] transition" in output
+    assert "[Turn #1] started" in output
+    assert "[Turn #1] completed" in output
+    assert "[NLU #1] resolved intent=start_booking resolver=deterministic" in output
+    assert "[Router #1] dispatch route=dialog" in output
+    assert "[DialogCtrl #1] dispatch" in output
+    assert "[DialogCtrl #1] transition" in output
+    assert "[StateMachine #1] transition" in output
+    assert "[Response #1] prepared" in output
     assert "instruction_template=greeting" in output
     assert "private-conversation-id" not in output
     assert "private raw user message" not in output
     assert "0901234567" not in output
     assert "Safe response" not in output
+
+
+@pytest.mark.asyncio
+async def test_turn_trace_sequence_increments_for_same_conversation(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    context = BookingContext("conversation-a")
+    fake = FakeContainer(context=context, nlu_result=resolved_nlu())
+
+    with caplog.at_level(logging.INFO, logger="app.transport.chat_api"):
+        await _process_chat_message(request=request(), container=as_container(fake))
+        await _process_chat_message(request=request(), container=as_container(fake))
+
+    assert "[Turn #1] started" in caplog.text
+    assert "[Turn #2] started" in caplog.text
+    assert context.turn_sequence == 2
+
+
+@pytest.mark.asyncio
+async def test_local_raw_turn_text_flags_log_truncated_user_and_assistant(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.setenv("LOG_RAW_CHAT_MESSAGES", "true")
+    monkeypatch.setenv("LOG_RAW_CHAT_RESPONSES", "true")
+    fake = FakeContainer(
+        context=BookingContext("conversation-a"),
+        nlu_result=resolved_nlu(),
+    )
+    fake.dialog_controller = StateChangingController()
+    raw_message = "u" * 510
+
+    with caplog.at_level(logging.DEBUG, logger="app.transport.chat_api"):
+        await _process_chat_message(
+            request=ChatRequest(conversation_id="conversation-a", message=raw_message),
+            container=as_container(fake),
+            correlation_id="request-correlation-a",
+        )
+
+    assert f"user_message={'u' * 500}" in caplog.text
+    assert "u" * 501 not in caplog.text
+    assert "assistant_message=Safe response" in caplog.text
+    assert "[DialogCtrl #1] context_diff" in caplog.text
+    assert "fields_changed=['state']" in caplog.text
+    assert caplog.text.count("correlation=") > 3
+    correlations = {
+        getattr(record, "correlation", None)
+        for record in caplog.records
+        if getattr(record, "component", None)
+    }
+    assert len(correlations) == 1
+
+
+@pytest.mark.asyncio
+async def test_production_never_logs_raw_turn_text_when_flags_are_true(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("LOG_RAW_CHAT_MESSAGES", "true")
+    monkeypatch.setenv("LOG_RAW_CHAT_RESPONSES", "true")
+    fake = FakeContainer(
+        context=BookingContext("conversation-a"),
+        nlu_result=resolved_nlu(),
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="app.transport.chat_api"):
+        await _process_chat_message(
+            request=ChatRequest(
+                conversation_id="conversation-a",
+                message="production private message",
+            ),
+            container=as_container(fake),
+        )
+
+    assert "production private message" not in caplog.text
+    assert "Safe response" not in caplog.text
 
 
 @pytest.mark.asyncio

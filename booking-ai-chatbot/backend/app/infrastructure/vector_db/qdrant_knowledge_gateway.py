@@ -63,6 +63,17 @@ class QdrantKnowledgeGateway:
         if type(limit) is not int or limit <= 0:
             raise ValueError("Knowledge result limit must be a positive integer.")
         started_at = perf_counter()
+        trace_log(
+            logging.getLogger(__name__),
+            logging.DEBUG,
+            "Knowledge",
+            "request",
+            operation="qdrant_search",
+            function="search",
+            collection=self._collection_name,
+            input_summary={"query_length": len(query), "limit": limit},
+            status="started",
+        )
         try:
             documents = await asyncio.to_thread(self._search_sync, query, limit)
         except ApiException as error:

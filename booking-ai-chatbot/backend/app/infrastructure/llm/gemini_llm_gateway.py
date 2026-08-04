@@ -44,6 +44,22 @@ class GeminiLLMGateway:
     ) -> LLMResponse:
         """Return one provider response without retry or failover."""
         started_at = perf_counter()
+        trace_log(
+            _LOGGER,
+            logging.DEBUG,
+            "LLMUsage",
+            "request",
+            provider="gemini",
+            model=self._model,
+            operation="chat_completion",
+            function="complete",
+            input_summary={
+                "message_count": len(messages),
+                "character_count": sum(len(message.content) for message in messages),
+                "tools_enabled": tools is not None,
+            },
+            status="started",
+        )
         if self._api_key is None:
             self._log_failure("gemini_not_configured", started_at)
             raise LLMGatewayUnavailableError("Gemini is not configured.")
