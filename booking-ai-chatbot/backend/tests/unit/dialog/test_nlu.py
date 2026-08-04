@@ -596,6 +596,22 @@ def test_booking_request_and_question_use_real_flow_intents(
     assert question.payload == {"query": "Giá bao nhiêu?"}
 
 
+def test_start_booking_preserves_date_and_time_for_later_workflow_steps(
+    nlu: DeterministicNLU,
+) -> None:
+    result = nlu.parse(
+        text="Tôi muốn đặt booking ngày mai vào lúc 7:00 nhé",
+        state=BookingState.IDLE,
+    )
+
+    assert result.intent == "start_booking"
+    assert result.payload == {
+        "booking_date": date(2026, 8, 2),
+        "start_time": time(7, 0),
+    }
+    assert result.has_unconsumed_entities is True
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -683,6 +699,33 @@ def test_social_intents_are_catalog_resolved(
 
     assert result.intent == intent
     assert result.source is NLUSource.DETERMINISTIC
+    assert result.resolution_status is NLUResolutionStatus.RESOLVED
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_intent"),
+    [
+        ("xin chào", "greeting"),
+        ("chào bạn", "greeting"),
+        ("hello", "greeting"),
+        ("hi Kori", "greeting"),
+        ("alo", "greeting"),
+        ("tôi muốn đặt lịch", "start_booking"),
+        ("tôi muốn đặt booking", "start_booking"),
+        ("book lịch giúp tôi", "start_booking"),
+        ("tôi muốn đặt chỗ", "start_booking"),
+        ("đặt hẹn cho tôi", "start_booking"),
+        ("tôi muốn đi massage", "start_booking"),
+    ],
+)
+def test_documented_idle_acceptance_phrases_are_deterministic(
+    nlu: DeterministicNLU,
+    text: str,
+    expected_intent: str,
+) -> None:
+    result = nlu.parse(text=text, state=BookingState.IDLE)
+
+    assert result.intent == expected_intent
     assert result.resolution_status is NLUResolutionStatus.RESOLVED
 
 

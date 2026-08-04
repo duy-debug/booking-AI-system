@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import Mapping
+from datetime import time
 from typing import cast
 from uuid import UUID
 
@@ -670,6 +671,56 @@ async def test_unresolved_branch_is_state_aware_and_does_not_dispatch(
     assert fake.entity_resolution_coordinator.calls == []
     assert fake.dialog_controller.calls == []
     assert fake.conversation_context_store.saved == []
+
+
+@pytest.mark.parametrize(
+    ("state", "expected_replies"),
+    [
+        (BookingState.IDLE, ("Tôi muốn đặt lịch", "Xem danh sách cửa hàng")),
+        (BookingState.SELECTING_DATE, ("Hôm nay", "Ngày mai")),
+        (BookingState.SELECTING_PEOPLE, ("1 người", "2 người", "3 người")),
+        (
+            BookingState.SELECTING_DURATION,
+            ("45 phút", "60 phút", "90 phút"),
+        ),
+        (
+            BookingState.VERIFYING_PHONE,
+            ("Xác nhận", "Nhập lại"),
+        ),
+        (
+            BookingState.AWAITING_CONFIRMATION,
+            ("Xác nhận", "Chỉnh sửa", "Hủy"),
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_unresolved_booking_input_suggests_valid_next_actions(
+    state: BookingState,
+    expected_replies: tuple[str, ...],
+) -> None:
+    fake = FakeContainer(
+        context=BookingContext("conversation-a", state=state),
+        nlu_result=unresolved_nlu(),
+    )
+
+    response = await _process_chat_message(request=request(), container=as_container(fake))
+
+    assert response.quick_replies == expected_replies
+    assert response.state is state
+
+
+@pytest.mark.asyncio
+async def test_unresolved_time_only_suggests_latest_validated_slots() -> None:
+    context = BookingContext(
+        "conversation-a",
+        state=BookingState.SELECTING_TIME,
+        available_slots=(time(9, 0), time(10, 30)),
+    )
+    fake = FakeContainer(context=context, nlu_result=unresolved_nlu())
+
+    response = await _process_chat_message(request=request(), container=as_container(fake))
+
+    assert response.quick_replies == ("09:00", "10:30")
 
 
 @pytest.mark.asyncio

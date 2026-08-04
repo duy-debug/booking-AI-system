@@ -277,6 +277,8 @@ số của tôi là 0912345678
 - Chuẩn hóa số điện thoại.
 - Không hiển thị số đầy đủ trong log.
 - Chuyển sang bước xác nhận số điện thoại.
+- Nếu POS nhận diện khách hàng cũ, không hỏi lại tên.
+- Nếu số điện thoại chưa có khách hàng, yêu cầu nhập tên trước khi xác nhận số.
 
 ### Số không hợp lệ
 
@@ -290,6 +292,21 @@ abcdefgh
 
 - Không cập nhật context.
 - Yêu cầu nhập lại số hợp lệ.
+
+---
+
+### Tên khách hàng mới
+
+```text
+Nguyễn Văn An
+tên tôi là Nguyễn Văn An
+```
+
+**Kỳ vọng:**
+
+- Chỉ hỏi tên khi số điện thoại chưa tồn tại trong POS.
+- Không hỏi lại tên đối với khách hàng cũ.
+- Sau khi nhận tên hợp lệ, chuyển sang xác nhận số điện thoại.
 
 ---
 
@@ -457,6 +474,7 @@ cho tôi xem giờ trống
 tôi chọn [GIỜ]
 không cần chỉ định therapist
 0901234567
+[TÊN KHÁCH HÀNG nếu là khách mới]
 đúng rồi
 xác nhận đặt lịch
 ```
@@ -469,6 +487,7 @@ xác nhận đặt lịch
 - POS create đúng một lần.
 - Không duplicate assistant message.
 - Không hiển thị UUID nội bộ.
+- Hiển thị mã booking do POS trả về khi tạo thành công.
 
 ---
 
@@ -483,6 +502,7 @@ ngày mai
 [TÊN LIỆU TRÌNH]
 [GIỜ]
 0901234567
+[TÊN KHÁCH HÀNG nếu là khách mới]
 đúng rồi
 xác nhận
 ```

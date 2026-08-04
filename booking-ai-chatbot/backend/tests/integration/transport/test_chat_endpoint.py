@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Iterator
-from datetime import date, time
+from datetime import date, time, timedelta
 from decimal import Decimal
 from typing import cast
 from uuid import UUID
@@ -435,6 +435,46 @@ def test_json_happy_path_reaches_people_without_preload_calls(
     assert context.booking_date == date(2099, 8, 15)
     assert search.calls == [None]
     assert resolver.calls == 1
+    assert outbound_requests == []
+
+
+def test_booking_request_prefills_date_and_skips_redundant_date_question(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+
+    started = post_message(
+        client,
+        conversation_id="conversation-prefilled",
+        message="Tôi muốn đặt booking ngày mai vào lúc 7:00 nhé",
+    )
+    container.entity_resolution_coordinator = cast(
+        EntityResolutionCoordinator,
+        StaticResolver(
+            EntityResolutionResult(
+                status=EntityResolutionStatus.RESOLVED,
+                entity_kind=NLUEntityKind.SHOP,
+                dispatch_intent="select_store",
+                dispatch_payload={"shop": SHOP},
+                matched_count=1,
+            )
+        ),
+    )
+    selected_shop = post_message(
+        client,
+        conversation_id="conversation-prefilled",
+        message="Shibuya",
+    )
+    context = container.memory_cache._contexts["conversation-prefilled"]
+
+    assert started.json()["state"] == "selecting_shop"
+    assert selected_shop.json()["state"] == "selecting_people"
+    assert selected_shop.json()["quick_replies"] == ["1 người", "2 người", "3 người"]
+    assert context.booking_date == date.today() + timedelta(days=1)
+    assert context.requested_booking_date is None
+    assert context.requested_start_time == time(7, 0)
+    assert context.start_time is None
     assert outbound_requests == []
 
 

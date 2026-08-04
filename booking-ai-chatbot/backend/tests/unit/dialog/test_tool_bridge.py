@@ -498,6 +498,29 @@ async def test_search_shop_binding_uses_default_query_without_context_mutation()
 
 
 @pytest.mark.asyncio
+async def test_search_shop_binding_preserves_requested_date_and_time() -> None:
+    handler = FakeSearchShopHandler()
+    bridge = production_bridge(search_shop=handler)
+    booking_context = BookingContext(conversation_id="conversation-1")
+    requested_date = date(2099, 8, 5)
+    requested_time = time(7, 0)
+
+    await bridge.execute_action(
+        "search_shop",
+        execution_context(
+            booking_context=booking_context,
+            payload={
+                "booking_date": requested_date,
+                "start_time": requested_time,
+            },
+        ),
+    )
+
+    assert booking_context.requested_booking_date == requested_date
+    assert booking_context.requested_start_time == requested_time
+
+
+@pytest.mark.asyncio
 async def test_search_shop_failure_preserves_context() -> None:
     handler = FakeSearchShopHandler(error=RuntimeError("POS unavailable"))
     bridge = production_bridge(search_shop=handler)

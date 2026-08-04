@@ -425,14 +425,20 @@ class DeterministicNLU:
 
         if catalog_match is not None and catalog_match.intent is Intent.START_BOOKING:
             booking_date, _ = _extract_date(normalized, today)
+            start_time = _extract_time(normalized)
+            payload: dict[str, object] = {}
+            if booking_date is not None:
+                payload["booking_date"] = booking_date
+            if start_time is not None:
+                payload["start_time"] = start_time
             return _resolved(
                 self._intent_policy,
                 state,
                 "start_booking",
-                {},
+                payload,
                 0.95,
                 "start_booking_phrase",
-                has_unconsumed_entities=booking_date is not None,
+                has_unconsumed_entities=bool(payload),
             )
 
         correction = state is BookingState.SELECTING_PEOPLE and " mà " in normalized
@@ -1220,6 +1226,16 @@ def _validate_dispatch_payload(
     if intent == "change_info":
         _validate_change_payload(payload)
         return
+    if intent == "start_booking":
+        if not set(payload).issubset({"booking_date", "start_time"}):
+            raise NLUResultNotDispatchableError(
+                "Start-booking payload contains unsupported fields."
+            )
+        if "booking_date" in payload and type(payload["booking_date"]) is not date:
+            raise NLUResultNotDispatchableError("Booking date has an invalid type.")
+        if "start_time" in payload and type(payload["start_time"]) is not time:
+            raise NLUResultNotDispatchableError("Start time has an invalid type.")
+        return
     expected_keys: frozenset[str]
     expected_type: type[object] | None
     if intent == "select_people":
@@ -1247,7 +1263,6 @@ def _validate_dispatch_payload(
         "list_therapists",
         "repeat_last_question",
         "restart_booking",
-        "start_booking",
         "thanks",
         "unknown",
     }:

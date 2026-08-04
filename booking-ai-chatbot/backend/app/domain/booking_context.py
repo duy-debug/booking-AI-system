@@ -48,7 +48,9 @@ class BookingContext:
     customer: Customer | None = None
     customer_id: str | None = None
     booking_date: date | None = None
+    requested_booking_date: date | None = None
     start_time: time | None = None
+    requested_start_time: time | None = None
     num_customer: int | None = None
     duration_minutes: int | None = None
     therapist_preference: TherapistPreference | None = None
@@ -402,7 +404,9 @@ class BookingContext:
         self.service = None
         self.customer = None
         self.booking_date = None
+        self.requested_booking_date = None
         self.start_time = None
+        self.requested_start_time = None
         self.num_customer = None
         self.duration_minutes = None
         self.therapist_preference = None

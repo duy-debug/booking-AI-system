@@ -242,6 +242,8 @@ def test_reset_clears_temporary_booking_data() -> None:
     context.reservation_codes = ("RSV-1",)
     context.child_reservation_ids = (BOOKING_ID,)
     context.pending_action = "create_booking"
+    context.requested_booking_date = BOOKING_DATE
+    context.requested_start_time = time(7, 0)
 
     context.reset()
 
@@ -250,7 +252,9 @@ def test_reset_clears_temporary_booking_data() -> None:
     assert context.service is None
     assert context.customer is None
     assert context.booking_date is None
+    assert context.requested_booking_date is None
     assert context.start_time is None
+    assert context.requested_start_time is None
     assert context.booking_id is None
     assert context.num_customer is None
     assert context.duration_minutes is None

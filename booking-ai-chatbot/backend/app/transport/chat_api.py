@@ -34,7 +34,7 @@ from app.dependencies import (
     InvalidConversationContextError,
     InvalidConversationIdError,
 )
-from app.dialog.dialog_controller import DialogTurnStatus
+from app.dialog.dialog_controller import DialogTurnInput, DialogTurnResult, DialogTurnStatus
 from app.dialog.entity_resolution import (
     EntityResolutionResult,
     EntityResolutionStatus,
@@ -102,6 +102,16 @@ _UNSUPPORTED_TEXT = {
 }
 _ENTITY_FAILURE_TEXT = "Hệ thống chưa thể tra cứu thông tin lúc này. Vui lòng thử lại."
 _DEFAULT_UNRESOLVED_TEXT = "Tôi chưa hiểu yêu cầu. Vui lòng nhập lại rõ hơn."
+_RECOVERY_QUICK_REPLIES = {
+    BookingState.IDLE: ("Tôi muốn đặt lịch", "Xem danh sách cửa hàng"),
+    BookingState.SELECTING_DATE: ("Hôm nay", "Ngày mai"),
+    BookingState.SELECTING_PEOPLE: ("1 người", "2 người", "3 người"),
+    BookingState.SELECTING_DURATION: ("45 phút", "60 phút", "90 phút"),
+    BookingState.SELECTING_THERAPIST: ("Không yêu cầu", "Nam", "Nữ"),
+    BookingState.VERIFYING_PHONE: ("Xác nhận", "Nhập lại"),
+    BookingState.AWAITING_CONFIRMATION: ("Xác nhận", "Chỉnh sửa", "Hủy"),
+    BookingState.BOOKING_FAILED: ("Thử lại", "Chọn giờ khác", "Hủy"),
+}
 _TERMINAL_CHANGE_TEXT = (
     "Đặt lịch này đã hoàn tất. Vui lòng tạo yêu cầu mới để thay đổi hoặc hủy lịch."
 )
@@ -421,6 +431,7 @@ async def _process_bound_chat_message(
         return _handled_response(
             context,
             _UNRESOLVED_TEXT.get(context.state, _DEFAULT_UNRESOLVED_TEXT),
+            _state_recovery_quick_replies(context),
         )
 
     if nlu_result.resolution_status is NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED:
@@ -492,6 +503,12 @@ async def _process_bound_chat_message(
     )
     controller_started = perf_counter()
     result = await container.dialog_controller.handle_turn(context, turn)
+    result = await _consume_requested_entities(
+        container=container,
+        context=context,
+        result=result,
+        idempotency_key=request.idempotency_key,
+    )
     trace_log(
         logger,
         logging.INFO,
@@ -548,6 +565,8 @@ async def _process_bound_chat_message(
             container=container,
             context=context,
         )
+    elif not response.quick_replies:
+        response = _with_state_recovery_suggestions(response, context)
     if not (result.intent == "change_info" and result.status is not DialogTurnStatus.SUCCESS):
         await container.conversation_context_store.save(
             request.conversation_id,
@@ -555,6 +574,55 @@ async def _process_bound_chat_message(
         )
         _trace_context_saved(context)
     return response
+
+
+async def _consume_requested_entities(
+    *,
+    container: ApplicationContainer,
+    context: BookingContext,
+    result: DialogTurnResult,
+    idempotency_key: str | None,
+) -> DialogTurnResult:
+    """Apply previously extracted fields only when their workflow step is reached."""
+    follow_up: DialogTurnInput | None = None
+    if (
+        result.status is DialogTurnStatus.SUCCESS
+        and context.state is BookingState.SELECTING_DATE
+        and context.requested_booking_date is not None
+    ):
+        booking_date = context.requested_booking_date
+        context.requested_booking_date = None
+        follow_up = DialogTurnInput(
+            "select_date",
+            {"booking_date": booking_date},
+            idempotency_key=idempotency_key,
+        )
+    elif (
+        result.status is DialogTurnStatus.SUCCESS
+        and context.state is BookingState.SELECTING_TIME
+        and context.requested_start_time is not None
+    ):
+        start_time = context.requested_start_time
+        context.requested_start_time = None
+        follow_up = DialogTurnInput(
+            "select_time",
+            {"start_time": start_time},
+            idempotency_key=idempotency_key,
+        )
+    if follow_up is None:
+        return result
+    consumed = await container.dialog_controller.handle_turn(context, follow_up)
+    trace_log(
+        logger,
+        logging.INFO,
+        "DialogCtrl",
+        "prefilled_entity_consumed",
+        intent=follow_up.intent,
+        from_state=consumed.initial_state.value,
+        to_state=consumed.final_state.value,
+        status=consumed.status.value,
+    )
+    return consumed
 
 
 def _trace_route(
@@ -1107,8 +1175,37 @@ def _handled_response(
         instruction_template=None,
         state=context.state,
         status=DialogTurnStatus.FAILURE_HANDLED,
-        quick_replies=quick_replies,
+        quick_replies=quick_replies or _state_recovery_quick_replies(context),
     )
+
+
+def _with_state_recovery_suggestions(
+    response: DialogResponse,
+    context: BookingContext,
+) -> DialogResponse:
+    """Add verified next-step choices without replacing the failure explanation."""
+    return DialogResponse(
+        text=response.text,
+        instruction_template=response.instruction_template,
+        state=response.state,
+        status=response.status,
+        quick_replies=_state_recovery_quick_replies(context),
+        metadata=response.metadata,
+    )
+
+
+def _state_recovery_quick_replies(context: BookingContext) -> tuple[str, ...]:
+    """Return safe choices derived from the current state and validated context."""
+    if context.state is BookingState.SELECTING_SHOP:
+        names = tuple(shop.name for shop in context.suggested_shops[:8])
+        return names or ("Xem danh sách cửa hàng",)
+    if context.state is BookingState.SELECTING_SERVICE:
+        if context.service is not None:
+            return ("Không chọn add-on", "Xem danh sách add-on")
+        return ("Xem danh sách liệu trình",)
+    if context.state is BookingState.SELECTING_TIME:
+        return tuple(slot.strftime("%H:%M") for slot in (context.available_slots or ()))
+    return _RECOVERY_QUICK_REPLIES.get(context.state, ())
 
 
 def _is_generic_change_request(message: str) -> bool:

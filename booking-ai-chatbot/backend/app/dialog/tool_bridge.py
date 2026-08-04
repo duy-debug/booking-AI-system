@@ -584,6 +584,14 @@ class ToolBridge:
         context: ActionExecutionContext,
     ) -> ActionResult:
         assert self._search_shop_handler is not None
+        requested_date = context.payload.get("booking_date")
+        requested_time = context.payload.get("start_time")
+        if requested_date is not None and type(requested_date) is not date:
+            raise InvalidActionInputError("Requested booking date is invalid.")
+        if requested_time is not None and type(requested_time) is not time:
+            raise InvalidActionInputError("Requested start time is invalid.")
+        context.booking_context.requested_booking_date = requested_date
+        context.booking_context.requested_start_time = requested_time
         shops = await self._search_shop_handler.execute()
         context.booking_context.suggested_shops = tuple(shops)
         context.booking_context.suggested_shops_loaded = True
