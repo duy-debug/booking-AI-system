@@ -14,7 +14,7 @@ logic hoặc tích hợp dịch vụ thật.
 - Cấu trúc package theo Clean Architecture.
 - Ranh giới giữa transport, dialog, application, domain và infrastructure.
 - Vị trí dành cho các application port.
-- Vị trí dành cho adapter OpenRouter, Booking API và Qdrant.
+- Vị trí dành cho adapter Gemini, Booking API và Qdrant.
 - Skeleton unit test và integration test.
 - `BookingContext` được thiết kế để lưu trạng thái tạm thời trong process memory.
 
@@ -24,7 +24,7 @@ Chưa triển khai:
 - Dialog controller và state machine.
 - Application handler.
 - `BookingGateway`, `KnowledgeGateway` và `LLMGateway`.
-- OpenRouter, Qdrant và HTTP Booking API adapter.
+- Gemini, Qdrant và HTTP Booking API adapter.
 - Booking flow và change handler.
 - RAG, tool calling và confirmation workflow.
 - Business rule và test logic.
@@ -37,7 +37,7 @@ sau khi cấu trúc được xác nhận.
 Kiến trúc được thiết kế để:
 
 - Thay FastAPI bằng Django hoặc framework khác mà không sửa business logic.
-- Thay OpenRouter bằng OpenAI hoặc provider khác mà không sửa application logic.
+- Thay Gemini bằng provider khác mà không sửa application logic.
 - Thay Qdrant bằng Milvus mà không sửa FAQ logic.
 - Thay HTTP Booking API bằng gRPC hoặc mock mà không sửa handler.
 - Giữ domain độc lập với framework, SDK và cơ sở dữ liệu.
@@ -81,7 +81,7 @@ flowchart TB
   end
  
   subgraph Infrastructure["Tầng Hạ Tầng"]
-    OR["OpenRouterLLMGateway\n(LLM adapter)"]
+    OR["GeminiLLMGateway\n(LLM adapter)"]
     HTTP["HttpBookingGateway\n(Booking API adapter)"]
     QD["QdrantKnowledgeGateway\n(Vector DB adapter)"]
     MC["MemoryCache\n(In-memory cache)"]
@@ -91,7 +91,7 @@ flowchart TB
     BookingAPI["Booking Backend API\n(Booking system)"]
     Qdrant["Qdrant VectorDB\n(FAQ search)"]
     PostgreSQL["PostgreSQL\n(Booking data)"]
-    LLM["OpenRouter or LLM Provider"]
+    LLM["Gemini API"]
   end
  
   User <-->|"Chat message"| FE
@@ -209,7 +209,7 @@ backend/
 │   │   └── faq_manager.py
 │   │
 │   ├── infrastructure/
-│   │   ├── llm/openrouter_llm_gateway.py
+│   │   ├── llm/gemini_llm_gateway.py
 │   │   ├── booking_api/http_booking_gateway.py
 │   │   ├── vector_db/qdrant_knowledge_gateway.py
 │   │   └── cache/memory_cache.py
@@ -289,7 +289,7 @@ Chứa mô hình và quy tắc booking thuần Python:
 - Booking rule.
 - Domain exception.
 
-Domain không biết FastAPI, OpenRouter, Qdrant, HTTP hoặc PostgreSQL.
+Domain không biết FastAPI, Gemini, Qdrant, HTTP hoặc PostgreSQL.
 
 ### `sidecar`
 
@@ -304,7 +304,7 @@ Sidecar không sở hữu Booking Backend business rule.
 
 Chứa adapter cụ thể:
 
-- OpenRouter triển khai `LLMGateway`.
+- Gemini triển khai `LLMGateway`.
 - HTTP triển khai `BookingGateway`.
 - Qdrant triển khai `KnowledgeGateway`.
 - Process memory làm cache tạm thời.
@@ -364,7 +364,7 @@ Thứ tự dự kiến:
 4. State machine và dialog controller.
 5. Memory cache và BookingContext.
 6. HTTP Booking Gateway.
-7. LLM Gateway và OpenRouter adapter.
+7. LLM Gateway và Gemini adapter.
 8. FAQ Manager và Qdrant adapter.
 9. FastAPI transport và SSE.
 10. Composition root trong `dependencies.py`.

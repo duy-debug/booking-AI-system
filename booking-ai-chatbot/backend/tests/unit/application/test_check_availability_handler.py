@@ -133,7 +133,7 @@ def make_context(
         addons=(ADDON,),
         booking_date=BOOKING_DATE,
         num_customer=num_customer,
-        duration_minutes=75,
+        duration_minutes=60,
         therapist_preference=therapist,
     )
 

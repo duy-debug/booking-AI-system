@@ -22,6 +22,7 @@ _SAFE_METADATA_KEYS = frozenset(
         "can_change_info",
         "response_type",
         "source_count",
+        "item_count",
     }
 )
 _UNHANDLED_FAILURE_TEXT = (
@@ -270,6 +271,7 @@ class InstructionBuilder:
                 "customer_verification_unavailable",
                 self._customer_verification_unavailable,
             ),
+            ("shop_lookup_unavailable", self._shop_lookup_unavailable),
             ("readback_phone", self._readback_phone),
             ("final_confirmation", self._final_confirmation),
             ("booking_processing", self._booking_processing),
@@ -428,13 +430,18 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        text = "Bạn muốn chọn liệu trình chính và add-on nào?"
+        text = "Bạn muốn chọn liệu trình chính nào?"
         if context.service is not None:
-            text += f" Liệu trình chính đang chọn: {context.service.name}."
+            text = (
+                f"Bạn đã chọn {context.service.name}. "
+                "Bạn muốn chọn thêm add-on nào?"
+            )
             if context.addons:
-                text += " Add-on: " + ", ".join(item.name for item in context.addons) + "."
+                addon_names = ", ".join(item.name for item in context.addons)
+                text += f" Add-on đang chọn: {addon_names}."
         return DialogResponseDraft(
             text,
+            ("Không chọn add-on",) if context.service is not None else (),
             metadata={"has_addons": bool(context.addons)},
         )
 
@@ -586,6 +593,17 @@ class InstructionBuilder:
         )
 
     @staticmethod
+    def _shop_lookup_unavailable(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        return DialogResponseDraft(
+            "Hệ thống chưa thể tải danh sách cửa hàng từ POS lúc này. Vui lòng thử lại.",
+            ("Thử lại đặt lịch", "Xem danh sách cửa hàng"),
+            {"can_retry": True},
+        )
+
+    @staticmethod
     def _readback_phone(
         context: BookingContext,
         result: DialogTurnResult,
@@ -705,7 +723,7 @@ def _allowlisted_metadata(values: Mapping[str, object]) -> Mapping[str, object]:
     for key, value in values.items():
         if key not in _SAFE_METADATA_KEYS:
             continue
-        if key in {"available_slot_count", "source_count"}:
+        if key in {"available_slot_count", "item_count", "source_count"}:
             if type(value) is int and value >= 0:
                 safe[key] = value
         elif key == "response_type":
@@ -768,9 +786,9 @@ def _therapist_text(context: BookingContext) -> str:
     if preference is None or preference.preference_type is TherapistPreferenceType.NONE:
         return "Không yêu cầu"
     if preference.preference_type is TherapistPreferenceType.MALE:
-        return "Nam"
+        return "Ưu tiên kỹ thuật viên nam"
     if preference.preference_type is TherapistPreferenceType.FEMALE:
-        return "Nữ"
+        return "Ưu tiên kỹ thuật viên nữ"
     return preference.therapist_name or "Kỹ thuật viên đã chọn"
 
 

@@ -1,5 +1,6 @@
 """Unit tests for deterministic chat-message orchestration."""
 
+import logging
 from collections.abc import Mapping
 from typing import cast
 from uuid import UUID
@@ -318,6 +319,41 @@ async def test_resolved_branch_runs_controller_renderer_and_save_once() -> None:
     assert len(fake.instruction_builder.calls) == 1
     assert fake.conversation_context_store.saved == [("conversation-a", context)]
     assert response.text == "Safe response"
+
+
+@pytest.mark.asyncio
+async def test_turn_trace_logs_lifecycle_intent_transition_without_raw_content(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LOG_RAW_CHAT_MESSAGES", "false")
+    monkeypatch.setenv("LOG_FULL_INSTRUCTIONS", "false")
+    fake = FakeContainer(
+        context=BookingContext("private-conversation-id"),
+        nlu_result=resolved_nlu(),
+    )
+    chat_request = ChatRequest(
+        conversation_id="private-conversation-id",
+        message="private raw user message 0901234567",
+    )
+
+    with caplog.at_level(logging.INFO, logger="app.transport.chat_api"):
+        await _process_chat_message(
+            request=chat_request,
+            container=as_container(fake),
+        )
+
+    output = caplog.text
+    assert "[Turn] started" in output
+    assert "[Turn] completed" in output
+    assert "[NLU] resolved intent=start_booking resolver=deterministic" in output
+    assert "[DialogCtrl] transition" in output
+    assert "[StateMachine] transition" in output
+    assert "instruction_template=greeting" in output
+    assert "private-conversation-id" not in output
+    assert "private raw user message" not in output
+    assert "0901234567" not in output
+    assert "Safe response" not in output
 
 
 @pytest.mark.asyncio

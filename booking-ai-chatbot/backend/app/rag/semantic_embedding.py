@@ -94,7 +94,10 @@ class SentenceTransformerEmbedding:
 def _load_sentence_transformer(model_name: str) -> _SentenceEncoder:
     from sentence_transformers import SentenceTransformer
 
-    return cast(_SentenceEncoder, SentenceTransformer(model_name))
+    return cast(
+        _SentenceEncoder,
+        SentenceTransformer(model_name, local_files_only=True),
+    )
 
 
 def _coerce_vectors(raw_vectors: object) -> list[list[float]]:

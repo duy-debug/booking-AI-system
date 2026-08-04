@@ -40,7 +40,7 @@ from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.infrastructure.booking_api.http_booking_gateway import HTTPBookingGateway
 from app.infrastructure.cache.memory_cache import MemoryCache
-from app.infrastructure.llm.openrouter_llm_gateway import OpenRouterLLMGateway
+from app.infrastructure.llm.gemini_llm_gateway import GeminiLLMGateway
 
 REQUIRED_ACTIONS = {
     "search_shop",
@@ -192,6 +192,7 @@ async def advance_to_awaiting_confirmation(
         "select_course",
         {"course_selection": CourseSelection(main_course=SERVICE)},
     )
+    await turn("deny", {})
     await turn("select_time", {"start_time": time(10, 30)})
     if num_customer == 1:
         if therapist_preference is None:
@@ -234,6 +235,26 @@ def shop_response(request: httpx.Request) -> httpx.Response:
 
 def settings() -> Settings:
     return Settings(pos_base_url="http://pos.test")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"llm_provider": "openrouter"}, "LLM_PROVIDER"),
+        ({"gemini_model": "   "}, "GEMINI_MODEL"),
+        ({"gemini_base_url": "https://example.test/openai/"}, "GEMINI_BASE_URL"),
+        ({"llm_max_retries": 1}, "LLM_MAX_RETRIES"),
+    ],
+)
+async def test_invalid_gemini_configuration_fails_fast(
+    override: dict[str, object],
+    message: str,
+) -> None:
+    configured = Settings(pos_base_url="http://pos.test", **override)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match=message):
+        await create_application_container(configured)
 
 
 @pytest.mark.asyncio
@@ -285,7 +306,7 @@ async def test_container_assembles_shared_dependencies_without_network_calls() -
     assert container.entity_resolution_coordinator._search_service_handler is (
         container._handlers[1]
     )
-    assert isinstance(container.llm_gateway, OpenRouterLLMGateway)
+    assert isinstance(container.llm_gateway, GeminiLLMGateway)
     assert container.llm_nlu_fallback._llm_gateway is container.llm_gateway
     assert container.llm_nlu_fallback._intent_policy is container.state_intent_policy
     assert container.faq_manager._knowledge_gateway is None
@@ -426,7 +447,8 @@ async def test_shop_search_failure_does_not_partially_mutate_context() -> None:
         DialogTurnInput(intent="start_booking", payload={}),
     )
 
-    assert result.status is DialogTurnStatus.FAILURE_UNHANDLED
+    assert result.status is DialogTurnStatus.FAILURE_HANDLED
+    assert result.instruction_template == "shop_lookup_unavailable"
     assert result.failed_action == "search_shop"
     assert context.state is BookingState.IDLE
     assert context.shop is None
@@ -468,7 +490,7 @@ async def test_phone_denial_uses_production_binding_and_commits_collection_state
     assert context.state is BookingState.COLLECTING_PHONE
     assert context.phone is None
     assert context.shop is SHOP
-    assert context.service is SERVICE
+    assert context.service == SERVICE
     assert context.start_time == time(10, 30)
 
     await container.close()
@@ -552,11 +574,12 @@ async def test_booking_happy_path_reaches_completed_once_without_user_code(
         context=context,
     )
 
-    assert states[:6] == (
+    assert states[:7] == (
         BookingState.SELECTING_SHOP,
         BookingState.SELECTING_DATE,
         BookingState.SELECTING_PEOPLE,
         BookingState.SELECTING_DURATION,
+        BookingState.SELECTING_SERVICE,
         BookingState.SELECTING_SERVICE,
         BookingState.SELECTING_TIME,
     )
@@ -644,7 +667,7 @@ async def test_empty_availability_returns_to_date_without_selecting_a_slot(
         duration_minutes=60,
     )
 
-    result = await container.dialog_controller.handle_turn(
+    selected = await container.dialog_controller.handle_turn(
         context,
         DialogTurnInput(
             intent="select_course",
@@ -652,10 +675,19 @@ async def test_empty_availability_returns_to_date_without_selecting_a_slot(
         ),
     )
 
+    assert selected.status is DialogTurnStatus.SUCCESS
+    assert context.state is BookingState.SELECTING_SERVICE
+
+    result = await container.dialog_controller.handle_turn(
+        context,
+        DialogTurnInput(intent="deny", payload={}),
+    )
+
     assert result.status is DialogTurnStatus.FAILURE_HANDLED
     assert result.failure_code == "no_slots_available"
-    assert context.state is BookingState.SELECTING_DATE
-    assert context.booking_date is None
+    assert context.state is BookingState.SELECTING_SERVICE
+    assert context.booking_date == date(2099, 8, 5)
+    assert context.service == SERVICE
     assert context.start_time is None
     assert context.available_slots is None
     assert gateway.create_requests == []

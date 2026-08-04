@@ -24,7 +24,7 @@ from app.domain.booking import (
     TherapistPreference,
     TherapistPreferenceType,
 )
-from app.domain.booking_context import BookingContext
+from app.domain.booking_context import BookingContext, ServiceSelectionMode
 from app.domain.booking_state import BookingState
 from app.domain.exceptions import InvalidCourseSelectionError
 
@@ -267,16 +267,24 @@ class EntityResolutionCoordinator:
                 "shop_required_before_course_resolution",
             )
         try:
+            course_type = None
+            if not change:
+                course_type = (
+                    CourseType.ADDON
+                    if context.service_selection_mode is ServiceSelectionMode.ADDON
+                    else CourseType.MAIN
+                )
             services = await self._search_service_handler.execute(
                 context.shop.shop_id,
                 query,
+                course_type=course_type,
             )
         except Exception:
             return _failure(
                 NLUEntityKind.COURSE,
                 "course_resolution_unavailable",
             )
-        if context.service is None and context.duration_minutes is not None:
+        if course_type is CourseType.MAIN and context.duration_minutes is not None:
             services = [
                 service
                 for service in services

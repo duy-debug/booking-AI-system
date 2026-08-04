@@ -1,0 +1,237 @@
+{
+  "version": 1,
+  "entities": [
+    {
+      "name": "shop_name",
+      "type": "string",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "SELECTING_SHOP"
+      ],
+      "deterministic": true,
+      "id_source": "Booking API candidate list"
+    },
+    {
+      "name": "shop_area",
+      "type": "string",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "SELECTING_SHOP"
+      ],
+      "deterministic": true,
+      "id_source": "Booking API candidate list"
+    },
+    {
+      "name": "shop_index",
+      "type": "integer",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "SELECTING_SHOP"
+      ],
+      "deterministic": true,
+      "id_source": "displayed candidates"
+    },
+    {
+      "name": "booking_date",
+      "type": "date",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "SELECTING_DATE"
+      ],
+      "deterministic": true,
+      "id_source": "calendar parser"
+    },
+    {
+      "name": "relative_date",
+      "type": "string",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "SELECTING_DATE"
+      ],
+      "deterministic": true,
+      "id_source": "conversation date"
+    },
+    {
+      "name": "time",
+      "type": "time",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "SELECTING_TIME"
+      ],
+      "deterministic": true,
+      "id_source": "latest availability"
+    },
+    {
+      "name": "time_period",
+      "type": "string",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "SELECTING_TIME"
+      ],
+      "deterministic": true,
+      "id_source": "latest availability"
+    },
+    {
+      "name": "number_of_people",
+      "type": "integer",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "SELECTING_PEOPLE"
+      ],
+      "deterministic": true,
+      "id_source": "domain validation"
+    },
+    {
+      "name": "duration_minutes",
+      "type": "integer",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "SELECTING_DURATION"
+      ],
+      "deterministic": true,
+      "id_source": "service candidates"
+    },
+    {
+      "name": "service_name",
+      "type": "string",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "SELECTING_SERVICE"
+      ],
+      "deterministic": true,
+      "id_source": "Booking API candidate list"
+    },
+    {
+      "name": "addon_name",
+      "type": "string",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "SELECTING_SERVICE"
+      ],
+      "deterministic": true,
+      "id_source": "Booking API candidate list"
+    },
+    {
+      "name": "therapist_name",
+      "type": "string",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "SELECTING_THERAPIST"
+      ],
+      "deterministic": true,
+      "id_source": "Booking API candidate list"
+    },
+    {
+      "name": "phone_number",
+      "type": "string",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "COLLECTING_PHONE"
+      ],
+      "deterministic": true,
+      "id_source": "validated user input"
+    },
+    {
+      "name": "booking_code",
+      "type": "string",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "IDLE"
+      ],
+      "deterministic": false,
+      "id_source": "Booking API only"
+    },
+    {
+      "name": "customer_name",
+      "type": "string",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "COLLECTING_PHONE"
+      ],
+      "deterministic": false,
+      "id_source": "verified customer response"
+    },
+    {
+      "name": "confirmation",
+      "type": "boolean",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "VERIFYING_PHONE",
+        "AWAITING_CONFIRMATION"
+      ],
+      "deterministic": true,
+      "id_source": "utterance"
+    },
+    {
+      "name": "ordinal",
+      "type": "integer",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "SELECTING_SHOP",
+        "SELECTING_SERVICE",
+        "SELECTING_TIME",
+        "SELECTING_THERAPIST"
+      ],
+      "deterministic": true,
+      "id_source": "displayed candidates"
+    },
+    {
+      "name": "preference",
+      "type": "string",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "SELECTING_THERAPIST"
+      ],
+      "deterministic": true,
+      "id_source": "utterance"
+    },
+    {
+      "name": "fallback_preference",
+      "type": "boolean",
+      "examples": [],
+      "synonyms": [],
+      "normalization": "NFC, trim, casefold for comparison",
+      "states": [
+        "SELECTING_THERAPIST"
+      ],
+      "deterministic": true,
+      "id_source": "utterance"
+    }
+  ]
+}

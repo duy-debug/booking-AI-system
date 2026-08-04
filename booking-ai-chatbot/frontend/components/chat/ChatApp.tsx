@@ -6,7 +6,7 @@ import { MessageComposer } from "@/components/chat/MessageComposer";
 import { MessageItem } from "@/components/chat/MessageItem";
 import { BotIcon } from "@/components/common/Icons";
 import { ChatApiError, streamChat } from "@/services/chat-api";
-import { loadConversationId, saveConversationSession } from "@/services/chat-session";
+import { saveConversationSession } from "@/services/chat-session";
 import type { ChatMessage } from "@/types/chat";
 
 const WELCOME_TEXT = "Xin chào! Mình là Kori, trợ lý wellness của Komorebi. Mình có thể giúp bạn đặt lịch và giải đáp thông tin dịch vụ. Hôm nay bạn cần mình hỗ trợ gì?";
@@ -37,13 +37,12 @@ export function ChatApp() {
   const messageScrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const inFlightRef = useRef(false);
-  const lastAttemptRef = useRef<ChatAttempt | null>(null);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
-      const storedConversation = loadConversationId(localStorage);
       localStorage.removeItem("booking-chat-conversation");
-      const nextConversation = storedConversation || makeConversationId();
+      localStorage.removeItem("booking-chat-session");
+      const nextConversation = makeConversationId();
       setConversationId(nextConversation);
       setDark(localStorage.getItem("booking-chat-theme") === "dark");
       setMessages([makeWelcome()]);
@@ -87,7 +86,6 @@ export function ChatApp() {
     const assistantMessageId = crypto.randomUUID();
     const controller = new AbortController();
     abortRef.current = controller;
-    lastAttemptRef.current = attempt;
     setFailedAttempt(null);
     setError(null);
     setStreamingStarted(false);
@@ -175,13 +173,6 @@ export function ChatApp() {
     setError(null);
     setFailedAttempt(null);
     setStreamingStarted(false);
-    lastAttemptRef.current = null;
-  }
-
-  function regenerate() {
-    const attempt = lastAttemptRef.current;
-    if (!attempt || loading) return;
-    void interact(attempt, true);
   }
 
   function retry() {
@@ -210,7 +201,6 @@ export function ChatApp() {
                 latest={index === messages.length - 1}
                 loading={loading}
                 streaming={loading && streamingStarted}
-                onRegenerate={regenerate}
                 onQuickReply={sendNewTurn}
               />
             ))}

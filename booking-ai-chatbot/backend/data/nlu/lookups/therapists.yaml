@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "dynamic_source": "Booking API / current BookingContext candidates",
+  "entries": [],
+  "note": "Intentionally empty: names and IDs are runtime data, not model truth."
+}

@@ -275,6 +275,7 @@ async def test_invalid_people_change_rolls_back_old_context() -> None:
     result, response = await run_change("đổi thành 5 người", booking_context)
 
     assert result.status is DialogTurnStatus.FAILURE_HANDLED
+    before.last_failure_code = result.failure_code
     assert booking_context == before
     assert "Dữ liệu đặt lịch cũ vẫn được giữ nguyên" in response.text
 

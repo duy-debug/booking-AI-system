@@ -136,15 +136,14 @@ test("manual retry after an ambiguous truncation reuses the same idempotency key
   await expect(page.getByText("Yêu cầu đang được xử lý")).toHaveCount(1);
 });
 
-test("regenerate replays the same logical turn with the same key", async ({ page }) => {
+test("successful stateful turns cannot be replayed from the UI", async ({ page }) => {
   const requests: CapturedRequest[] = [];
   await mockChat(page, requests);
   await page.goto("/");
-  await send(page, "Tạo lại câu này");
+  await send(page, "Một turn stateful");
   await expect(page.getByText("Xin chào từ E2E")).toBeVisible();
-  await page.getByTitle("Tạo lại").click();
-  await expect.poll(() => requests.length).toBe(2);
-  expect(requests[1]).toEqual(requests[0]);
+  await expect(page.getByTitle("Tạo lại")).toHaveCount(0);
+  expect(requests).toHaveLength(1);
   await expect(page.getByText("Xin chào từ E2E")).toHaveCount(1);
 });
 

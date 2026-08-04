@@ -35,7 +35,7 @@ from app.domain.booking import (
     TherapistPreference,
     TherapistPreferenceType,
 )
-from app.domain.booking_context import BookingContext
+from app.domain.booking_context import BookingContext, ServiceSelectionMode
 from app.domain.booking_state import BookingState
 
 SHOP = Shop(
@@ -99,6 +99,7 @@ class FakeSearchServiceHandler:
         self.calls = 0
         self.received_shop_id: UUID | None = None
         self.received_query: str | None = None
+        self.received_course_type: CourseType | None = None
 
     async def execute(
         self,
@@ -109,6 +110,10 @@ class FakeSearchServiceHandler:
         self.calls += 1
         self.received_shop_id = shop_id
         self.received_query = query
+        course_type = kwargs.get("course_type")
+        self.received_course_type = (
+            course_type if isinstance(course_type, CourseType) else None
+        )
         if self.error is not None:
             raise self.error
         return self.results
@@ -325,6 +330,7 @@ async def test_one_main_course_resolves_course_selection_without_context_mutatio
     assert result.dispatch_payload == {"course_selection": CourseSelection(MAIN)}
     assert context == snapshot
     assert context.duration_minutes == 60
+    assert handler.received_course_type is CourseType.MAIN
 
 
 @pytest.mark.asyncio
@@ -362,7 +368,12 @@ async def test_addon_preserves_type_and_requires_existing_main_course() -> None:
     ).resolve(
         nlu_result=entity_request(NLUEntityKind.COURSE, "đá nóng"),
         state=BookingState.SELECTING_SERVICE,
-        context=BookingContext("conversation-1", shop=SHOP, service=MAIN),
+        context=BookingContext(
+            "conversation-1",
+            shop=SHOP,
+            service=MAIN,
+            service_selection_mode=ServiceSelectionMode.ADDON,
+        ),
     )
 
     assert without_main.status is EntityResolutionStatus.UNSUPPORTED
@@ -371,6 +382,26 @@ async def test_addon_preserves_type_and_requires_existing_main_course() -> None:
         "course_selection": CourseSelection(MAIN, (ADDON,))
     }
     assert ADDON.course_type is CourseType.ADDON
+
+
+@pytest.mark.asyncio
+async def test_addon_mode_queries_only_addons() -> None:
+    handler = FakeSearchServiceHandler([ADDON])
+    context = BookingContext(
+        "conversation-addon-mode",
+        state=BookingState.SELECTING_SERVICE,
+        shop=SHOP,
+        service=MAIN,
+        service_selection_mode=ServiceSelectionMode.ADDON,
+    )
+
+    await coordinator(services=handler).resolve(
+        nlu_result=entity_request(NLUEntityKind.COURSE, "đá nóng"),
+        state=context.state,
+        context=context,
+    )
+
+    assert handler.received_course_type is CourseType.ADDON
 
 
 @pytest.mark.asyncio

@@ -34,7 +34,7 @@ class CheckAvailabilityHandler:
             shop_id=context.shop.shop_id,
             booking_date=context.booking_date,
             num_customer=context.num_customer,
-            duration_minutes=context.duration_minutes,
+            duration_minutes=context.total_duration_minutes or context.duration_minutes,
             main_course_id=course_selection.main_course.service_id,
             addon_ids=tuple(addon.service_id for addon in course_selection.addons),
             therapist_preference=context.therapist_preference,

@@ -1,0 +1,229 @@
+{
+  "baseline": "token Jaccard nearest-example; diagnostic only",
+  "intent_accuracy": 0.8876404494382022,
+  "macro_f1": 0.8398311097900809,
+  "per_intent": {
+    "change_info": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "confirm": {
+      "precision": 0.25,
+      "recall": 1.0,
+      "f1": 0.4
+    },
+    "deny": {
+      "precision": 0.8571428571428571,
+      "recall": 0.4,
+      "f1": 0.5454545454545455
+    },
+    "faq": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "greeting": {
+      "precision": 0.5,
+      "recall": 1.0,
+      "f1": 0.6666666666666666
+    },
+    "list_addons": {
+      "precision": 1.0,
+      "recall": 0.8888888888888888,
+      "f1": 0.9411764705882353
+    },
+    "list_available_times": {
+      "precision": 1.0,
+      "recall": 0.8461538461538461,
+      "f1": 0.9166666666666666
+    },
+    "list_services": {
+      "precision": 0.9375,
+      "recall": 0.8823529411764706,
+      "f1": 0.9090909090909091
+    },
+    "list_shops": {
+      "precision": 0.3333333333333333,
+      "recall": 1.0,
+      "f1": 0.5
+    },
+    "list_therapists": {
+      "precision": 0.9333333333333333,
+      "recall": 1.0,
+      "f1": 0.9655172413793104
+    },
+    "provide_phone": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "search_shops": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "select_date": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "select_duration": {
+      "precision": 0.9375,
+      "recall": 0.8333333333333334,
+      "f1": 0.8823529411764706
+    },
+    "select_people": {
+      "precision": 0.6666666666666666,
+      "recall": 1.0,
+      "f1": 0.8
+    },
+    "select_service": {
+      "precision": 0.6666666666666666,
+      "recall": 1.0,
+      "f1": 0.8
+    },
+    "select_shop": {
+      "precision": 0.6666666666666666,
+      "recall": 1.0,
+      "f1": 0.8
+    },
+    "select_therapist": {
+      "precision": 1.0,
+      "recall": 0.7777777777777778,
+      "f1": 0.8750000000000001
+    },
+    "select_time": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "start_booking": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "thanks": {
+      "precision": 0.5,
+      "recall": 0.5,
+      "f1": 0.5
+    },
+    "unknown": {
+      "precision": 0.95,
+      "recall": 1.0,
+      "f1": 0.9743589743589743
+    }
+  },
+  "entity_precision": 1.0,
+  "entity_recall": 1.0,
+  "entity_f1": 1.0,
+  "entity_note": "Oracle validation of supplied spans, not learned extraction.",
+  "out_of_scope_recall": 1.0,
+  "ambiguity_detection_rate": null,
+  "ambiguity_note": "Ambiguous corpus is review-only and not in the classifier split.",
+  "accuracy_by_state": {
+    "IDLE": 0.9736842105263158,
+    "SELECTING_SHOP": 1.0,
+    "SELECTING_DATE": 1.0,
+    "SELECTING_DURATION": 0.8333333333333334,
+    "SELECTING_SERVICE": 0.90625,
+    "SELECTING_TIME": 0.9130434782608695,
+    "SELECTING_THERAPIST": 0.9130434782608695,
+    "AWAITING_CONFIRMATION": 0.5,
+    "SELECTING_PEOPLE": 1.0,
+    "COLLECTING_PHONE": 1.0
+  },
+  "accuracy_by_variation_tag": {
+    "synthetic": 0.8876404494382022,
+    "direct": 0.9186046511627907,
+    "no_diacritics": 0.9,
+    "conversational": 0.8586956521739131,
+    "light_typo": 0.75,
+    "entity": 0.926829268292683,
+    "hard_negative": 0.8181818181818182,
+    "out_of_scope": 1.0
+  },
+  "confusion_matrix": {
+    "change_info": {
+      "change_info": 1
+    },
+    "confirm": {
+      "confirm": 2
+    },
+    "deny": {
+      "deny": 6,
+      "thanks": 1,
+      "confirm": 6,
+      "select_shop": 1,
+      "unknown": 1
+    },
+    "faq": {
+      "faq": 8
+    },
+    "greeting": {
+      "greeting": 1
+    },
+    "list_addons": {
+      "list_addons": 8,
+      "list_services": 1
+    },
+    "list_available_times": {
+      "list_available_times": 11,
+      "list_therapists": 1,
+      "list_shops": 1
+    },
+    "list_services": {
+      "list_services": 15,
+      "list_shops": 1,
+      "select_duration": 1
+    },
+    "list_shops": {
+      "list_shops": 1
+    },
+    "list_therapists": {
+      "list_therapists": 14
+    },
+    "provide_phone": {
+      "provide_phone": 2
+    },
+    "search_shops": {
+      "search_shops": 12
+    },
+    "select_date": {
+      "select_date": 7
+    },
+    "select_duration": {
+      "select_duration": 15,
+      "select_people": 1,
+      "select_service": 1,
+      "deny": 1
+    },
+    "select_people": {
+      "select_people": 2
+    },
+    "select_service": {
+      "select_service": 6
+    },
+    "select_shop": {
+      "select_shop": 2
+    },
+    "select_therapist": {
+      "select_therapist": 7,
+      "select_service": 2
+    },
+    "select_time": {
+      "select_time": 10
+    },
+    "start_booking": {
+      "start_booking": 8
+    },
+    "thanks": {
+      "greeting": 1,
+      "thanks": 1
+    },
+    "unknown": {
+      "unknown": 19
+    }
+  },
+  "test_count": 178
+}

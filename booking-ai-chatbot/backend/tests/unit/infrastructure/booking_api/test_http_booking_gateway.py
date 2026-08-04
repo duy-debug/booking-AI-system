@@ -1,6 +1,7 @@
 """Contract tests for the verified HTTP booking gateway operations."""
 
 import json
+import logging
 from collections.abc import Callable
 from datetime import date, time
 from decimal import Decimal
@@ -582,7 +583,9 @@ async def test_network_timeout_and_connection_failures_are_typed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_search_services_sends_only_pos_filters_and_maps_course_types() -> None:
+async def test_search_services_sends_only_pos_filters_and_maps_course_types(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -591,13 +594,17 @@ async def test_search_services_sends_only_pos_filters_and_maps_course_types() ->
 
     client, gateway = _gateway(handler)
     try:
-        services = await gateway.search_services(
-            CourseSearchRequest(
-                shop_id=SHOP_ID,
-                course_type=CourseType.MAIN,
-                is_active=False,
+        with caplog.at_level(
+            logging.INFO,
+            logger="app.infrastructure.booking_api.http_booking_gateway",
+        ):
+            services = await gateway.search_services(
+                CourseSearchRequest(
+                    shop_id=SHOP_ID,
+                    course_type=CourseType.MAIN,
+                    is_active=False,
+                )
             )
-        )
     finally:
         await client.aclose()
 
@@ -614,10 +621,16 @@ async def test_search_services_sends_only_pos_filters_and_maps_course_types() ->
     assert services[1].course_type is CourseType.ADDON
     assert services[0].duration_minutes == 60
     assert services[0].price == Decimal("6000.00")
+    assert "[POS] completed" in caplog.text
+    assert "operation=search_services" in caplog.text
+    assert "status_code=200" in caplog.text
+    assert "item_count=2" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_search_services_maps_not_found_and_malformed_success() -> None:
+async def test_search_services_maps_not_found_and_malformed_success(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     responses = iter(
         [
             httpx.Response(404, json={"code": "SHOP_NOT_FOUND"}),
@@ -631,12 +644,18 @@ async def test_search_services_maps_not_found_and_malformed_success() -> None:
     client, gateway = _gateway(handler)
     request = CourseSearchRequest(shop_id=SHOP_ID)
     try:
-        with pytest.raises(POSNotFoundError):
-            await gateway.search_services(request)
+        with caplog.at_level(
+            logging.WARNING,
+            logger="app.infrastructure.booking_api.http_booking_gateway",
+        ):
+            with pytest.raises(POSNotFoundError):
+                await gateway.search_services(request)
         with pytest.raises(POSResponseMappingError):
             await gateway.search_services(request)
     finally:
         await client.aclose()
+    assert "error_code=pos_http_404" in caplog.text
+    assert "SHOP_NOT_FOUND" not in caplog.text
 
 
 @pytest.mark.asyncio

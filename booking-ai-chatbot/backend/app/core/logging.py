@@ -1,21 +1,25 @@
 """Centralized, security-conscious application logging configuration."""
 
+import hashlib
 import json
 import logging as std_logging
 import re
 import sys
 from collections.abc import Mapping
+from contextvars import ContextVar, Token
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from time import perf_counter
 
 _CONSOLE_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 _VALID_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 _VALID_FORMATS = {"console", "json"}
-_PHONE_PATTERN = re.compile(r"(?<!\d)\+?\d(?:[ -]?\d){8,14}(?!\d)")
+_PHONE_PATTERN = re.compile(r"(?<![\d-])(?!\d{4}-\d{2}-\d{2})\+?\d(?:[ -]?\d){8,14}(?!\d)")
 _BEARER_PATTERN = re.compile(r"(?i)\bBearer\s+[^\s,;]+")
 _SECRET_ASSIGNMENT_PATTERN = re.compile(
-    r"(?i)\b(api[_-]?key|authorization|password|secret|token)\s*[:=]\s*[^\s,;]+"
+    r"(?i)\b(api[_-]?key|authorization|idempotency[_-]?key|password|secret|token)"
+    r"\s*[:=]\s*[^\s,;]+"
 )
 _SENSITIVE_KEY_PARTS = {
     "api_key",
@@ -23,6 +27,7 @@ _SENSITIVE_KEY_PARTS = {
     "booking_api_service_key",
     "content",
     "customer",
+    "idempotency",
     "password",
     "payload",
     "phone",
@@ -33,9 +38,80 @@ _SENSITIVE_KEY_PARTS = {
     "token",
     "vector",
 }
-_RESERVED_RECORD_FIELDS = frozenset(
-    std_logging.LogRecord("", 0, "", 0, "", (), None).__dict__
-) | {"message", "asctime"}
+_RESERVED_RECORD_FIELDS = frozenset(std_logging.LogRecord("", 0, "", 0, "", (), None).__dict__) | {
+    "message",
+    "asctime",
+}
+_conversation_marker: ContextVar[str] = ContextVar("conversation_marker", default="-")
+_correlation_marker: ContextVar[str] = ContextVar("correlation_marker", default="-")
+
+
+class SafeConsoleFormatter(std_logging.Formatter):
+    """Apply the shared redaction rules to human-readable console output."""
+
+    def format(self, record: std_logging.LogRecord) -> str:
+        return _sanitize_text(super().format(record))
+
+
+def mask_conversation_id(conversation_id: str) -> str:
+    """Return a stable non-reversible marker without exposing the identifier."""
+    return hashlib.sha256(conversation_id.encode("utf-8")).hexdigest()[:8]
+
+
+def bind_conversation(conversation_id: str) -> Token[str]:
+    """Bind one masked conversation marker for nested adapter logs."""
+    return _conversation_marker.set(mask_conversation_id(conversation_id))
+
+
+def reset_conversation(token: Token[str]) -> None:
+    """Restore the prior conversation logging context."""
+    _conversation_marker.reset(token)
+
+
+def bind_correlation_id(correlation_id: str | None) -> Token[str]:
+    """Bind a safe correlation marker supplied by the current transport."""
+    marker = mask_conversation_id(correlation_id) if correlation_id else "-"
+    return _correlation_marker.set(marker)
+
+
+def reset_correlation_id(token: Token[str]) -> None:
+    """Restore the prior correlation logging context."""
+    _correlation_marker.reset(token)
+
+
+def trace_log(
+    logger: std_logging.Logger,
+    level: int,
+    component: str,
+    event: str,
+    **fields: object,
+) -> None:
+    """Write one safe component trace with structured fields."""
+    marker = _conversation_marker.get()
+    correlation = _correlation_marker.get()
+    safe_fields = {key: _sanitize_value(key, value) for key, value in fields.items()}
+    details = " ".join(f"{key}={value}" for key, value in safe_fields.items())
+    message = f"[conv:{marker}] [{component}] {event}"
+    if details:
+        message = f"{message} {details}"
+    if correlation != "-":
+        message = f"{message} correlation={correlation}"
+    logger.log(
+        level,
+        message,
+        extra={
+            "conversation": marker,
+            "correlation": correlation,
+            "component": component,
+            "event": event,
+            **safe_fields,
+        },
+    )
+
+
+def elapsed_ms(started_at: float) -> int:
+    """Return monotonic elapsed milliseconds for external/lifecycle logs."""
+    return max(0, round((perf_counter() - started_at) * 1000))
 
 
 class JsonFormatter(std_logging.Formatter):
@@ -56,9 +132,7 @@ class JsonFormatter(std_logging.Formatter):
                 continue
             payload[key] = _sanitize_value(key, value)
         if record.exc_info is not None:
-            payload["exception"] = _sanitize_text(
-                self.formatException(record.exc_info)
-            )
+            payload["exception"] = _sanitize_text(self.formatException(record.exc_info))
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
@@ -83,7 +157,7 @@ def configure_logging(
     if normalized_format == "json":
         console_formatter = JsonFormatter()
     else:
-        console_formatter = std_logging.Formatter(
+        console_formatter = SafeConsoleFormatter(
             _CONSOLE_FORMAT,
             datefmt="%Y-%m-%d %H:%M:%S",
         )
@@ -127,17 +201,12 @@ def _replace_handlers(
 
 def _validate_level(level: str) -> str:
     if not isinstance(level, str) or level.strip().upper() not in _VALID_LEVELS:
-        raise ValueError(
-            "Log level must be DEBUG, INFO, WARNING, ERROR, or CRITICAL."
-        )
+        raise ValueError("Log level must be DEBUG, INFO, WARNING, ERROR, or CRITICAL.")
     return level.strip().upper()
 
 
 def _validate_format(log_format: str) -> str:
-    if (
-        not isinstance(log_format, str)
-        or log_format.strip().casefold() not in _VALID_FORMATS
-    ):
+    if not isinstance(log_format, str) or log_format.strip().casefold() not in _VALID_FORMATS:
         raise ValueError("Log format must be 'console' or 'json'.")
     return log_format.strip().casefold()
 
@@ -156,6 +225,13 @@ def _normalize_json_path(json_path: str | Path | None) -> Path | None:
 
 def _sanitize_value(key: str, value: object) -> object:
     normalized_key = key.casefold().replace("-", "_")
+    if normalized_key in {
+        "input_tokens",
+        "output_tokens",
+        "vector_candidate_count",
+        "lexical_candidate_count",
+    }:
+        return value if type(value) is int and value >= 0 else "[REDACTED]"
     if any(part in normalized_key for part in _SENSITIVE_KEY_PARTS):
         return "[REDACTED]"
     if isinstance(value, str):

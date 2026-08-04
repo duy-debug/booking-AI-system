@@ -504,6 +504,7 @@ class ToolBridge:
             ("handle_people_selection", self._handle_people_selection),
             ("handle_duration_selection", self._handle_duration_selection),
             ("handle_service_selection", self._handle_service_selection),
+            ("skip_addon", self._skip_addon),
             ("handle_time_selection", self._handle_time_selection),
             ("handle_therapist_selection", self._handle_therapist_selection),
             ("change_shop", self._change_shop),
@@ -549,6 +550,8 @@ class ToolBridge:
     ) -> ActionResult:
         assert self._search_shop_handler is not None
         shops = await self._search_shop_handler.execute()
+        context.booking_context.suggested_shops = tuple(shops)
+        context.booking_context.suggested_shops_loaded = True
         return ActionResult("search_shop", shops)
 
     async def _handle_store_selection(
@@ -594,6 +597,10 @@ class ToolBridge:
         )
         context.booking_context.set_course_selection(selection)
         return ActionResult("handle_service_selection", selection)
+
+    async def _skip_addon(self, context: ActionExecutionContext) -> ActionResult:
+        context.booking_context.skip_addon()
+        return ActionResult("skip_addon", None)
 
     async def _handle_time_selection(
         self,

@@ -37,7 +37,7 @@ from app.dialog.tool_bridge import ToolBridge
 from app.domain.booking_context import BookingContext
 from app.infrastructure.booking_api.http_booking_gateway import HTTPBookingGateway
 from app.infrastructure.cache.memory_cache import MemoryCache
-from app.infrastructure.llm.openrouter_llm_gateway import OpenRouterLLMGateway
+from app.infrastructure.llm.gemini_llm_gateway import GeminiLLMGateway
 from app.infrastructure.vector_db.qdrant_knowledge_gateway import (
     QdrantKnowledgeGateway,
     QdrantQueryClient,
@@ -139,6 +139,13 @@ class ApplicationContainer:
     _qdrant_client: QdrantClient | None = field(default=None, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
 
+    def handler(self, handler_type: type[object]) -> object:
+        """Return one already-composed handler by its concrete application type."""
+        for configured in self._handlers:
+            if isinstance(configured, handler_type):
+                return configured
+        raise RuntimeError(f"Handler {handler_type.__name__} is unavailable.")
+
     async def close(self) -> None:
         """Close only resources created and owned by this container."""
         if self._closed:
@@ -172,6 +179,7 @@ async def create_application_container(
         state_intent_policy = build_state_intent_policy(
             flow_definition,
             enable_faq=True,
+            enable_discovery=True,
         )
         booking_gateway: BookingGateway = HTTPBookingGateway(
             client=client,
@@ -188,11 +196,11 @@ async def create_application_container(
             search_shop_handler=search_shop_handler,
             search_service_handler=search_service_handler,
         )
-        configured_llm_gateway = llm_gateway or OpenRouterLLMGateway(
+        configured_llm_gateway = llm_gateway or GeminiLLMGateway(
             client=client,
-            api_key=settings.openrouter_api_key,
-            base_url=settings.openrouter_base_url,
-            model=settings.openrouter_model,
+            api_key=settings.gemini_api_key,
+            base_url=settings.gemini_base_url,
+            model=settings.gemini_model,
         )
         handlers: tuple[object, ...] = (
             search_shop_handler,
@@ -254,11 +262,15 @@ async def create_application_container(
                 llm_gateway=configured_llm_gateway,
                 intent_policy=state_intent_policy,
                 min_confidence=settings.llm_nlu_min_confidence,
-                enabled=settings.enable_llm_nlu_fallback,
+                enabled=(
+                    settings.enable_llm_nlu_fallback
+                    and settings.dialog_intent_tool_enabled
+                ),
             ),
             faq_manager=FAQManager(
                 knowledge_gateway=configured_knowledge_gateway,
                 instruction_builder=instruction_builder,
+                min_relevance_score=settings.rag_hybrid_score_threshold,
             ),
             knowledge_gateway=configured_knowledge_gateway,
             _handlers=handlers,
@@ -333,14 +345,29 @@ def _validate_settings(settings: Settings) -> None:
         or not 0.0 <= settings.llm_nlu_min_confidence <= 1.0
     ):
         raise ValueError("LLM NLU confidence threshold must be between zero and one.")
-    if not settings.openrouter_base_url.strip():
-        raise ValueError("OpenRouter base URL must not be empty.")
-    if not settings.openrouter_model.strip():
-        raise ValueError("OpenRouter model must not be empty.")
+    if settings.llm_provider.strip().casefold() != "gemini":
+        raise ValueError("LLM_PROVIDER must be 'gemini'.")
+    if not settings.gemini_model.strip():
+        raise ValueError("GEMINI_MODEL must not be empty.")
+    if settings.gemini_base_url.strip().rstrip("/") != (
+        "https://generativelanguage.googleapis.com/v1beta/openai"
+    ):
+        raise ValueError("GEMINI_BASE_URL must be the official Gemini OpenAI endpoint.")
+    if type(settings.llm_max_retries) is not int or settings.llm_max_retries != 0:
+        raise ValueError("LLM_MAX_RETRIES must be 0; this gateway does not retry.")
+    if type(settings.dialog_intent_tool_enabled) is not bool:
+        raise ValueError("DIALOG_INTENT_TOOL_ENABLED must be boolean.")
     if not settings.embedding_model_name.strip():
         raise ValueError("Embedding model name must not be empty.")
     if type(settings.knowledge_qdrant_enabled) is not bool:
         raise ValueError("Knowledge Qdrant enabled flag must be boolean.")
+    if (
+        isinstance(settings.rag_hybrid_score_threshold, bool)
+        or not isinstance(settings.rag_hybrid_score_threshold, int | float)
+        or not isfinite(settings.rag_hybrid_score_threshold)
+        or not 0.0 <= settings.rag_hybrid_score_threshold <= 1.0
+    ):
+        raise ValueError("RAG hybrid score threshold must be between zero and one.")
     if settings.knowledge_qdrant_enabled:
         host = settings.qdrant_host.strip()
         if (

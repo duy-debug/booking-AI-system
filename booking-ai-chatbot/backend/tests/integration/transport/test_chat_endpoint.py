@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 import app.dependencies as dependencies
 from app.application.handlers.check_availability_handler import CheckAvailabilityHandler
+from app.application.handlers.search_service_handler import SearchServiceHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.application.ports.knowledge_gateway import KnowledgeDocument
 from app.application.ports.llm_gateway import LLMMessage, LLMResponse
@@ -33,7 +34,7 @@ from app.dialog.nlu import (
     NLUResult,
     NLUSource,
 )
-from app.domain.booking import Service, Shop
+from app.domain.booking import CourseSelection, CourseType, Service, Shop
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.main import create_app
@@ -50,6 +51,13 @@ SERVICE = Service(
     duration_minutes=60,
     price=Decimal("500000.00"),
 )
+ADDON = Service(
+    service_id=UUID("55555555-5555-5555-5555-555555555555"),
+    name="Chăm sóc da đầu",
+    duration_minutes=15,
+    price=Decimal("100000.00"),
+    course_type=CourseType.ADDON,
+)
 
 
 class RecordingSearchShopHandler(SearchShopHandler):
@@ -59,6 +67,38 @@ class RecordingSearchShopHandler(SearchShopHandler):
     async def execute(self, query: str | None = None) -> list[Shop]:
         self.calls.append(query)
         return [SHOP]
+
+
+class RecordingDiscoveryShopHandler(SearchShopHandler):
+    def __init__(self) -> None:
+        self.calls: list[str | None] = []
+
+    async def execute(self, query: str | None = None) -> list[Shop]:
+        self.calls.append(query)
+        return [
+            SHOP,
+            Shop(
+                shop_id=UUID("33333333-3333-3333-3333-333333333333"),
+                name="Komorebi Huế",
+                address="Huế",
+            ),
+        ]
+
+
+class RecordingDiscoveryServiceHandler(SearchServiceHandler):
+    def __init__(self) -> None:
+        self.calls: list[tuple[UUID, CourseType | None]] = []
+
+    async def execute(
+        self,
+        shop_id: UUID,
+        query: str | None = None,
+        *,
+        course_type: CourseType | None = None,
+        is_active: bool = True,
+    ) -> list[Service]:
+        self.calls.append((shop_id, course_type))
+        return [ADDON] if course_type is CourseType.ADDON else [SERVICE]
 
 
 class RecordingAvailabilityHandler(CheckAvailabilityHandler):
@@ -178,6 +218,138 @@ def post_message(
     if idempotency_key is not None:
         payload["idempotency_key"] = idempotency_key
     return cast(httpx.Response, client.post("/api/v1/chat", json=payload))
+
+
+def test_shop_discovery_enters_shop_selection_without_selecting_a_candidate(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    handler = RecordingDiscoveryShopHandler()
+    container._handlers = tuple(
+        handler if isinstance(item, SearchShopHandler) else item
+        for item in container._handlers
+    )
+
+    response = post_message(
+        client,
+        conversation_id="conversation-list-shops",
+        message="bạn có thể liệt kê cửa hàng cho tôi xem được không",
+    )
+    body = response.json()
+    context = container.memory_cache._contexts["conversation-list-shops"]
+
+    assert response.status_code == 200
+    assert body["state"] == "selecting_shop"
+    assert body["status"] == "success"
+    assert body["quick_replies"] == ["Shibuya", "Komorebi Huế"]
+    assert body["metadata"] == {"item_count": 2}
+    assert "Komorebi Huế" in body["text"]
+    assert handler.calls == [None]
+    assert context.shop is None
+    assert outbound_requests == []
+
+
+def test_generic_edit_at_final_confirmation_returns_guided_change_menu(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    context = BookingContext(
+        "conversation-edit-menu",
+        state=BookingState.AWAITING_CONFIRMATION,
+    )
+    container.memory_cache._contexts[context.conversation_id] = context
+
+    response = post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message="tôi muốn chỉnh sửa booking",
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["state"] == "awaiting_confirmation"
+    assert body["status"] == "success"
+    assert body["quick_replies"] == [
+        "Đổi cửa hàng",
+        "Đổi ngày",
+        "Đổi số người",
+        "Đổi thời lượng",
+        "Đổi liệu trình",
+        "Đổi giờ",
+        "Đổi kỹ thuật viên",
+        "Đổi số điện thoại",
+    ]
+    assert context.state is BookingState.AWAITING_CONFIRMATION
+    assert outbound_requests == []
+
+
+def test_service_package_synonym_lists_services_during_duration_selection(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    handler = RecordingDiscoveryServiceHandler()
+    container._handlers = tuple(
+        handler if isinstance(item, SearchServiceHandler) else item
+        for item in container._handlers
+    )
+    context = BookingContext(
+        "conversation-package-list",
+        state=BookingState.SELECTING_DURATION,
+        shop=SHOP,
+    )
+    container.memory_cache._contexts[context.conversation_id] = context
+
+    response = post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message="cho tôi xem các gói",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "selecting_duration"
+    assert response.json()["quick_replies"] == [SERVICE.name]
+    assert handler.calls == [(SHOP.shop_id, CourseType.MAIN)]
+    assert context.duration_minutes is None
+    assert outbound_requests == []
+
+
+def test_service_discovery_keeps_booking_selection_and_calls_pos_once(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    handler = RecordingDiscoveryServiceHandler()
+    container._handlers = tuple(
+        handler if isinstance(item, SearchServiceHandler) else item
+        for item in container._handlers
+    )
+    context = BookingContext(
+        "conversation-list-services",
+        state=BookingState.SELECTING_SERVICE,
+        shop=SHOP,
+        booking_date=date(2099, 8, 15),
+        num_customer=1,
+        duration_minutes=60,
+    )
+    container.memory_cache._contexts[context.conversation_id] = context
+
+    response = post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message="có những liệu trình chính và add-on nào",
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["state"] == "selecting_service"
+    assert body["status"] == "success"
+    assert body["quick_replies"] == [SERVICE.name]
+    assert handler.calls == [(SHOP.shop_id, CourseType.MAIN)]
+    assert context.service is None
+    assert outbound_requests == []
 
 
 def test_valid_idle_booking_turn_returns_json_and_persists_state(
@@ -301,6 +473,75 @@ def test_json_phone_denial_clears_phone_and_returns_to_collection(
     assert context.service is SERVICE
     assert context.booking_date == date(2099, 8, 15)
     assert context.start_time == time(10, 30)
+    assert outbound_requests == []
+
+
+def test_booking_proactively_suggests_main_course_then_addon_then_slots(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    service_handler = RecordingDiscoveryServiceHandler()
+    container._handlers = tuple(
+        service_handler if isinstance(item, SearchServiceHandler) else item
+        for item in container._handlers
+    )
+    availability = RecordingAvailabilityHandler()
+    container.tool_bridge._check_availability_handler = availability
+    context = BookingContext(
+        "conversation-guided-services",
+        state=BookingState.SELECTING_DURATION,
+        shop=SHOP,
+        booking_date=date(2099, 8, 15),
+        num_customer=1,
+    )
+    container.memory_cache._contexts[context.conversation_id] = context
+
+    main_response = post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message="60 phút",
+    )
+    assert main_response.json()["state"] == "selecting_service"
+    assert main_response.json()["quick_replies"] == [SERVICE.name]
+    assert "liệu trình chính" in main_response.json()["text"].casefold()
+    assert service_handler.calls == [(SHOP.shop_id, CourseType.MAIN)]
+
+    container.entity_resolution_coordinator = cast(
+        EntityResolutionCoordinator,
+        StaticResolver(
+            EntityResolutionResult(
+                status=EntityResolutionStatus.RESOLVED,
+                entity_kind=NLUEntityKind.COURSE,
+                dispatch_intent="select_course",
+                dispatch_payload={
+                    "course_selection": CourseSelection(main_course=SERVICE)
+                },
+                matched_count=1,
+            )
+        ),
+    )
+    addon_response = post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message=SERVICE.name,
+    )
+    assert addon_response.json()["state"] == "selecting_service"
+    assert addon_response.json()["quick_replies"] == [
+        ADDON.name,
+        "Không chọn add-on",
+    ]
+    assert "add-on" in addon_response.json()["text"].casefold()
+    assert service_handler.calls[-1] == (SHOP.shop_id, CourseType.ADDON)
+
+    slot_response = post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message="Không chọn add-on",
+    )
+    assert slot_response.json()["state"] == "selecting_time"
+    assert slot_response.json()["quick_replies"] == ["10:30", "11:00"]
+    assert availability.calls == [context]
     assert outbound_requests == []
 
 

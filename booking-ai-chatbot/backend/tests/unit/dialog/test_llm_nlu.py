@@ -91,6 +91,41 @@ def structured(
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("intent", "entities", "expected_payload"),
+    [
+        ("list_shops", {}, {}),
+        ("list_services", {}, {}),
+        ("list_addons", {}, {}),
+        ("list_available_times", {}, {}),
+        ("list_therapists", {}, {}),
+        ("search_shops", {"query": "Huế"}, {"location_query": "Huế"}),
+    ],
+)
+async def test_llm_supports_discovery_intents_without_inventing_entities(
+    intent: str,
+    entities: dict[str, object],
+    expected_payload: dict[str, object],
+) -> None:
+    gateway = FakeLLMGateway(
+        LLMResponse(content=structured(intent=intent, entities=entities))
+    )
+    fallback = LLMNLUFallback(
+        llm_gateway=gateway,
+        intent_policy=StateIntentPolicy(
+            {BookingState.IDLE: frozenset({intent})},
+            frozenset(),
+        ),
+    )
+
+    result = await fallback.parse(text="discovery request", state=BookingState.IDLE)
+
+    assert result.intent == intent
+    assert result.payload == expected_payload
+    assert result.resolution_status is NLUResolutionStatus.RESOLVED
+
+
 def fallback_for(content: str, *, min_confidence: float = 0.7) -> tuple[
     LLMNLUFallback,
     FakeLLMGateway,

@@ -1,9 +1,11 @@
 """HTTP adapter for the verified subset of the POS booking contract."""
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, time
 from decimal import Decimal, InvalidOperation
+from time import perf_counter
 from typing import cast
 from uuid import UUID
 
@@ -21,6 +23,7 @@ from app.application.ports.booking_gateway import (
     FinalAvailabilityRequest,
     FinalAvailabilityResult,
 )
+from app.core.logging import elapsed_ms, trace_log
 from app.domain.booking import (
     Booking,
     CourseType,
@@ -238,6 +241,7 @@ class HTTPBookingGateway:
         expected_status: int = 200,
     ) -> object:
         url = f"{self._base_url}{path}"
+        started_at = perf_counter()
         try:
             if self._timeout_seconds is None:
                 response = await self._client.request(
@@ -257,20 +261,87 @@ class HTTPBookingGateway:
                     timeout=self._timeout_seconds,
                 )
         except httpx.TimeoutException as exc:
+            trace_log(
+                logging.getLogger(__name__),
+                logging.WARNING,
+                "POS",
+                "failed",
+                operation=operation,
+                method=method,
+                endpoint=operation,
+                error_code="pos_timeout",
+                duration_ms=elapsed_ms(started_at),
+            )
             raise POSTimeoutError(f"POS operation {operation!r} timed out.") from exc
         except httpx.RequestError as exc:
+            trace_log(
+                logging.getLogger(__name__),
+                logging.WARNING,
+                "POS",
+                "failed",
+                operation=operation,
+                method=method,
+                endpoint=operation,
+                error_code="pos_connection_error",
+                duration_ms=elapsed_ms(started_at),
+            )
             raise POSConnectionError(
                 f"POS operation {operation!r} could not reach the server."
             ) from exc
 
         if response.status_code != expected_status:
+            trace_log(
+                logging.getLogger(__name__),
+                logging.WARNING,
+                "POS",
+                "failed",
+                operation=operation,
+                method=method,
+                endpoint=operation,
+                status_code=response.status_code,
+                error_code=f"pos_http_{response.status_code}",
+                duration_ms=elapsed_ms(started_at),
+            )
             _raise_http_error(operation, response)
         try:
-            return cast(object, response.json())
+            payload = cast(object, response.json())
         except ValueError as exc:
+            trace_log(
+                logging.getLogger(__name__),
+                logging.WARNING,
+                "POS",
+                "failed",
+                operation=operation,
+                method=method,
+                endpoint=operation,
+                status_code=response.status_code,
+                error_code="pos_invalid_json",
+                duration_ms=elapsed_ms(started_at),
+            )
             raise POSResponseMappingError(
                 f"POS operation {operation!r} returned invalid JSON."
             ) from exc
+        trace_log(
+            logging.getLogger(__name__),
+            logging.INFO,
+            "POS",
+            "completed",
+            operation=operation,
+            method=method,
+            endpoint=operation,
+            status_code=response.status_code,
+            item_count=_safe_item_count(payload),
+            duration_ms=elapsed_ms(started_at),
+        )
+        return payload
+
+
+def _safe_item_count(payload: object) -> int:
+    if isinstance(payload, Mapping):
+        data = payload.get("data")
+        if isinstance(data, list):
+            return len(data)
+    return 0
 
 
 def _availability_params(
@@ -314,9 +385,7 @@ def _create_booking_body(request: CreateBookingRequest) -> dict[str, object]:
         "confirmed_by_customer": True,
     }
     if request.therapist_preference is not None:
-        body["therapist_request"] = _therapist_request_body(
-            request.therapist_preference
-        )
+        body["therapist_request"] = _therapist_request_body(request.therapist_preference)
     return body
 
 
@@ -354,9 +423,7 @@ def _parse_customer_verification(payload: object) -> CustomerVerificationResult:
             "POS returned an ineligible 201 response instead of its documented error."
         )
     if _required(data, "restriction") is not None:
-        raise POSResponseMappingError(
-            "POS eligible response unexpectedly contains a restriction."
-        )
+        raise POSResponseMappingError("POS eligible response unexpectedly contains a restriction.")
 
     raw_customer = _required(data, "customer")
     if raw_customer is None:
@@ -371,9 +438,7 @@ def _parse_customer_verification(payload: object) -> CustomerVerificationResult:
 
     customer = _mapping(raw_customer, "eligibility customer")
     if _string(customer, "customer_type") != "existing":
-        raise POSResponseMappingError(
-            "POS eligibility customer has an unknown customer_type."
-        )
+        raise POSResponseMappingError("POS eligibility customer has an unknown customer_type.")
     customer_id = str(_uuid(customer, "customer_id"))
     _optional_string(customer, "name")
     _boolean(customer, "is_member")
@@ -421,32 +486,21 @@ def _parse_create_booking_result(
     _string(data, "updated_at")
 
     reservations = tuple(
-        _parse_reservation(item, index)
-        for index, item in enumerate(_list(data, "reservations"))
+        _parse_reservation(item, index) for index, item in enumerate(_list(data, "reservations"))
     )
     if len(reservations) != num_customer:
-        raise POSResponseMappingError(
-            "POS child reservation count differs from number_of_people."
-        )
+        raise POSResponseMappingError("POS child reservation count differs from number_of_people.")
     first_courses = reservations[0].courses
     if any(item.courses != first_courses for item in reservations[1:]):
-        raise POSResponseMappingError(
-            "POS group reservations contain different course snapshots."
-        )
+        raise POSResponseMappingError("POS group reservations contain different course snapshots.")
     main_courses = tuple(
         service for service in first_courses if service.course_type is CourseType.MAIN
     )
-    addons = tuple(
-        service for service in first_courses if service.course_type is CourseType.ADDON
-    )
+    addons = tuple(service for service in first_courses if service.course_type is CourseType.ADDON)
     if len(main_courses) != 1:
-        raise POSResponseMappingError(
-            "POS booking response must contain exactly one main course."
-        )
+        raise POSResponseMappingError("POS booking response must contain exactly one main course.")
     if sum(service.duration_minutes for service in first_courses) != duration_minutes:
-        raise POSResponseMappingError(
-            "POS course snapshots disagree with total_duration_minutes."
-        )
+        raise POSResponseMappingError("POS course snapshots disagree with total_duration_minutes.")
 
     booking = Booking(
         booking_id=booking_id,
@@ -582,9 +636,7 @@ def _parse_slots(
     if _uuid(meta, "shop_id") != shop_id:
         raise POSResponseMappingError("POS availability meta contains a different shop_id.")
     if _date(meta, "booking_date") != booking_date:
-        raise POSResponseMappingError(
-            "POS availability meta contains a different booking_date."
-        )
+        raise POSResponseMappingError("POS availability meta contains a different booking_date.")
     if _integer(meta, "number_of_people") != num_customer:
         raise POSResponseMappingError(
             "POS availability meta contains a different number_of_people."
@@ -631,9 +683,7 @@ def _parse_service(
 ) -> Service:
     item = _mapping(value, f"course data[{index}]")
     if _uuid(item, "shop_id") != expected_shop_id:
-        raise POSResponseMappingError(
-            f"POS course data[{index}] contains a different shop_id."
-        )
+        raise POSResponseMappingError(f"POS course data[{index}] contains a different shop_id.")
     return Service(
         service_id=_uuid(item, "course_id"),
         name=_string(item, "name"),
@@ -753,9 +803,7 @@ def _optional_uuid(value: Mapping[str, object], field: str) -> UUID | None:
     try:
         return UUID(raw)
     except ValueError as exc:
-        raise POSResponseMappingError(
-            f"POS field {field!r} must be a UUID or null."
-        ) from exc
+        raise POSResponseMappingError(f"POS field {field!r} must be a UUID or null.") from exc
 
 
 def _date(value: Mapping[str, object], field: str) -> date:

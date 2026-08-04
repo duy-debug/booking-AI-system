@@ -145,10 +145,10 @@ def test_flow_loads_all_booking_states(flow: FlowDefinition) -> None:
             "select_duration",
             BookingState.SELECTING_SERVICE,
         ),
-        (
-            BookingState.SELECTING_SERVICE,
-            "select_course",
-            BookingState.SELECTING_TIME,
+            (
+                BookingState.SELECTING_SERVICE,
+                "select_course",
+                BookingState.SELECTING_SERVICE,
         ),
         (
             BookingState.SELECTING_TIME,
@@ -263,20 +263,25 @@ def test_single_booking_can_skip_therapist(flow: FlowDefinition) -> None:
 def test_service_selection_owns_addons_and_slot_loading(
     flow: FlowDefinition,
 ) -> None:
-    transition = _transition(flow, BookingState.SELECTING_SERVICE, "select_course")
+    transitions = tuple(
+        item
+        for item in flow.states[BookingState.SELECTING_SERVICE].transitions
+        if item.intent == "select_course"
+    )
 
-    assert transition.target is BookingState.SELECTING_TIME
-    assert transition.actions == ("handle_service_selection", "load_time_slots")
-    assert _failure(transition, "addon_without_main_course").target is (
-        BookingState.SELECTING_SERVICE
-    )
-    assert _failure(transition, "combo_not_bookable").target is (
-        BookingState.SELECTING_SERVICE
-    )
+    assert len(transitions) == 2
+    assert transitions[0].target is BookingState.SELECTING_SERVICE
+    assert transitions[0].actions == ("handle_service_selection",)
+    assert transitions[1].target is BookingState.SELECTING_TIME
+    assert transitions[1].actions == ("handle_service_selection", "load_time_slots")
 
 
 def test_service_failure_contract_is_complete(flow: FlowDefinition) -> None:
-    transition = _transition(flow, BookingState.SELECTING_SERVICE, "select_course")
+    transition = tuple(
+        item
+        for item in flow.states[BookingState.SELECTING_SERVICE].transitions
+        if item.intent == "select_course"
+    )[1]
     failures = {failure.condition: failure for failure in transition.on_fail}
 
     assert set(failures) == {
@@ -292,7 +297,8 @@ def test_service_failure_contract_is_complete(flow: FlowDefinition) -> None:
     assert failures["service_duration_mismatch"].target is (
         BookingState.SELECTING_DURATION
     )
-    assert failures["no_slots_available"].target is BookingState.SELECTING_DATE
+    assert failures["no_slots_available"].target is BookingState.SELECTING_SERVICE
+    assert failures["no_slots_available"].actions == ()
 
 
 def test_duration_step_accepts_course_without_loading_slots(

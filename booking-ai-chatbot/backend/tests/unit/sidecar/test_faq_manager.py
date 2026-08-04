@@ -107,6 +107,49 @@ async def test_empty_and_blank_documents_render_safe_no_result() -> None:
 
 
 @pytest.mark.asyncio
+async def test_documents_below_relevance_threshold_are_not_rendered() -> None:
+    gateway = FakeKnowledgeGateway(
+        [KnowledgeDocument("Unrelated content", 0.64, "private")]
+    )
+    builder = RecordingInstructionBuilder()
+    manager = FAQManager(
+        knowledge_gateway=gateway,
+        instruction_builder=cast(InstructionBuilder, builder),
+        min_relevance_score=0.65,
+    )
+
+    response = await manager.answer(
+        query="Pregnancy policy?",
+        context=BookingContext("faq-below-threshold"),
+    )
+
+    assert response.status is DialogTurnStatus.FAILURE_HANDLED
+    assert "Unrelated content" not in response.text
+    assert response.metadata["source_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_document_at_relevance_threshold_is_rendered() -> None:
+    gateway = FakeKnowledgeGateway(
+        [KnowledgeDocument("Grounded answer", 0.65, "private")]
+    )
+    builder = RecordingInstructionBuilder()
+    manager = FAQManager(
+        knowledge_gateway=gateway,
+        instruction_builder=cast(InstructionBuilder, builder),
+        min_relevance_score=0.65,
+    )
+
+    response = await manager.answer(
+        query="Opening hours?",
+        context=BookingContext("faq-at-threshold"),
+    )
+
+    assert response.status is DialogTurnStatus.SUCCESS
+    assert response.text == "Grounded answer"
+
+
+@pytest.mark.asyncio
 async def test_documents_keep_order_normalize_deduplicate_and_limit_first_three() -> None:
     gateway = FakeKnowledgeGateway(
         [

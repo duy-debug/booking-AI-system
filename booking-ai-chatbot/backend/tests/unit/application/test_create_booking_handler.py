@@ -165,7 +165,7 @@ def make_context() -> BookingContext:
         booking_date=BOOKING_DATE,
         start_time=START_TIME,
         num_customer=1,
-        duration_minutes=75,
+        duration_minutes=60,
         phone=CUSTOMER.phone,
         phone_confirmed=True,
         member_rank="gold",

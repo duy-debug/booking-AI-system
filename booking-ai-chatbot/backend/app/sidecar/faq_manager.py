@@ -1,10 +1,14 @@
 """Coordinate deterministic FAQ retrieval outside the booking state machine."""
 
+import logging
+from time import perf_counter
+
 from app.application.ports.knowledge_gateway import (
     KnowledgeDocument,
     KnowledgeGateway,
     KnowledgeGatewayError,
 )
+from app.core.logging import elapsed_ms, trace_log
 from app.dialog.instruction_builder import DialogResponse, InstructionBuilder
 from app.domain.booking_context import BookingContext
 
@@ -18,6 +22,7 @@ _FAQ_NO_RESULT_TEXT = (
 )
 _MAX_DOCUMENTS = 3
 _MAX_ANSWER_CHARS = 2_000
+_LOGGER = logging.getLogger(__name__)
 
 
 class FAQManager:
@@ -28,9 +33,17 @@ class FAQManager:
         *,
         knowledge_gateway: KnowledgeGateway | None,
         instruction_builder: InstructionBuilder,
+        min_relevance_score: float = 0.45,
     ) -> None:
+        if (
+            isinstance(min_relevance_score, bool)
+            or not isinstance(min_relevance_score, int | float)
+            or not 0.0 <= min_relevance_score <= 1.0
+        ):
+            raise ValueError("FAQ relevance threshold must be between zero and one.")
         self._knowledge_gateway = knowledge_gateway
         self._instruction_builder = instruction_builder
+        self._min_relevance_score = float(min_relevance_score)
 
     async def answer(
         self,
@@ -39,25 +52,69 @@ class FAQManager:
         context: BookingContext,
     ) -> DialogResponse:
         """Retrieve and render one FAQ answer while preserving booking state."""
+        started_at = perf_counter()
         gateway = self._knowledge_gateway
         if gateway is None:
+            self._log_failure("qdrant_disabled", started_at)
             return self._render_unavailable(context)
         try:
             documents = await gateway.search(query, limit=_MAX_DOCUMENTS)
         except KnowledgeGatewayError:
+            self._log_failure("knowledge_gateway_unavailable", started_at)
             return self._render_unavailable(context)
-        contents = _document_contents(documents)
+        accepted = [
+            document
+            for document in documents
+            if document.score >= self._min_relevance_score
+        ]
+        top_score = max((document.score for document in documents), default=None)
+        contents = _document_contents(accepted)
         if not contents:
+            trace_log(
+                _LOGGER,
+                logging.INFO,
+                "Knowledge",
+                "no_result",
+                operation="faq_retrieval",
+                candidate_count=len(documents),
+                accepted_result_count=0,
+                top_score=top_score,
+                error_code="no_relevant_result",
+                duration_ms=elapsed_ms(started_at),
+            )
             return self._instruction_builder.build_faq_response(
                 answer=_FAQ_NO_RESULT_TEXT,
                 source_count=0,
                 context=context,
                 handled_failure=True,
             )
+        trace_log(
+            _LOGGER,
+            logging.INFO,
+            "Knowledge",
+            "completed",
+            operation="faq_retrieval",
+            candidate_count=len(documents),
+            accepted_result_count=len(contents),
+            top_score=top_score,
+            duration_ms=elapsed_ms(started_at),
+        )
         return self._instruction_builder.build_faq_response(
             answer="\n\n".join(contents),
             source_count=len(contents),
             context=context,
+        )
+
+    @staticmethod
+    def _log_failure(error_code: str, started_at: float) -> None:
+        trace_log(
+            _LOGGER,
+            logging.WARNING,
+            "Knowledge",
+            "failed",
+            operation="faq_retrieval",
+            error_code=error_code,
+            duration_ms=elapsed_ms(started_at),
         )
 
     def _render_unavailable(self, context: BookingContext) -> DialogResponse:

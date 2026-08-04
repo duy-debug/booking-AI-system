@@ -12,7 +12,14 @@ from types import TracebackType
 
 import pytest
 
-from app.core.logging import JsonFormatter, configure_logging
+from app.core.logging import (
+    JsonFormatter,
+    bind_conversation,
+    configure_logging,
+    mask_conversation_id,
+    reset_conversation,
+    trace_log,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -118,6 +125,55 @@ def test_json_formatter_redacts_sensitive_message_and_nested_extra() -> None:
     assert "0912345678" not in rendered
     assert payload["api_key"] == "[REDACTED]"
     assert payload["metadata"] == {"phone": "[REDACTED]", "safe": "visible"}
+
+
+def test_conversation_marker_is_short_stable_and_non_reversible() -> None:
+    conversation_id = "customer-conversation-123456789"
+
+    marker = mask_conversation_id(conversation_id)
+
+    assert len(marker) == 8
+    assert marker == mask_conversation_id(conversation_id)
+    assert marker not in conversation_id
+
+
+def test_console_trace_redacts_phone_authorization_and_idempotency(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    configure_logging(level="INFO", log_format="console")
+    token = bind_conversation("conversation-private-value")
+    try:
+        trace_log(
+            logging.getLogger("app.trace"),
+            logging.INFO,
+            "Turn",
+            "started",
+            phone="0901234567",
+            authorization="Bearer private-token",
+            idempotency_key="full-idempotency-key",
+        )
+    finally:
+        reset_conversation(token)
+    output = capsys.readouterr().out
+
+    assert "conversation-private-value" not in output
+    assert "0901234567" not in output
+    assert "private-token" not in output
+    assert "full-idempotency-key" not in output
+    assert "[conv:" in output
+    assert "[Turn] started" in output
+
+
+def test_console_redaction_preserves_iso_timestamp(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    configure_logging(level="INFO", log_format="console")
+
+    logging.getLogger("app.trace").info("timestamp-safe")
+    output = capsys.readouterr().out
+
+    assert "[REDACTED_PHONE]" not in output
+    assert "timestamp-safe" in output
 
 
 def test_optional_json_file_uses_rotation_utf8_and_creates_parent(

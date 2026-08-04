@@ -224,7 +224,7 @@ def test_confirmation_summary_formats_context_without_internal_identifiers() -> 
     assert "10:30" in response.text
     assert "Massage thư giãn" in response.text
     assert "Đá nóng" in response.text
-    assert "Kỹ thuật viên: Nữ" in response.text
+    assert "Kỹ thuật viên: Ưu tiên kỹ thuật viên nữ" in response.text
     assert "4567" in response.text
     assert "0901234567" not in response.text
     assert str(BOOKING_ID) not in response.text

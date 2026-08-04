@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.core.config import Settings
+from app.core.config import Settings, load_runtime_environment
 from app.core.logging import configure_logging
 from app.dependencies import application_container_lifespan
 from app.transport.chat_api import router as chat_router
@@ -48,12 +48,16 @@ def create_app(settings: Settings) -> FastAPI:
     return application
 
 
+load_runtime_environment()
+
 _knowledge_qdrant_enabled = _environment_bool("KNOWLEDGE_QDRANT_ENABLED")
 _log_level = os.getenv("LOG_LEVEL", "INFO")
 _log_format = os.getenv("LOG_FORMAT", "console")
 _log_json_path = os.getenv("LOG_JSON_PATH") or None
 _log_max_bytes = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))
 _log_backup_count = int(os.getenv("LOG_BACKUP_COUNT", "5"))
+_log_full_instructions = _environment_bool("LOG_FULL_INSTRUCTIONS")
+_log_raw_chat_messages = _environment_bool("LOG_RAW_CHAT_MESSAGES")
 
 configure_logging(
     level=_log_level,
@@ -66,12 +70,17 @@ configure_logging(
 app = create_app(
     Settings(
         pos_base_url=os.getenv("BOOKING_API_URL", "http://localhost:8000"),
-        openrouter_api_key=os.getenv("OPENROUTER_API_KEY") or None,
-        openrouter_base_url=os.getenv(
-            "OPENROUTER_BASE_URL",
-            "https://openrouter.ai/api/v1",
+        llm_provider=os.getenv("LLM_PROVIDER", "gemini"),
+        gemini_api_key=os.getenv("GEMINI_API_KEY") or None,
+        gemini_base_url=os.getenv(
+            "GEMINI_BASE_URL",
+            "https://generativelanguage.googleapis.com/v1beta/openai/",
         ),
-        openrouter_model=os.getenv("OPENROUTER_MODEL", "openrouter/free"),
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        llm_max_retries=int(os.getenv("LLM_MAX_RETRIES", "0")),
+        dialog_intent_tool_enabled=_environment_bool(
+            "DIALOG_INTENT_TOOL_ENABLED", default=True
+        ),
         embedding_model_name=os.getenv(
             "EMBED_MODEL_NAME",
             "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
@@ -81,10 +90,15 @@ app = create_app(
         qdrant_api_key=os.getenv("QDRANT_API_KEY") or None,
         qdrant_collection=os.getenv("QDRANT_COLLECTION", "kb_chunks"),
         knowledge_qdrant_enabled=_knowledge_qdrant_enabled,
+        rag_hybrid_score_threshold=float(
+            os.getenv("RAG_HYBRID_SCORE_THRESHOLD", "0.45")
+        ),
         log_level=_log_level,
         log_format=_log_format,
         log_json_path=_log_json_path,
         log_max_bytes=_log_max_bytes,
         log_backup_count=_log_backup_count,
+        log_full_instructions=_log_full_instructions,
+        log_raw_chat_messages=_log_raw_chat_messages,
     )
 )

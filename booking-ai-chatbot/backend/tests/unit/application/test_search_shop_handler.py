@@ -106,6 +106,21 @@ async def test_execute_filters_by_address_case_insensitively() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_filters_vietnamese_name_without_requiring_diacritics() -> None:
+    shop = Shop(
+        shop_id=UUID("22222222-2222-2222-2222-222222222222"),
+        name="Komorebi Ba Đình",
+        address="Hà Nội",
+    )
+    fake = FakeBookingGateway([shop])
+
+    result = await make_handler(fake).execute("komorebi ba dinh")
+
+    assert result == [shop]
+    assert fake.received_query is None
+
+
+@pytest.mark.asyncio
 async def test_execute_returns_empty_when_local_query_does_not_match() -> None:
     fake = FakeBookingGateway([SHOP])
 
@@ -133,6 +148,16 @@ async def test_execute_returns_same_empty_list_from_gateway() -> None:
 
     assert result is shops
     assert result == []
+
+
+@pytest.mark.asyncio
+async def test_execute_removes_exact_duplicate_shop_names_only() -> None:
+    duplicate = Shop(SHOP.shop_id, SHOP.name, "Another address")
+    fake = FakeBookingGateway([SHOP, duplicate])
+
+    result = await make_handler(fake).execute()
+
+    assert result == [SHOP]
 
 
 @pytest.mark.asyncio

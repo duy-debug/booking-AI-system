@@ -360,6 +360,7 @@ class DialogController:
             )
 
         self._state_machine.apply_failure(booking_context, failure)
+        booking_context.last_failure_code = failure_code
         return DialogTurnResult(
             status=DialogTurnStatus.FAILURE_HANDLED,
             initial_state=initial_state,

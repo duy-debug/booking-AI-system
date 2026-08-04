@@ -33,12 +33,14 @@ PARSER_OUTPUT_INTENTS = {
     "change_info",
     "confirm",
     "deny",
+    "greeting",
     "provide_phone",
     "select_date",
     "select_duration",
     "select_people",
     "select_time",
     "start_booking",
+    "thanks",
     "unknown",
 }
 OUT_OF_FLOW_INTENTS = {"ask_question"}

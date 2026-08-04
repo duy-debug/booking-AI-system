@@ -38,12 +38,13 @@ class CreateBookingHandler:
         assert context.phone is not None
 
         addon_ids = tuple(addon.service_id for addon in context.addons)
+        total_duration = context.total_duration_minutes or context.duration_minutes
         final_request = FinalAvailabilityRequest(
             shop_id=context.shop.shop_id,
             booking_date=context.booking_date,
             start_time=context.start_time,
             num_customer=context.num_customer,
-            duration_minutes=context.duration_minutes,
+            duration_minutes=total_duration,
             main_course_id=context.service.service_id,
             addon_ids=addon_ids,
             therapist_preference=context.therapist_preference,
@@ -62,7 +63,7 @@ class CreateBookingHandler:
             booking_date=context.booking_date,
             start_time=context.start_time,
             num_customer=context.num_customer,
-            duration_minutes=context.duration_minutes,
+            duration_minutes=total_duration,
             main_course_id=context.service.service_id,
             addon_ids=addon_ids,
             therapist_preference=context.therapist_preference,

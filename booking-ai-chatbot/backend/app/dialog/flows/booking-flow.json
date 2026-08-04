@@ -11,9 +11,26 @@
       },
       "transitions": [
         {
+          "intent": "greeting",
+          "target": "idle",
+          "actions": []
+        },
+        {
+          "intent": "thanks",
+          "target": "idle",
+          "actions": []
+        },
+        {
           "intent": "start_booking",
           "target": "selecting_shop",
-          "actions": ["search_shop"]
+          "actions": ["search_shop"],
+          "on_fail": [
+            {
+              "condition": "*",
+              "target": "idle",
+              "instruction_template": "shop_lookup_unavailable"
+            }
+          ]
         },
         {
           "intent": "unknown",
@@ -226,14 +243,43 @@
       ]
     },
     "selecting_service": {
-      "description": "Waiting for a service or course.",
+      "description": "Waiting for a main course, then an optional add-on.",
       "on_enter": {
         "instruction_template": "ask_service"
       },
       "transitions": [
         {
           "intent": "select_course",
+          "target": "selecting_service",
+          "conditions": [
+            {"field": "service", "op": "null"}
+          ],
+          "actions": ["handle_service_selection"],
+          "on_fail": [
+            {
+              "condition": "course_not_found",
+              "target": "selecting_service",
+              "instruction_template": "ask_service"
+            },
+            {
+              "condition": "main_course_missing",
+              "target": "selecting_service",
+              "instruction_template": "main_course_required"
+            },
+            {
+              "condition": "service_duration_mismatch",
+              "target": "selecting_duration",
+              "actions": ["clear_course_for_reselect"],
+              "instruction_template": "duration_invalid"
+            }
+          ]
+        },
+        {
+          "intent": "select_course",
           "target": "selecting_time",
+          "conditions": [
+            {"field": "service", "op": "not_null"}
+          ],
           "actions": ["handle_service_selection", "load_time_slots"],
           "on_fail": [
             {
@@ -265,8 +311,27 @@
             },
             {
               "condition": "no_slots_available",
-              "target": "selecting_date",
-              "actions": ["clear_date"],
+              "target": "selecting_service",
+              "instruction_template": "no_slots_available"
+            },
+            {
+              "condition": "slot_api_error",
+              "target": "selecting_service",
+              "instruction_template": "slot_api_error"
+            }
+          ]
+        },
+        {
+          "intent": "deny",
+          "target": "selecting_time",
+          "conditions": [
+            {"field": "service", "op": "not_null"}
+          ],
+          "actions": ["skip_addon", "load_time_slots"],
+          "on_fail": [
+            {
+              "condition": "no_slots_available",
+              "target": "selecting_service",
               "instruction_template": "no_slots_available"
             },
             {
@@ -278,8 +343,13 @@
         },
         {
           "intent": "select_duration",
-          "target": "selecting_duration",
-          "actions": []
+          "target": "selecting_service",
+          "actions": ["handle_duration_selection"],
+          "on_fail": {
+            "condition": "duration_not_multiple_15",
+            "target": "selecting_duration",
+            "instruction_template": "duration_invalid"
+          }
         },
         {
           "intent": "select_people",

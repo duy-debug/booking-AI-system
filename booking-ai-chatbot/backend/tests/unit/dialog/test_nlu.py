@@ -35,7 +35,7 @@ def intent_policy() -> StateIntentPolicy:
     return StateIntentPolicy(
         {
             BookingState.IDLE: frozenset(
-                {"start_booking", "ask_question", "unknown"}
+                {"greeting", "thanks", "start_booking", "ask_question", "unknown"}
             ),
             BookingState.SELECTING_SHOP: frozenset(
                 {"select_store", "ask_question", "cancel_flow", "unknown"}
@@ -50,7 +50,15 @@ def intent_policy() -> StateIntentPolicy:
                 {"select_duration", "deny", "cancel_flow", "unknown"}
             ),
             BookingState.SELECTING_SERVICE: frozenset(
-                {"select_course", "cancel_flow", "unknown"}
+                {
+                    "select_course",
+                    "select_duration",
+                    "list_available_times",
+                    "list_therapists",
+                    "change_info",
+                    "cancel_flow",
+                    "unknown",
+                }
             ),
             BookingState.SELECTING_TIME: frozenset(
                 {"select_time", "deny", "cancel_flow", "unknown"}
@@ -480,6 +488,41 @@ def test_shop_parser_returns_query_without_domain_identity(nlu: DeterministicNLU
     assert result.entity_query == "quận 1"
 
 
+@pytest.mark.parametrize(
+    ("phrase", "expected_query"),
+    [
+        ("tôi muốn đặt cửa hàng Komorebi Ba Đình", "komorebi ba đình"),
+        ("tôi muốn đặt chi nhánh Komorebi Bình Thạnh", "komorebi bình thạnh"),
+        ("cho tôi chi nhánh Ba Đình nhé", "ba đình"),
+        ("đặt ở Komorebi Cần Thơ ạ", "komorebi cần thơ"),
+    ],
+)
+def test_shop_parser_extracts_candidate_from_natural_selection_phrase(
+    nlu: DeterministicNLU,
+    phrase: str,
+    expected_query: str,
+) -> None:
+    result = nlu.parse(text=phrase, state=BookingState.SELECTING_SHOP)
+
+    assert result.intent is None
+    assert result.resolution_status is NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED
+    assert result.entity_kind is NLUEntityKind.SHOP
+    assert result.entity_query == expected_query
+
+
+def test_start_booking_phrase_does_not_override_selecting_shop_state(
+    nlu: DeterministicNLU,
+) -> None:
+    result = nlu.parse(
+        text="tôi muốn đặt Komorebi Ba Đình4",
+        state=BookingState.SELECTING_SHOP,
+    )
+
+    assert result.intent is None
+    assert result.resolution_status is NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED
+    assert result.entity_query == "komorebi ba đình4"
+
+
 def test_course_parser_returns_query_and_optional_duration(
     nlu: DeterministicNLU,
 ) -> None:
@@ -561,6 +604,10 @@ def test_booking_request_and_question_use_real_flow_intents(
         "Massage Thái giá bao nhiêu?",
         "Có chỗ đậu xe không?",
         "Có nhận khách mang thai không?",
+        "Có dịch vụ cho phụ nữ mang thai không?",
+        "Dịch vụ có an toàn cho người mang thai không?",
+        "Chính sách cho bà bầu như thế nào?",
+        "Có lưu ý gì trong thai kỳ?",
         "Chính sách hủy lịch như thế nào?",
         "Tôi cần đến trước bao nhiêu phút?",
     ],
@@ -609,12 +656,10 @@ def test_unknown_question_is_unresolved_in_production_fallback_mode() -> None:
     assert result.matched_rule == "question_unresolved"
 
 
-@pytest.mark.parametrize("phrase", ["xin chào", "cảm ơn", "cuối tuần sau"])
-def test_unsupported_or_ambiguous_sentence_uses_unknown(
+def test_ambiguous_sentence_uses_unknown(
     nlu: DeterministicNLU,
-    phrase: str,
 ) -> None:
-    result = nlu.parse(text=phrase, state=BookingState.IDLE)
+    result = nlu.parse(text="cuối tuần sau", state=BookingState.IDLE)
 
     assert result == NLUResult(
         "unknown",
@@ -623,6 +668,22 @@ def test_unsupported_or_ambiguous_sentence_uses_unknown(
         NLUSource.FALLBACK,
         NLUResolutionStatus.RESOLVED,
     )
+
+
+@pytest.mark.parametrize(
+    ("phrase", "intent"),
+    [("xin chào", "greeting"), ("cảm ơn", "thanks")],
+)
+def test_social_intents_are_catalog_resolved(
+    nlu: DeterministicNLU,
+    phrase: str,
+    intent: str,
+) -> None:
+    result = nlu.parse(text=phrase, state=BookingState.IDLE)
+
+    assert result.intent == intent
+    assert result.source is NLUSource.DETERMINISTIC
+    assert result.resolution_status is NLUResolutionStatus.RESOLVED
 
 
 def test_wildcard_without_named_unknown_stays_unresolved() -> None:
@@ -786,3 +847,47 @@ def test_parser_does_not_mutate_context_or_input(nlu: DeterministicNLU) -> None:
         "conversation-1",
         state=BookingState.SELECTING_PEOPLE,
     )
+
+
+@pytest.mark.parametrize(
+    ("text", "intent"),
+    [
+        ("tại sao", "ask_why"),
+        ("cho tôi xem lịch trống", "list_available_times"),
+        ("hôm đó có therapist nào", "list_therapists"),
+        ("xin chào", "greeting"),
+    ],
+)
+def test_global_intents_precede_service_entity_fallback(
+    nlu: DeterministicNLU,
+    text: str,
+    intent: str,
+) -> None:
+    result = nlu.parse(text=text, state=BookingState.SELECTING_SERVICE)
+
+    assert result.intent == intent
+    assert result.entity_kind is None
+
+
+@pytest.mark.parametrize("text", ["60", "60 phút", "đổi sang 90 phút"])
+def test_duration_correction_is_not_a_service_query(
+    nlu: DeterministicNLU,
+    text: str,
+) -> None:
+    result = nlu.parse(text=text, state=BookingState.SELECTING_SERVICE)
+
+    assert result.intent in {"select_duration", "change_info"}
+    assert result.entity_kind is None
+
+
+def test_change_shop_without_new_name_is_not_an_entity_search(
+    nlu: DeterministicNLU,
+) -> None:
+    result = nlu.parse(
+        text="tôi muốn đổi cửa hàng",
+        state=BookingState.SELECTING_SERVICE,
+    )
+
+    assert result.intent == "change_info"
+    assert result.payload == {"change_target": "shop"}
+    assert result.entity_kind is None

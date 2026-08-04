@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import date, time
+from enum import StrEnum
 from uuid import UUID
 
 from app.domain.booking import (
@@ -24,6 +25,14 @@ from app.domain.exceptions import (
 )
 
 
+class ServiceSelectionMode(StrEnum):
+    """Authoritative sub-step while the public dialog state selects services."""
+
+    NONE = "none"
+    MAIN = "main_service"
+    ADDON = "addon"
+
+
 @dataclass(slots=True)
 class BookingContext:
     """Stores mutable booking data for an active conversation."""
@@ -31,7 +40,10 @@ class BookingContext:
     conversation_id: str
     state: BookingState = BookingState.IDLE
     shop: Shop | None = None
+    suggested_shops: tuple[Shop, ...] = ()
+    suggested_shops_loaded: bool = False
     service: Service | None = None
+    service_selection_mode: ServiceSelectionMode = ServiceSelectionMode.NONE
     customer: Customer | None = None
     booking_date: date | None = None
     start_time: time | None = None
@@ -54,6 +66,16 @@ class BookingContext:
     reservation_codes: tuple[str, ...] = ()
     child_reservation_ids: tuple[UUID, ...] = ()
     pending_action: str | None = None
+    last_failure_code: str | None = None
+
+    @property
+    def total_duration_minutes(self) -> int | None:
+        """Return the POS-authoritative total duration of selected courses."""
+        if self.service is None:
+            return self.duration_minutes
+        return self.service.duration_minutes + sum(
+            addon.duration_minutes for addon in self.addons
+        )
 
     def is_ready_to_create(self) -> bool:
         """Return whether all data required to create a booking is present."""
@@ -99,6 +121,8 @@ class BookingContext:
         if shop == self.shop:
             return
         self.shop = shop
+        self.suggested_shops = ()
+        self.suggested_shops_loaded = False
         self._clear_course_and_availability()
         self.member_rank = None
         self.visit_count = None
@@ -137,6 +161,7 @@ class BookingContext:
             return
         self.duration_minutes = value
         self._clear_course_and_availability()
+        self.service_selection_mode = ServiceSelectionMode.MAIN
 
     def set_course_selection(self, selection: CourseSelection) -> None:
         """Set the main course and add-ons and invalidate availability."""
@@ -144,6 +169,15 @@ class BookingContext:
         self.addons = selection.addons
         self.options = ()
         self._clear_availability_and_therapist()
+        self.service_selection_mode = (
+            ServiceSelectionMode.ADDON
+            if not selection.addons
+            else ServiceSelectionMode.NONE
+        )
+
+    def skip_addon(self) -> None:
+        """Finish the optional add-on sub-step without changing the main course."""
+        self.service_selection_mode = ServiceSelectionMode.NONE
 
     def set_service(self, service: Service) -> None:
         """Set a compatible main service without add-ons."""
@@ -271,6 +305,9 @@ class BookingContext:
         self.options = ()
         self._clear_availability_and_therapist()
         self._clear_booking_result()
+        self.service_selection_mode = (
+            ServiceSelectionMode.MAIN if value is not None else ServiceSelectionMode.NONE
+        )
 
     def change_course_selection(
         self,
@@ -286,6 +323,11 @@ class BookingContext:
         self.options = ()
         self._clear_availability_and_therapist()
         self._clear_booking_result()
+        self.service_selection_mode = (
+            ServiceSelectionMode.MAIN
+            if selection is None
+            else ServiceSelectionMode.ADDON
+        )
 
     def change_start_time(self, start_time: time | None) -> None:
         """Replace the selected time and invalidate therapist confirmation."""
@@ -325,6 +367,7 @@ class BookingContext:
         self.addons = ()
         self.options = ()
         self._clear_availability_and_therapist()
+        self.service_selection_mode = ServiceSelectionMode.MAIN
 
     def _clear_availability_and_therapist(self) -> None:
         self.available_slots = None
@@ -339,6 +382,7 @@ class BookingContext:
         self.reservation_codes = ()
         self.child_reservation_ids = ()
         self.pending_action = None
+        self.last_failure_code = None
 
     def reset(self) -> None:
         """Clear temporary booking data while preserving the conversation ID."""
@@ -367,3 +411,5 @@ class BookingContext:
         self.reservation_codes = ()
         self.child_reservation_ids = ()
         self.pending_action = None
+        self.service_selection_mode = ServiceSelectionMode.NONE
+        self.last_failure_code = None

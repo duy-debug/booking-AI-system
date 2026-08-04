@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "synonyms": {
+    "booking": [
+      "đặt lịch",
+      "book lịch",
+      "đặt chỗ",
+      "giữ chỗ"
+    ],
+    "shop": [
+      "cửa hàng",
+      "chi nhánh",
+      "cơ sở",
+      "shop"
+    ],
+    "therapist": [
+      "kỹ thuật viên",
+      "therapist",
+      "nhân viên massage"
+    ],
+    "slot": [
+      "giờ trống",
+      "slot",
+      "khung giờ",
+      "lịch trống"
+    ],
+    "addon": [
+      "add-on",
+      "add on",
+      "addon",
+      "dịch vụ bổ sung"
+    ]
+  }
+}

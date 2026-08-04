@@ -1,9 +1,11 @@
 """Qdrant-backed semantic knowledge retrieval."""
 
 import asyncio
+import logging
 from collections.abc import Sequence
 from math import isfinite
 from pathlib import PurePosixPath
+from time import perf_counter
 from typing import Protocol
 
 from qdrant_client import models
@@ -14,6 +16,7 @@ from app.application.ports.knowledge_gateway import (
     KnowledgeDocument,
     KnowledgeGatewayUnavailableError,
 )
+from app.core.logging import elapsed_ms, trace_log
 from app.rag.semantic_embedding import SentenceTransformerEmbedding
 
 
@@ -59,16 +62,51 @@ class QdrantKnowledgeGateway:
             raise ValueError("Knowledge query must not be empty.")
         if type(limit) is not int or limit <= 0:
             raise ValueError("Knowledge result limit must be a positive integer.")
+        started_at = perf_counter()
         try:
-            return await asyncio.to_thread(self._search_sync, query, limit)
+            documents = await asyncio.to_thread(self._search_sync, query, limit)
         except ApiException as error:
+            trace_log(
+                logging.getLogger(__name__),
+                logging.WARNING,
+                "Knowledge",
+                "failed",
+                operation="qdrant_search",
+                collection=self._collection_name,
+                error_code="qdrant_unavailable",
+                duration_ms=elapsed_ms(started_at),
+            )
             raise KnowledgeGatewayUnavailableError(
                 "Knowledge retrieval infrastructure is unavailable."
             ) from error
-        except OSError as error:
+        except (OSError, RuntimeError) as error:
+            trace_log(
+                logging.getLogger(__name__),
+                logging.WARNING,
+                "Knowledge",
+                "failed",
+                operation="qdrant_search",
+                collection=self._collection_name,
+                error_code="embedding_failure",
+                duration_ms=elapsed_ms(started_at),
+            )
             raise KnowledgeGatewayUnavailableError(
                 "Knowledge embedding infrastructure is unavailable."
             ) from error
+        trace_log(
+            logging.getLogger(__name__),
+            logging.INFO,
+            "Knowledge",
+            "completed",
+            operation="qdrant_search",
+            collection=self._collection_name,
+            vector_candidate_count=len(documents),
+            lexical_candidate_count=0,
+            accepted_result_count=len(documents),
+            top_score=documents[0].score if documents else None,
+            duration_ms=elapsed_ms(started_at),
+        )
+        return documents
 
     def _search_sync(self, query: str, limit: int) -> list[KnowledgeDocument]:
         query_vector = self._embedding.embed_query(query)

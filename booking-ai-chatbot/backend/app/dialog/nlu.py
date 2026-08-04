@@ -2,6 +2,7 @@
 
 import json
 import re
+import unicodedata
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, time, timedelta
@@ -23,6 +24,12 @@ from pydantic import (
 from app.application.ports.llm_gateway import LLMGateway, LLMGatewayError, LLMMessage
 from app.dialog.dialog_controller import DialogTurnInput
 from app.dialog.flow_loader import FlowDefinition
+from app.dialog.nlu_catalog import (
+    Intent,
+    IntentCatalog,
+    load_default_intent_catalog,
+    normalize_vietnamese,
+)
 from app.domain.booking import CourseSelection, Shop
 from app.domain.booking_state import BookingState
 
@@ -56,6 +63,24 @@ FAQ_ALLOWED_STATES = frozenset(
         BookingState.CANCELLED,
     }
 )
+DISCOVERY_ALLOWED_STATES: Mapping[str, frozenset[BookingState]] = MappingProxyType(
+    {
+        "list_shops": frozenset(BookingState),
+        "search_shops": frozenset(BookingState),
+        "list_services": frozenset(
+            BookingState
+        ),
+        "list_addons": frozenset(
+            BookingState
+        ),
+        "list_available_times": frozenset(
+            BookingState
+        ),
+        "list_therapists": frozenset(
+            BookingState
+        ),
+    }
+)
 
 _RULE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _WHITESPACE_PATTERN = re.compile(r"\s+")
@@ -81,14 +106,17 @@ _COURSE_DURATION_PATTERN = re.compile(
 _CANCEL_PHRASES = frozenset(
     {"hủy", "hủy đặt lịch", "dừng đặt lịch", "thôi không đặt nữa"}
 )
-_CONFIRM_PHRASES = frozenset(
-    {"đồng ý", "xác nhận", "đúng", "đúng rồi", "ok", "oke", "yes", "tiếp tục"}
+_RESTART_PHRASES = frozenset({"đặt lại từ đầu", "bắt đầu lại", "restart booking"})
+_WHY_PHRASES = frozenset(
+    {
+        "tại sao",
+        "vì sao",
+        "sao lại thế",
+        "tôi phải làm gì tiếp theo",
+        "bạn đang cần tôi nhập gì",
+    }
 )
-_DENY_PHRASES = frozenset(
-    {"không", "không đồng ý", "sai", "nhập lại", "đổi lại", "no"}
-)
-_GREETING_PHRASES = frozenset({"xin chào", "chào", "hello", "hi"})
-_THANKS_PHRASES = frozenset({"cảm ơn", "cám ơn", "thanks"})
+_REPEAT_PHRASES = frozenset({"nhắc lại", "hỏi lại đi", "lặp lại câu hỏi", "thử lại"})
 _QUESTION_PREFIXES = (
     "ai ",
     "gì ",
@@ -170,6 +198,7 @@ def build_state_intent_policy(
     flow: FlowDefinition,
     *,
     enable_faq: bool = False,
+    enable_discovery: bool = False,
 ) -> StateIntentPolicy:
     """Copy named intents and wildcard availability from an already loaded flow."""
     allowed: dict[BookingState, frozenset[str]] = {}
@@ -182,6 +211,10 @@ def build_state_intent_policy(
     if enable_faq:
         for state in FAQ_ALLOWED_STATES:
             allowed[state] = allowed.get(state, frozenset()) | {"ask_question"}
+    if enable_discovery:
+        for intent, states in DISCOVERY_ALLOWED_STATES.items():
+            for state in states:
+                allowed[state] = allowed.get(state, frozenset()) | {intent}
     return StateIntentPolicy(allowed, frozenset(wildcard_states))
 
 
@@ -278,6 +311,7 @@ class DeterministicNLU:
         intent_policy: StateIntentPolicy,
         today_provider: TodayProvider = date.today,
         unknown_as_unresolved: bool = False,
+        catalog: IntentCatalog | None = None,
     ) -> None:
         if not isinstance(intent_policy, StateIntentPolicy):
             raise TypeError("Intent policy must be a StateIntentPolicy.")
@@ -288,6 +322,7 @@ class DeterministicNLU:
         self._intent_policy = intent_policy
         self._today_provider = today_provider
         self._unknown_as_unresolved = unknown_as_unresolved
+        self._catalog = catalog or load_default_intent_catalog()
 
     def parse(self, *, text: str, state: BookingState) -> NLUResult:
         """Return the first deterministic match according to rule precedence."""
@@ -303,10 +338,26 @@ class DeterministicNLU:
                 allow_unknown=not self._unknown_as_unresolved,
             )
 
-        if _looks_like_change_request(normalized):
-            today = self._today_provider()
-            if not isinstance(today, date):
-                raise TypeError("Today provider must return a date.")
+        today = self._today_provider()
+        if not isinstance(today, date):
+            raise TypeError("Today provider must return a date.")
+        catalog_match = self._catalog.match(text, state)
+        unrestricted_catalog_match = self._catalog.match(text)
+
+        if normalized in _CANCEL_PHRASES:
+            return _resolved(
+                self._intent_policy, state, "cancel_flow", {}, 1.0, "cancel_exact"
+            )
+        if normalized in _RESTART_PHRASES:
+            return _globally_resolved("restart_booking", "restart_exact")
+
+        change_catalog_match = (
+            catalog_match is not None and catalog_match.intent is Intent.CHANGE_INFO
+        ) or (
+            unrestricted_catalog_match is not None
+            and unrestricted_catalog_match.intent is Intent.CHANGE_INFO
+        )
+        if change_catalog_match:
             change_result = _parse_change_request(
                 normalized,
                 state=state,
@@ -316,7 +367,19 @@ class DeterministicNLU:
             if change_result is not None:
                 return change_result
 
-        if _is_explicit_faq(normalized):
+        global_catalog_match = catalog_match or unrestricted_catalog_match
+        if global_catalog_match is not None and global_catalog_match.intent in {
+            Intent.GREETING,
+            Intent.THANKS,
+        }:
+            return _globally_resolved(
+                global_catalog_match.intent.value,
+                f"catalog_{global_catalog_match.intent.value}",
+            )
+
+        if global_catalog_match is not None and global_catalog_match.intent in {
+            Intent.FAQ,
+        }:
             return _resolved(
                 self._intent_policy,
                 state,
@@ -326,17 +389,42 @@ class DeterministicNLU:
                 "faq_explicit",
             )
 
-        if normalized in _CANCEL_PHRASES:
+        if global_catalog_match is not None and global_catalog_match.intent in {
+            Intent.LIST_SHOPS,
+            Intent.SEARCH_SHOPS,
+            Intent.LIST_SERVICES,
+            Intent.LIST_ADDONS,
+            Intent.LIST_AVAILABLE_TIMES,
+            Intent.LIST_THERAPISTS,
+        }:
+            payload: dict[str, object] = {}
+            if global_catalog_match.intent is Intent.SEARCH_SHOPS:
+                location_query = _extract_location_query(normalized)
+                if location_query is None:
+                    return _unresolved(
+                        source=NLUSource.DETERMINISTIC,
+                        matched_rule="catalog_search_shops",
+                    )
+                payload["location_query"] = location_query
             return _resolved(
                 self._intent_policy,
                 state,
-                "cancel_flow",
-                {},
-                1.0,
-                "cancel_exact",
+                global_catalog_match.intent.value,
+                payload,
+                0.95,
+                f"catalog_{global_catalog_match.intent.value}",
             )
+        if normalized in _WHY_PHRASES:
+            return _globally_resolved("ask_why", "ask_why_exact")
+        if normalized in _REPEAT_PHRASES:
+            return _globally_resolved("repeat_last_question", "repeat_exact")
 
-        if _contains_booking_request(normalized):
+        scalar_result = self._parse_scalar_for_state(normalized, state, today)
+        if scalar_result is not None:
+            return scalar_result
+
+        if catalog_match is not None and catalog_match.intent is Intent.START_BOOKING:
+            booking_date, _ = _extract_date(normalized, today)
             return _resolved(
                 self._intent_policy,
                 state,
@@ -344,6 +432,7 @@ class DeterministicNLU:
                 {},
                 0.95,
                 "start_booking_phrase",
+                has_unconsumed_entities=booking_date is not None,
             )
 
         correction = state is BookingState.SELECTING_PEOPLE and " mà " in normalized
@@ -359,7 +448,7 @@ class DeterministicNLU:
                     "people_correction",
                 )
 
-        if normalized in _CONFIRM_PHRASES:
+        if catalog_match is not None and catalog_match.intent is Intent.CONFIRM:
             return _resolved(
                 self._intent_policy,
                 state,
@@ -368,7 +457,7 @@ class DeterministicNLU:
                 1.0,
                 "confirm_exact",
             )
-        if normalized in _DENY_PHRASES or normalized.startswith("không phải "):
+        if catalog_match is not None and catalog_match.intent is Intent.DENY:
             return _resolved(
                 self._intent_policy,
                 state,
@@ -378,18 +467,46 @@ class DeterministicNLU:
                 "deny_exact",
             )
 
-        today = self._today_provider()
-        if not isinstance(today, date):
-            raise TypeError("Today provider must return a date.")
-        state_result = self._parse_for_state(normalized, state, today)
+        state_restricted_intents = {
+            Intent.START_BOOKING,
+            Intent.CONFIRM,
+            Intent.DENY,
+            Intent.GREETING,
+            Intent.THANKS,
+        }
+        if (
+            catalog_match is None
+            and unrestricted_catalog_match is not None
+            and unrestricted_catalog_match.intent in state_restricted_intents
+        ):
+            is_shop_selection = (
+                state is BookingState.SELECTING_SHOP
+                and unrestricted_catalog_match.intent is Intent.START_BOOKING
+                and _looks_like_shop_selection(normalized)
+            )
+            if not is_shop_selection:
+                return _unresolved(
+                    source=NLUSource.DETERMINISTIC,
+                    matched_rule=(
+                        f"catalog_{unrestricted_catalog_match.intent.value}_disallowed"
+                    ),
+                )
+
+        state_result = self._parse_entity_for_state(normalized, state)
         if state_result is not None:
             return state_result
 
-        if normalized in _GREETING_PHRASES or normalized in _THANKS_PHRASES:
-            return _fallback(
+        if catalog_match is not None and catalog_match.intent in {
+            Intent.GREETING,
+            Intent.THANKS,
+        }:
+            return _resolved(
                 self._intent_policy,
                 state,
-                allow_unknown=not self._unknown_as_unresolved,
+                catalog_match.intent.value,
+                {},
+                1.0,
+                f"catalog_{catalog_match.intent.value}",
             )
         if _looks_like_question(text, normalized):
             return _unresolved(
@@ -403,13 +520,15 @@ class DeterministicNLU:
             allow_unknown=not self._unknown_as_unresolved,
         )
 
-    def _parse_for_state(
+    def _parse_scalar_for_state(
         self,
         text: str,
         state: BookingState,
         today: date,
     ) -> NLUResult | None:
         if state is BookingState.SELECTING_PEOPLE:
+            if text.startswith("không phải "):
+                return None
             people = _extract_people(text, allow_bare=True)
             if people is not None:
                 people_payload: dict[str, object] = {"num_customer": people}
@@ -425,9 +544,16 @@ class DeterministicNLU:
                     ),
                 )
 
-        if state is BookingState.SELECTING_DURATION:
+        if state in {BookingState.SELECTING_DURATION, BookingState.SELECTING_SERVICE}:
             duration, rule = _extract_duration(text, allow_bare=True)
-            if duration is not None and rule is not None:
+            if (
+                duration is not None
+                and rule is not None
+                and (
+                    state is BookingState.SELECTING_DURATION
+                    or _is_duration_correction(text)
+                )
+            ):
                 duration_payload: dict[str, object] = {
                     "duration_minutes": duration
                 }
@@ -487,6 +613,13 @@ class DeterministicNLU:
                     "phone_candidate",
                 )
 
+        return None
+
+    def _parse_entity_for_state(
+        self,
+        text: str,
+        state: BookingState,
+    ) -> NLUResult | None:
         if state is BookingState.SELECTING_SHOP:
             query = _extract_shop_query(text)
             if query is not None:
@@ -545,7 +678,7 @@ def to_dialog_turn_input(
 
 
 def _normalize_text(text: str) -> str:
-    lowered = text.casefold().strip()
+    lowered = unicodedata.normalize("NFC", text).casefold().strip()
     punctuation_normalized = _PUNCTUATION_PATTERN.sub(" ", lowered)
     return _WHITESPACE_PATTERN.sub(" ", punctuation_normalized).strip()
 
@@ -576,6 +709,26 @@ def _resolved(
         matched_rule=matched_rule,
         has_unconsumed_entities=has_unconsumed_entities,
     )
+
+
+def _globally_resolved(intent: str, matched_rule: str) -> NLUResult:
+    """Build a transport-handled intent that is valid independently of flow state."""
+    return NLUResult(
+        intent=intent,
+        payload={},
+        confidence=1.0,
+        source=NLUSource.DETERMINISTIC,
+        resolution_status=NLUResolutionStatus.RESOLVED,
+        matched_rule=matched_rule,
+    )
+
+
+def _is_duration_correction(text: str) -> bool:
+    stripped = _strip_prefixes(
+        text,
+        ("đổi sang ", "đổi thời lượng sang ", "chọn "),
+    )
+    return bool(re.fullmatch(r"\d{1,3}(?:\s*phút)?", stripped))
 
 
 def _fallback(
@@ -643,34 +796,6 @@ def _entity_required(
         entity_kind=kind,
         change_target=change_target,
         has_unconsumed_entities=has_unconsumed_entities,
-    )
-
-
-def _contains_booking_request(text: str) -> bool:
-    return text == "đặt lịch" or " muốn đặt lịch" in f" {text}"
-
-
-def _is_explicit_faq(text: str) -> bool:
-    patterns = (
-        "mở cửa lúc mấy giờ",
-        "đóng cửa lúc mấy giờ",
-        "giá bao nhiêu",
-        "có chỗ đậu xe không",
-        "có nhận khách mang thai không",
-        "chính sách hủy lịch",
-        "đến trước bao nhiêu phút",
-    )
-    return any(pattern in text for pattern in patterns)
-
-
-def _looks_like_change_request(text: str) -> bool:
-    return (
-        text.startswith(("đổi ", "chọn lại ", "sửa "))
-        or text.startswith(
-            ("chọn giờ khác", "chọn khung giờ khác", "chọn liệu trình khác")
-        )
-        or " đổi " in f" {text} "
-        or text.startswith("không yêu cầu kỹ thuật viên")
     )
 
 
@@ -764,7 +889,7 @@ def _change_entity_query(
 ) -> str | None:
     query = _strip_prefixes(
         text,
-        ("đổi sang ", "đổi ", "chọn lại ", "chọn "),
+        ("tôi muốn đổi ", "đổi sang ", "đổi ", "chọn lại ", "chọn "),
     )
     prefixes = (
         ("chi nhánh ", "cửa hàng ")
@@ -915,31 +1040,65 @@ def _extract_phone(text: str) -> str | None:
 
 
 def _extract_shop_query(text: str) -> str | None:
-    if text in _GREETING_PHRASES or text in _THANKS_PHRASES:
-        return None
     query = _strip_prefixes(
         text,
         (
+            "tôi muốn đặt cửa hàng ",
+            "tôi muốn đặt chi nhánh ",
             "tôi muốn đặt tại ",
+            "tôi muốn đặt ở ",
+            "tôi muốn đặt bên ",
+            "tôi muốn đặt ",
             "tôi muốn chọn ",
+            "tôi chọn cửa hàng ",
+            "tôi chọn chi nhánh ",
+            "cho tôi cửa hàng ",
+            "cho tôi chi nhánh ",
+            "cho mình cửa hàng ",
+            "cho mình chi nhánh ",
+            "đặt cửa hàng ",
+            "đặt chi nhánh ",
+            "đặt tại ",
+            "đặt ở ",
             "chọn ",
             "chi nhánh ",
             "cửa hàng ",
         ),
     )
     query = _strip_prefixes(query, ("chi nhánh ", "cửa hàng "))
+    query = _strip_suffixes(
+        query,
+        (" giúp mình", " giúp tôi", " cho mình", " cho tôi", " nhé", " nha", " ạ"),
+    )
     return query or None
 
 
+def _looks_like_shop_selection(text: str) -> bool:
+    return (
+        "komorebi" in text
+        or "chi nhánh" in text
+        or "cửa hàng" in text
+        or text.startswith(("đặt ở ", "đặt tại ", "đặt bên "))
+    )
+
+
 def _extract_course_query(text: str) -> str | None:
-    if text in _GREETING_PHRASES or text in _THANKS_PHRASES:
-        return None
+    text = normalize_vietnamese(text, service_context=True)
     without_duration = _COURSE_DURATION_PATTERN.sub(" ", text)
     query = _WHITESPACE_PATTERN.sub(" ", without_duration).strip()
     query = _strip_prefixes(
         query,
         ("tôi muốn chọn ", "tôi muốn ", "chọn ", "liệu trình "),
     )
+    return query or None
+
+
+def _extract_location_query(text: str) -> str | None:
+    marker = " ở "
+    if marker not in f" {text} ":
+        return None
+    query = text.rsplit(marker, 1)[-1].strip()
+    query = _strip_prefixes(query, ("khu vực ", "tỉnh ", "thành phố "))
     return query or None
 
 
@@ -1001,6 +1160,13 @@ def _strip_prefixes(text: str, prefixes: tuple[str, ...]) -> str:
     return text
 
 
+def _strip_suffixes(text: str, suffixes: tuple[str, ...]) -> str:
+    for suffix in suffixes:
+        if text.endswith(suffix):
+            return text[: -len(suffix)].strip()
+    return text
+
+
 def _has_secondary_entities(
     text: str,
     today: date,
@@ -1052,10 +1218,22 @@ def _validate_dispatch_payload(
         "cancel_flow",
         "confirm",
         "deny",
+        "greeting",
+        "ask_why",
+        "list_addons",
+        "list_available_times",
+        "list_services",
+        "list_shops",
+        "list_therapists",
+        "repeat_last_question",
+        "restart_booking",
         "start_booking",
+        "thanks",
         "unknown",
     }:
         expected_keys, expected_type = frozenset(), None
+    elif intent == "search_shops":
+        expected_keys, expected_type = frozenset({"location_query"}), str
     else:
         raise NLUResultNotDispatchableError(
             "NLU intent has no direct dispatch payload contract."
@@ -1171,7 +1349,17 @@ _LLM_ENTITY_INTENTS = {
     NLUEntityKind.THERAPIST: "select_therapist",
 }
 _LLM_NO_PAYLOAD_INTENTS = frozenset(
-    {"cancel_flow", "confirm", "deny", "start_booking"}
+    {
+        "cancel_flow",
+        "confirm",
+        "deny",
+        "list_addons",
+        "list_available_times",
+        "list_services",
+        "list_shops",
+        "list_therapists",
+        "start_booking",
+    }
 )
 
 
@@ -1296,7 +1484,9 @@ def _build_llm_messages(
         "Entities may only contain number_of_people, duration_minutes, booking_date "
         "(YYYY-MM-DD), start_time (HH:MM), phone, confirmation, therapist_gender, "
         "change_target, query. Use intent change_info for an in-progress booking "
-        "change and ask_question for an FAQ query. "
+        "change and ask_question for an FAQ query. Use list_shops, search_shops, "
+        "list_services, list_addons, list_available_times, or list_therapists only "
+        "for discovery requests; search_shops must put the location in entities.query. "
         "For shop/course/therapist return only entity_kind and entity_query; never infer "
         "IDs or return domain objects. Example: "
         '{"intent":"select_people","confidence":0.9,'
@@ -1332,6 +1522,9 @@ def _llm_direct_payload(
     if intent == "ask_question" and entities.query is not None:
         query = entities.query.strip()
         return {"query": query} if query else None
+    if intent == "search_shops" and entities.query is not None:
+        query = entities.query.strip()
+        return {"location_query": query} if query else None
     if intent == "select_people" and entities.number_of_people is not None:
         return {"num_customer": entities.number_of_people}
     if intent == "select_duration" and entities.duration_minutes is not None:

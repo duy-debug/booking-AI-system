@@ -3,6 +3,19 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+
+def _default_env_path() -> Path:
+    return Path(__file__).resolve().parents[2] / ".env"
+
+
+def load_runtime_environment(env_file: Path | None = None) -> Path:
+    """Load backend-local defaults without overriding the process environment."""
+    resolved_path = (env_file or _default_env_path()).resolve()
+    load_dotenv(dotenv_path=resolved_path, override=False)
+    return resolved_path
+
 
 def _default_booking_flow_path() -> Path:
     return Path(__file__).resolve().parents[1] / "dialog" / "flows" / "booking-flow.json"
@@ -23,9 +36,12 @@ class Settings:
     max_auto_transitions: int = 8
     enable_llm_nlu_fallback: bool = True
     llm_nlu_min_confidence: float = 0.70
-    openrouter_api_key: str | None = None
-    openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    openrouter_model: str = "openrouter/free"
+    llm_provider: str = "gemini"
+    gemini_api_key: str | None = None
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    gemini_model: str = "gemini-2.5-flash"
+    llm_max_retries: int = 0
+    dialog_intent_tool_enabled: bool = True
     embedding_model_name: str = (
         "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     )
@@ -34,8 +50,11 @@ class Settings:
     qdrant_api_key: str | None = None
     qdrant_collection: str = "kb_chunks"
     knowledge_qdrant_enabled: bool = False
+    rag_hybrid_score_threshold: float = 0.45
     log_level: str = "INFO"
     log_format: str = "console"
     log_json_path: str | None = None
     log_max_bytes: int = 10 * 1024 * 1024
     log_backup_count: int = 5
+    log_full_instructions: bool = False
+    log_raw_chat_messages: bool = False
