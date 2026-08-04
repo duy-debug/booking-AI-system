@@ -32,7 +32,6 @@ from app.domain.booking import (
 )
 from app.domain.booking_context import BookingContext
 from app.domain.booking_rules import BookingRules
-from app.domain.booking_state import BookingState
 from app.domain.exceptions import (
     BookingConflictError,
     BookingContextNotReadyError,
@@ -145,17 +144,6 @@ class FailureDescriptor:
     code: str
     action_name: str
     cause: Exception
-
-
-@dataclass(frozen=True, slots=True)
-class FailureExecutionResult:
-    """Contains prepared failure metadata without rendering or state commit."""
-
-    failure_code: str
-    target: BookingState
-    instruction_template: str | None
-    action_report: ActionExecutionReport
-    original_error: ActionExecutionError
 
 
 def _require_payload_value(

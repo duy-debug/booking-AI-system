@@ -297,16 +297,6 @@ async def application_container_lifespan(
         await container.close()
 
 
-def get_dialog_controller(container: ApplicationContainer) -> DialogController:
-    """Return the container's dialog controller."""
-    return container.dialog_controller
-
-
-def get_memory_cache(container: ApplicationContainer) -> MemoryCache:
-    """Return the container's conversation context cache."""
-    return container.memory_cache
-
-
 def _validate_conversation_id(conversation_id: str) -> str:
     if not isinstance(conversation_id, str):
         raise InvalidConversationIdError("Conversation ID must be a string.")

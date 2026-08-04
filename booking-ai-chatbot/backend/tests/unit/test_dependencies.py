@@ -330,8 +330,6 @@ async def test_dependency_getters_return_container_instances() -> None:
         http_client=client,
     )
 
-    assert dependencies.get_dialog_controller(container) is container.dialog_controller
-    assert dependencies.get_memory_cache(container) is container.memory_cache
 
     await container.close()
     await client.aclose()

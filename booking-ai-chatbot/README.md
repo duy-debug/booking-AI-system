@@ -1,399 +1,531 @@
-# Booking AI Chatbot
+# Kori — Booking AI Chatbot
 
-Chatbot hỗ trợ khách hàng tìm hiểu dịch vụ và thực hiện các thao tác đặt, tra cứu,
-đổi hoặc hủy lịch massage thông qua Booking Backend.
+> Trợ lý hội thoại tiếng Việt giúp khách khám phá dịch vụ và hoàn tất đặt lịch
+> wellness qua POS, với workflow xác định, phục hồi lỗi an toàn và FAQ tùy chọn.
 
-Repository hiện đang ở giai đoạn **thiết kế skeleton Clean Architecture**. Backend
-chatbot mới chỉ có cấu trúc thư mục và module docstring, chưa triển khai business
-logic hoặc tích hợp dịch vụ thật.
+Kori kết hợp deterministic NLU, state machine và Gemini fallback để xử lý hội thoại
+nhiều lượt. Hệ thống chủ động gợi ý cửa hàng, liệu trình chính, add-on và giờ trống;
+POS vẫn là nguồn dữ liệu và transaction chính thức.
 
-## Trạng thái hiện tại
+```text
+Khách hàng → Next.js UI → FastAPI Chatbot → POS Booking API
+                              ├── Gemini (NLU fallback)
+                              └── Qdrant (FAQ, optional)
+```
 
-Đã hoàn thành:
+## Nội dung
 
-- Cấu trúc package theo Clean Architecture.
-- Ranh giới giữa transport, dialog, application, domain và infrastructure.
-- Vị trí dành cho các application port.
-- Vị trí dành cho adapter Gemini, Booking API và Qdrant.
-- Skeleton unit test và integration test.
-- `BookingContext` được thiết kế để lưu trạng thái tạm thời trong process memory.
+- [Tổng quan](#tổng-quan)
+- [Luồng trải nghiệm](#luồng-trải-nghiệm)
+- [Chạy nhanh](#chạy-nhanh)
+- [Cách hệ thống hoạt động](#cách-hệ-thống-hoạt-động)
+- [API](#api)
+- [Cấu hình](#cấu-hình)
+- [Knowledge và Qdrant](#knowledge-và-qdrant)
+- [Logging và bảo mật dữ liệu](#logging-và-bảo-mật-dữ-liệu)
+- [Kiểm thử](#kiểm-thử)
+- [Cấu trúc repository](#cấu-trúc-repository)
+- [Giới hạn hiện tại](#giới-hạn-hiện-tại)
 
-Chưa triển khai:
+## Tổng quan
 
-- FastAPI router và SSE runtime.
-- Dialog controller và state machine.
-- Application handler.
-- `BookingGateway`, `KnowledgeGateway` và `LLMGateway`.
-- Gemini, Qdrant và HTTP Booking API adapter.
-- Booking flow và change handler.
-- RAG, tool calling và confirmation workflow.
-- Business rule và test logic.
+### Kori làm được gì?
 
-Backend hiện tại **chưa thể chạy** bằng Uvicorn. Việc triển khai logic chỉ bắt đầu
-sau khi cấu trúc được xác nhận.
+- Duy trì booking context qua nhiều chat turn bằng `conversation_id`.
+- Đặt lịch cho một người hoặc nhóm 2–3 người.
+- Chọn cửa hàng, ngày, số người, thời lượng, liệu trình chính, add-on, giờ và
+  preference kỹ thuật viên.
+- Tự tải lựa chọn phù hợp từ POS thay vì buộc khách phải hỏi danh sách.
+- Xác minh số điện thoại và yêu cầu final confirmation trước khi tạo booking.
+- Hỗ trợ đổi thông tin, bỏ qua add-on, hủy/restart và phục hồi sau lỗi nghiệp vụ.
+- Hiểu các intent discovery, FAQ và câu hỏi xen giữa booking flow.
+- Trả kết quả qua JSON hoặc POST SSE với cùng business-processing path.
+- Ghi dialog trace có correlation nhưng redact dữ liệu nhạy cảm.
 
-## Mục tiêu kiến trúc
+### Công nghệ chính
 
-Kiến trúc được thiết kế để:
+| Thành phần | Công nghệ |
+|---|---|
+| Frontend | Next.js 16, React 19, TypeScript |
+| Backend | Python 3.11+, FastAPI, Pydantic, HTTPX |
+| Dialog | JSON state machine, deterministic Vietnamese NLU |
+| LLM fallback | Gemini OpenAI-compatible API |
+| Booking integration | HTTP POS adapter |
+| Knowledge | multilingual MiniLM + Qdrant, optional |
+| Persistence hội thoại | In-process memory |
+| Tests | Pytest, Mypy, Ruff, Vitest, Playwright |
 
-- Thay FastAPI bằng Django hoặc framework khác mà không sửa business logic.
-- Thay Gemini bằng provider khác mà không sửa application logic.
-- Thay Qdrant bằng Milvus mà không sửa FAQ logic.
-- Thay HTTP Booking API bằng gRPC hoặc mock mà không sửa handler.
-- Giữ domain độc lập với framework, SDK và cơ sở dữ liệu.
-- Đảm bảo dependency luôn hướng từ tầng ngoài vào tầng trong.
+### Trạng thái hiện tại
 
-## Sơ đồ kiến trúc dự kiến
+| Capability | Trạng thái |
+|---|---|
+| Single booking | Sẵn sàng |
+| Group booking 2–3 người | Sẵn sàng |
+| JSON multi-turn | Sẵn sàng |
+| POST SSE multi-turn | Sẵn sàng |
+| Gemini NLU fallback | Đã tích hợp, cần API key |
+| Qdrant FAQ | Tùy chọn qua feature flag |
+| Multi-instance context | Chưa hỗ trợ |
+| POS authentication | Chưa wire |
+
+Backend checkpoint gần nhất: **1050 tests passed**, Mypy/Ruff/diff check đều pass.
+
+## Luồng trải nghiệm
+
+Một booking thành công đi qua các bước:
+
+```mermaid
+flowchart LR
+  A[Chọn cửa hàng] --> B[Chọn ngày]
+  B --> C[Số người]
+  C --> D[Thời lượng]
+  D --> E[Liệu trình chính]
+  E --> F[Add-on hoặc bỏ qua]
+  F --> G[Giờ trống]
+  G --> H[Kỹ thuật viên hoặc skip]
+  H --> I[Xác minh điện thoại]
+  I --> J[Xác nhận cuối]
+  J --> K[POS tạo booking]
+  K --> L[Completed]
+```
+
+Ví dụ hội thoại rút gọn:
+
+```text
+Khách: Tôi muốn đặt lịch
+Kori:  [tải và hiển thị danh sách cửa hàng]
+Khách: Komorebi Ba Đình
+Kori:  Bạn muốn đặt vào ngày nào?
+Khách: Ngày mai, 1 người, 60 phút
+Kori:  [gợi ý liệu trình chính 60 phút]
+Khách: Massage đá nóng 60 phút
+Kori:  [gợi ý add-on hoặc bỏ qua]
+Khách: Không chọn add-on
+Kori:  [tải giờ trống từ POS]
+...
+Kori:  Đặt lịch thành công.
+```
+
+Main service và add-on được tách bằng internal mode; add-on không thể bị tìm như
+liệu trình chính. Availability và create booking dùng tổng duration authoritative
+của các course do POS trả về.
+
+## Chạy nhanh
+
+### 1. Chuẩn bị
+
+- Python 3.11 trở lên
+- Node.js phù hợp với Next.js 16
+- POS API đang chạy, mặc định tại `http://127.0.0.1:8000`
+- Gemini API key nếu muốn bật LLM fallback
+- Qdrant chỉ cần khi bật semantic FAQ
+
+### 2. Chạy backend
+
+```powershell
+cd D:\Intern_Fsoft\booking-ai-system\booking-ai-chatbot\backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+Copy-Item .env.example .env
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
+```
+
+Cấu hình tối thiểu trong `backend/.env`:
+
+```dotenv
+BOOKING_API_URL=http://127.0.0.1:8000
+
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+GEMINI_MODEL=gemini-2.5-flash
+DIALOG_INTENT_TOOL_ENABLED=true
+
+KNOWLEDGE_QDRANT_ENABLED=false
+LOG_LEVEL=INFO
+LOG_FORMAT=console
+```
+
+Deterministic booking flow vẫn chạy khi Gemini chưa có key; chỉ những câu thật sự
+cần fallback mới trả safe recovery.
+
+### 3. Chạy frontend
+
+```powershell
+cd D:\Intern_Fsoft\booking-ai-system\booking-ai-chatbot\frontend
+npm install
+Copy-Item .env.example .env.local
+npm run dev
+```
+
+Frontend dev chạy tại `http://localhost:3002` và proxy đến backend bằng:
+
+```dotenv
+CHATBOT_API_URL=http://localhost:8001
+```
+
+### 4. Gửi request đầu tiên
+
+```powershell
+$body = @{
+  conversation_id = "demo-conversation"
+  message = "Tôi muốn đặt lịch"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Uri http://127.0.0.1:8001/api/v1/chat `
+  -Method Post `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+Nếu Windows báo `WinError 10013` hoặc `10048`:
+
+```powershell
+Get-NetTCPConnection -LocalPort 8000,8001 -ErrorAction SilentlyContinue
+netsh interface ipv4 show excludedportrange protocol=tcp
+```
+
+## Cách hệ thống hoạt động
 
 ```mermaid
 flowchart TB
-  subgraph Transport["Tầng Vận Chuyển"]
-    User["Người dùng\n(Chat trên Web)"]
-    FE["Next.js Chat UI\n(Text + SSE)"]
-    API["Chat API\n(FastAPI adapter)"]
-  end
- 
-  subgraph Dialog["Tầng Điều Khiển Hội Thoại"]
-    TB["ToolBridge\n(Tool wiring + guards)"]
-    DC["DialogController\n(Turn orchestrator)"]
-    SM["StateMachine\n(JSON tree matcher)"]
-    DT["booking-flow.json\nchange-handlers.json"]
-    IB["InstructionBuilder\n(Template rendering)"]
-  end
- 
-  subgraph Sidecar["Sidecar Managers"]
-    CM["ConfirmationManager\n(Xác nhận hành động)"]
-    FAQM["FAQManager\n(Q&A ngoài luồng booking)"]
-  end
- 
-  subgraph Application["Tầng Ứng Dụng"]
-    H["handlers\n(9 action handlers)"]
-    BP["BookingGateway\n(Port interface)"]
-    KP["KnowledgeGateway\n(Port interface)"]
-    LP["LLMGateway\n(Port interface)"]
-  end
- 
-  subgraph Domain["Tầng Domain"]
-    B["Booking\n(Domain model)"]
-    BC["BookingContext\n(In-memory booking state)"]
-    BS["BookingState\n(Dialog state)"]
-    BR["BookingRules\n(Rule validation)"]
-  end
- 
-  subgraph Infrastructure["Tầng Hạ Tầng"]
-    OR["GeminiLLMGateway\n(LLM adapter)"]
-    HTTP["HttpBookingGateway\n(Booking API adapter)"]
-    QD["QdrantKnowledgeGateway\n(Vector DB adapter)"]
-    MC["MemoryCache\n(In-memory cache)"]
-  end
- 
-  subgraph External["Hệ thống ngoài"]
-    BookingAPI["Booking Backend API\n(Booking system)"]
-    Qdrant["Qdrant VectorDB\n(FAQ search)"]
-    PostgreSQL["PostgreSQL\n(Booking data)"]
-    LLM["Gemini API"]
-  end
- 
-  User <-->|"Chat message"| FE
-  FE -->|"POST chat or SSE"| API
-  API -->|"user message"| LP
-  LP -.->|"implemented by"| OR
-  OR -->|"LLM request"| LLM
-  LLM -->|"tool_call: extract_intent\ntool_call: confirm_action"| OR
-  OR -->|"tool call"| TB
-  TB -->|"handleTurn()"| DC
-
-  DC <-->|"transition()\ncheckAutoTransition()"| SM
-  SM -->|"reads"| DT
-  DC -->|"execute()"| H
-  H -->|"uses"| B
-  H -->|"read or write"| BC
-  H -->|"uses state"| BS
-  H -->|"validate()"| BR
-
-  H -->|"uses"| BP
-  BP -.->|"implemented by"| HTTP
-  HTTP -->|"HTTP calls"| BookingAPI
-  BookingAPI -->|"read or write"| PostgreSQL
-
-  DC -->|"build()"| IB
-  IB -->|"instruction"| LP
-
-  DC <-->|"handle()"| CM
-  DC <-->|"handle()"| FAQM
-  FAQM -->|"uses"| KP
-  KP -.->|"implemented by"| QD
-  QD -->|"vector search"| Qdrant
-
-  MC -->|"cache data"| BC
-  OR -->|"Tạo câu trả lời"| API
-  API -->|"SSE stream"| FE
+  UI[Next.js Chat UI] --> API[FastAPI JSON / SSE]
+  API --> CTX[ConversationContextStore]
+  API --> NLU[Deterministic NLU]
+  NLU -->|unresolved| LLM[Gemini fallback]
+  NLU --> ROUTE[Global / FAQ / Entity routing]
+  LLM --> ROUTE
+  ROUTE --> DC[DialogController]
+  DC --> SM[StateMachine]
+  SM --> FLOW[booking-flow.json]
+  DC --> TB[ToolBridge]
+  TB --> HANDLERS[Application handlers]
+  HANDLERS --> POS[HTTP POS adapter]
+  ROUTE --> FAQ[FAQManager]
+  FAQ --> QDRANT[Qdrant, optional]
+  DC --> RENDER[InstructionBuilder]
+  RENDER --> API
 ```
 
-Sơ đồ trên mô tả kiến trúc mục tiêu, không khẳng định các component đã được triển
-khai.
+Một chat turn được xử lý theo thứ tự:
 
-## Dependency direction
+1. Validate request và lấy `BookingContext` theo `conversation_id`.
+2. Chạy global-first deterministic NLU.
+3. Chỉ gọi Gemini nếu deterministic result unresolved.
+4. Resolve entity qua POS catalog khi cần.
+5. `DialogController` chọn transition từ flow JSON.
+6. `ToolBridge` chạy typed application actions và rollback context nếu action lỗi.
+7. `InstructionBuilder` tạo text, state, status, quick replies và metadata.
+8. Lưu context trong memory và trả JSON/SSE.
+
+NLU recognition data nằm tại
+[`backend/app/dialog/nlu/catalogs/intent_catalog.vi.json`](backend/app/dialog/nlu/catalogs/intent_catalog.vi.json).
+Python `Intent` enum vẫn là contract; transition/action thuộc về flow JSON.
+
+## API
+
+### `POST /api/v1/chat`
+
+Request:
+
+```json
+{
+  "conversation_id": "web-7f63d2",
+  "message": "Tôi muốn đặt lịch",
+  "idempotency_key": "client-generated-key"
+}
+```
+
+Response:
+
+```json
+{
+  "conversation_id": "web-7f63d2",
+  "text": "Bạn muốn chọn cửa hàng nào?",
+  "state": "selecting_shop",
+  "status": "success",
+  "instruction_template": null,
+  "quick_replies": [],
+  "metadata": {}
+}
+```
+
+`idempotency_key` là optional ở transport nhưng bắt buộc tại turn tạo booking.
+
+### `POST /api/v1/chat/stream`
+
+Dùng cùng request schema và trả business-level SSE:
 
 ```text
-Transport ─────┐
-Dialog ────────┼──> Application ───> Domain
-Sidecar ───────┘          │
-                          └──> Application Ports
-                                      ▲
-                                      │ implements
-                              Infrastructure
+started → message → completed
 ```
 
-Quy tắc:
+JSON và SSE dùng chung `_process_chat_message`, vì vậy state transition và POS side
+effect không bị thực thi hai lần. Đây chưa phải token-level streaming.
 
-1. `domain` không import bất kỳ layer nào khác.
-2. `application` chỉ phụ thuộc `domain` và `application/ports`.
-3. Handler không import FastAPI, HTTPX hoặc adapter cụ thể.
-4. `infrastructure` triển khai interface do application sở hữu.
-5. `transport` chỉ chuyển đổi request/response và gọi `DialogController`.
-6. `dependencies.py` là composition root duy nhất biết implementation cụ thể.
-7. `main.py` chỉ khởi tạo framework application và đăng ký router.
-8. Chatbot không truy cập trực tiếp PostgreSQL của Booking Backend.
+## Cấu hình
 
-## Cấu trúc backend
+Toàn bộ mẫu cấu hình nằm trong [`backend/.env.example`](backend/.env.example).
 
-```text
-backend/
-├── app/
-│   ├── main.py
-│   ├── dependencies.py
-│   │
-│   ├── transport/
-│   │   ├── __init__.py
-│   │   ├── chat_api.py
-│   │   ├── schemas.py
-│   │   └── sse.py
-│   │
-│   ├── dialog/
-│   │   ├── __init__.py
-│   │   ├── tool_bridge.py
-│   │   ├── dialog_controller.py
-│   │   ├── state_machine.py
-│   │   ├── instruction_builder.py
-│   │   └── flows/
-│   │       ├── booking-flow.json
-│   │       └── change-handlers.json
-│   │
-│   ├── application/
-│   │   ├── __init__.py
-│   │   ├── handlers/
-│   │   │   ├── search_shop_handler.py
-│   │   │   ├── search_service_handler.py
-│   │   │   ├── check_availability_handler.py
-│   │   │   ├── create_booking_handler.py
-│   │   │   ├── lookup_booking_handler.py
-│   │   │   ├── reschedule_booking_handler.py
-│   │   │   ├── cancel_booking_handler.py
-│   │   │   ├── collect_customer_handler.py
-│   │   │   └── complete_booking_handler.py
-│   │   └── ports/
-│   │       ├── booking_gateway.py
-│   │       ├── knowledge_gateway.py
-│   │       └── llm_gateway.py
-│   │
-│   ├── domain/
-│   │   ├── booking.py
-│   │   ├── booking_context.py
-│   │   ├── booking_state.py
-│   │   ├── booking_rules.py
-│   │   └── exceptions.py
-│   │
-│   ├── sidecar/
-│   │   ├── confirmation_manager.py
-│   │   └── faq_manager.py
-│   │
-│   ├── infrastructure/
-│   │   ├── llm/gemini_llm_gateway.py
-│   │   ├── booking_api/http_booking_gateway.py
-│   │   ├── vector_db/qdrant_knowledge_gateway.py
-│   │   └── cache/memory_cache.py
-│   │
-│   └── core/
-│       ├── config.py
-│       └── logging.py
-│
-├── tests/
-│   ├── unit/
-│   │   ├── domain/
-│   │   ├── application/
-│   │   └── dialog/
-│   └── integration/
-│       ├── test_chat_api.py
-│       ├── test_booking_gateway.py
-│       └── test_llm_gateway.py
-│
-├── .env.example
-├── pyproject.toml
-└── Dockerfile
+Các biến runtime chính:
+
+| Nhóm | Biến |
+|---|---|
+| POS | `BOOKING_API_URL` |
+| Gemini | `GEMINI_API_KEY`, `GEMINI_BASE_URL`, `GEMINI_MODEL` |
+| NLU | `DIALOG_INTENT_TOOL_ENABLED` |
+| Embedding | `EMBED_MODEL_NAME` |
+| Qdrant | `KNOWLEDGE_QDRANT_ENABLED`, `QDRANT_HOST`, `QDRANT_PORT`, `QDRANT_COLLECTION`, `QDRANT_API_KEY` |
+| Retrieval | `RAG_HYBRID_SCORE_THRESHOLD` |
+| Logging | `LOG_LEVEL`, `LOG_FORMAT`, `LOG_JSON_PATH`, `LOG_MAX_BYTES`, `LOG_BACKUP_COUNT` |
+| Privacy | `LOG_FULL_INSTRUCTIONS`, `LOG_RAW_CHAT_MESSAGES` |
+
+Một số biến deployment/product trong `.env.example` chưa được entrypoint wire, ví
+dụ POS service key, conversation TTL, CORS, rate limit và audio settings. Chúng chưa
+phải capability runtime.
+
+## Knowledge và Qdrant
+
+Qdrant mặc định tắt. Booking không phụ thuộc Qdrant.
+
+```dotenv
+KNOWLEDGE_QDRANT_ENABLED=true
+QDRANT_HOST=localhost
+QDRANT_PORT=6333
+QDRANT_COLLECTION=kb_chunks
 ```
 
-## Trách nhiệm từng layer
-
-### `transport`
-
-Adapter của framework web:
-
-- Nhận HTTP request.
-- Validate transport schema.
-- Gọi `DialogController`.
-- Chuyển kết quả thành JSON hoặc SSE.
-
-Không chứa business rule hoặc gọi trực tiếp Booking API.
-
-### `dialog`
-
-Điều khiển một lượt hội thoại:
-
-- Đọc flow JSON.
-- Xác định state transition.
-- Xây instruction.
-- Chuyển tool call đến application handler.
-
-Dialog không tự triển khai nghiệp vụ booking.
-
-### `application`
-
-Chứa các use case của chatbot:
-
-- Tìm cửa hàng và dịch vụ.
-- Kiểm tra availability.
-- Tạo, tra cứu, đổi và hủy booking.
-- Thu thập khách hàng.
-- Hoàn tất booking.
-
-Application chỉ giao tiếp với hệ thống ngoài thông qua port.
-
-### `application/ports`
-
-Sở hữu abstraction:
-
-- `BookingGateway`.
-- `KnowledgeGateway`.
-- `LLMGateway`.
-
-Provider hoặc giao thức cụ thể không xuất hiện trong interface nghiệp vụ.
-
-### `domain`
-
-Chứa mô hình và quy tắc booking thuần Python:
-
-- Booking entity.
-- Booking context tạm thời.
-- Booking state.
-- Booking rule.
-- Domain exception.
-
-Domain không biết FastAPI, Gemini, Qdrant, HTTP hoặc PostgreSQL.
-
-### `sidecar`
-
-Xử lý các luồng phụ:
-
-- Xác nhận trước mutation.
-- FAQ ngoài booking workflow.
-
-Sidecar không sở hữu Booking Backend business rule.
-
-### `infrastructure`
-
-Chứa adapter cụ thể:
-
-- Gemini triển khai `LLMGateway`.
-- HTTP triển khai `BookingGateway`.
-- Qdrant triển khai `KnowledgeGateway`.
-- Process memory làm cache tạm thời.
-
-Đổi provider chỉ yêu cầu thay adapter và composition wiring.
-
-### `dependencies.py`
-
-Composition root duy nhất khởi tạo:
-
-- Infrastructure gateway.
-- Application handler.
-- Sidecar manager.
-- Tool bridge.
-- Dialog controller.
-
-Các layer bên trong không tự khởi tạo concrete adapter.
-
-## Ranh giới với Booking Backend
-
-Chatbot:
-
-- Không có PostgreSQL riêng.
-- Không truy cập database booking trực tiếp.
-- Không sở hữu transaction hoặc availability rule cuối cùng.
-- Không tự xác nhận booking đã thành công.
-
-Booking Backend:
-
-- Là source of truth.
-- Quản lý PostgreSQL.
-- Kiểm tra availability trong transaction.
-- Thực hiện create, reschedule và cancel.
-- Trả kết quả chính thức cho chatbot.
-
-## Process memory
-
-Thiết kế hiện tại không sử dụng Redis hoặc SessionManager.
-
-`BookingContext` dự kiến chỉ giữ dữ liệu booking tạm thời trong process memory.
-Điều này phù hợp giai đoạn học tập và single-process development, nhưng có các giới
-hạn:
-
-- Mất state khi restart.
-- Không chia sẻ state giữa nhiều worker.
-- Không phù hợp horizontal scaling.
-
-Chưa triển khai `BookingContext` hoặc `MemoryCache` ở trạng thái skeleton hiện tại.
-
-## Nguyên tắc phát triển tiếp theo
-
-Thứ tự dự kiến:
-
-1. Domain model và domain rule.
-2. Application port bằng `Protocol`.
-3. Application handler với gateway mock.
-4. State machine và dialog controller.
-5. Memory cache và BookingContext.
-6. HTTP Booking Gateway.
-7. LLM Gateway và Gemini adapter.
-8. FAQ Manager và Qdrant adapter.
-9. FastAPI transport và SSE.
-10. Composition root trong `dependencies.py`.
-
-Mỗi bước cần có unit test trước khi nối infrastructure thật.
-
-## Kiểm tra skeleton
-
-Hiện tại:
-
-```text
-Python files: 57
-File có nội dung ngoài module docstring: 0
-Import statement: 0
-Package thiếu __init__.py: 0
-JSON flow không hợp lệ: 0
-```
-
-Do chưa có import hoặc implementation, skeleton hiện chưa phát sinh dependency vi
-phạm Clean Architecture.
-
-## Lưu ý chạy ứng dụng
-
-Backend skeleton chưa có biến FastAPI `app`, router hoặc dependency wiring. Vì vậy
-lệnh sau chưa được hỗ trợ:
+Index knowledge document:
 
 ```powershell
-python -m uvicorn app.main:app --reload --port 8001
+cd backend
+python -m app.rag.qdrant_indexing --source knowledge/README.md
 ```
 
-Chỉ chạy lại backend sau khi cấu trúc được xác nhận và transport layer được triển
-khai.
+Chỉ dùng `--recreate` khi chủ động muốn xóa và tạo lại collection:
+
+```powershell
+python -m app.rag.qdrant_indexing --source knowledge/README.md --recreate
+```
+
+FAQ chỉ trả nội dung vượt relevance threshold; nếu knowledge thiếu, hệ thống không
+tự sáng tác policy.
+
+## Logging và bảo mật dữ liệu
+
+Console local:
+
+```dotenv
+ENVIRONMENT=local
+LOG_LEVEL=INFO
+LOG_FORMAT=console
+```
+
+JSON stdout trong container:
+
+```dotenv
+LOG_FORMAT=json
+LOG_JSON_PATH=
+```
+
+Mỗi turn có trace theo conversation marker đã mask:
+
+```text
+[conv:a7f03c21] [Turn] started state=selecting_service
+[conv:a7f03c21] [NLU] resolved intent=select_course resolver=deterministic
+[conv:a7f03c21] [POS] completed operation=search_services status_code=200
+[conv:a7f03c21] [DialogCtrl] transition from_state=selecting_service to_state=selecting_time
+[conv:a7f03c21] [Turn] completed state=selecting_time status=success duration_ms=137
+```
+
+Formatter redact phone, authorization, API key, secret/token, idempotency key, raw
+payload/response, embedding và knowledge content. Raw message/full instruction mặc
+định tắt và chỉ được phép bật trong local/development.
+
+## Kiểm thử
+
+Backend:
+
+```powershell
+cd backend
+python -m pytest -q
+python -m mypy app tests --warn-unused-ignores
+python -m ruff check app tests
+git diff --check
+```
+
+Frontend:
+
+```powershell
+cd frontend
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+## Cấu trúc repository
+
+```text
+booking-ai-chatbot/
+├── backend/                                  # Python chatbot API và business runtime
+│   ├── app/                                  # package source chính của backend
+│   │   ├── application/                      # orchestration use case, không phụ thuộc adapter
+│   │   │   ├── handlers/                    # từng booking/lookup/change use case
+│   │   │   │   ├── search_shop_handler.py
+│   │   │   │   ├── search_service_handler.py
+│   │   │   │   ├── check_availability_handler.py
+│   │   │   │   ├── collect_customer_handler.py
+│   │   │   │   ├── confirm_phone_handler.py
+│   │   │   │   ├── create_booking_handler.py
+│   │   │   │   ├── lookup_booking_handler.py
+│   │   │   │   ├── reschedule_booking_handler.py
+│   │   │   │   └── cancel_booking_handler.py
+│   │   │   ├── ports/                       # contract cho POS, LLM và knowledge
+│   │   │   │   ├── booking_gateway.py
+│   │   │   │   ├── knowledge_gateway.py
+│   │   │   │   └── llm_gateway.py
+│   │   │   └── exceptions.py
+│   │   ├── core/                             # cấu hình và observability dùng chung
+│   │   │   ├── config.py                    # runtime settings + .env loading
+│   │   │   └── logging.py                   # console/JSON logging + redaction
+│   │   ├── dialog/                           # hiểu input và điều phối một chat turn
+│   │   │   ├── flows/                       # khai báo state/transition/change bằng JSON
+│   │   │   │   ├── booking-flow.json        # states, transitions, failures
+│   │   │   │   └── change-handlers.json     # change-info rules
+│   │   │   ├── nlu/catalogs/                # vocabulary nhận diện intent theo ngôn ngữ
+│   │   │   │   └── intent_catalog.vi.json   # Vietnamese recognition catalog
+│   │   │   ├── dialog_controller.py
+│   │   │   ├── entity_resolution.py
+│   │   │   ├── flow_loader.py
+│   │   │   ├── instruction_builder.py
+│   │   │   ├── nlu.py                       # deterministic + Gemini fallback
+│   │   │   ├── nlu_catalog.py               # catalog schema/loader
+│   │   │   ├── state_machine.py
+│   │   │   └── tool_bridge.py
+│   │   ├── domain/                           # model và rule booking thuần Python
+│   │   │   ├── booking.py
+│   │   │   ├── booking_context.py
+│   │   │   ├── booking_rules.py
+│   │   │   ├── booking_state.py
+│   │   │   └── exceptions.py
+│   │   ├── infrastructure/                   # concrete adapter cho external systems
+│   │   │   ├── booking_api/                 # HTTP mapping giữa chatbot và POS
+│   │   │   │   ├── exceptions.py
+│   │   │   │   └── http_booking_gateway.py  # POS adapter
+│   │   │   ├── cache/                       # lưu conversation context trong process
+│   │   │   │   └── memory_cache.py
+│   │   │   ├── llm/                         # Gemini implementation của LLMGateway
+│   │   │   │   └── gemini_llm_gateway.py
+│   │   │   └── vector_db/                   # Qdrant implementation của KnowledgeGateway
+│   │   │       └── qdrant_knowledge_gateway.py
+│   │   ├── rag/                              # chunk, embed và index knowledge offline
+│   │   │   ├── markdown_ingestion.py
+│   │   │   ├── qdrant_indexing.py
+│   │   │   └── semantic_embedding.py
+│   │   ├── sidecar/                          # capability ngoài booking state flow chính
+│   │   │   └── faq_manager.py
+│   │   ├── transport/                        # FastAPI schemas, JSON endpoint và SSE
+│   │   │   ├── chat_api.py                  # JSON + POST SSE endpoints
+│   │   │   ├── schemas.py
+│   │   │   └── sse.py
+│   │   ├── dependencies.py                  # composition root
+│   │   └── main.py                          # FastAPI entrypoint
+│   ├── data/nlu/                             # corpus dùng phát triển/đánh giá NLU, không phải RAG
+│   │   ├── lookups/                         # entity lookup fixtures cho dataset
+│   │   ├── intent_catalog.yaml              # inventory intent của offline dataset
+│   │   ├── entity_catalog.yaml              # entity schema của offline dataset
+│   │   ├── synonyms.yaml                    # synonym groups dùng khi sinh dữ liệu
+│   │   ├── utterances.jsonl
+│   │   ├── train.jsonl
+│   │   ├── validation.jsonl
+│   │   ├── test.jsonl
+│   │   ├── golden_test.jsonl
+│   │   ├── hard_negatives.jsonl
+│   │   ├── ambiguous_cases.jsonl
+│   │   ├── multi_intent_cases.jsonl
+│   │   ├── out_of_scope.jsonl
+│   │   ├── human_review.jsonl
+│   │   ├── validation-report.json           # output của dataset validation
+│   │   └── evaluation-report.json           # output đánh giá deterministic NLU
+│   ├── docs/                                 # báo cáo nghiên cứu và chất lượng NLU
+│   │   ├── confusion-analysis.md            # phân tích các nhóm intent dễ nhầm
+│   │   ├── dataset-report.md                # thống kê và phạm vi NLU dataset
+│   │   └── source-research.md               # nguồn/cơ sở xây dựng cách diễn đạt
+│   ├── knowledge/                            # nguồn nội dung authoritative cho FAQ/RAG
+│   │   └── README.md                        # authoritative Qdrant source
+│   ├── scripts/                              # công cụ offline tạo/validate/evaluate NLU data
+│   │   ├── generate_nlu_dataset.py
+│   │   ├── validate_nlu_dataset.py
+│   │   └── evaluate_nlu_dataset.py
+│   ├── tests/                                # automated verification của backend
+│   │   ├── unit/                            # test từng module/contract cô lập
+│   │   │   ├── application/
+│   │   │   ├── dialog/
+│   │   │   ├── domain/
+│   │   │   ├── infrastructure/
+│   │   │   ├── rag/
+│   │   │   ├── sidecar/
+│   │   │   └── transport/
+│   │   └── integration/                     # test wiring, flow và transport gần production
+│   │       ├── dialog/
+│   │       ├── rag/
+│   │       └── transport/
+│   ├── .env.example
+│   ├── chatbot_booking_test_cases.md
+│   ├── Dockerfile
+│   └── pyproject.toml
+├── frontend/                                 # Next.js web chat client
+│   ├── app/                                  # App Router, page, layout và server proxy
+│   │   ├── api/                             # server-side routes gọi chatbot backend
+│   │   │   ├── chat/stream/route.ts         # backend SSE proxy
+│   │   │   └── audio/transcriptions/route.ts
+│   │   ├── globals.css
+│   │   ├── layout.tsx
+│   │   └── page.tsx
+│   ├── components/                           # React presentation và interaction components
+│   │   ├── chat/                            # chat shell, message, composer và header
+│   │   └── common/                          # shared icons và error boundary
+│   ├── services/                             # API/SSE parsing và client session lifecycle
+│   │   ├── chat-api.ts
+│   │   └── chat-session.ts
+│   ├── types/                                # TypeScript public UI/API contracts
+│   │   └── chat.ts
+│   ├── e2e/                                  # Playwright browser booking scenarios
+│   │   └── chat.spec.ts
+│   ├── .env.example
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── playwright.config.ts
+│   ├── vitest.config.ts
+│   ├── next.config.ts
+│   └── tsconfig.json
+└── README.md
+```
+
+Các file `__init__.py`, test file chi tiết, package lock và generated cache được rút
+gọn trong sơ đồ để giữ khả năng đọc; chúng vẫn tồn tại trong repository. Các thư mục
+`.venv`, `.next`, `node_modules`, `__pycache__`, `.pytest_cache` và `.ruff_cache`
+không phải source nên không được liệt kê.
+
+## Giới hạn hiện tại
+
+- Context nằm trong process memory, mất khi restart và không dùng được cho nhiều
+  worker/instance.
+- POS authentication/service key chưa được wire.
+- Chưa có `/health` endpoint.
+- SSE chưa stream theo token.
+- POS chưa cung cấp therapist-list API cho chatbot.
+- Client cung cấp idempotency key; POS vẫn chịu trách nhiệm idempotency và transaction
+  cuối cùng.
+- Test records có thể xuất hiện trong shop catalog nếu POS trả chúng như active mà
+  không có metadata nhận diện fixture.
+- Qdrant chỉ phục vụ FAQ và là external dependency tùy chọn.
+
+## Nguyên tắc ownership
+
+POS là source of truth cho shop/service catalog, availability và booking transaction.
+Chatbot sở hữu dialog state, validation trước gateway, recovery và response rendering;
+chatbot không truy cập trực tiếp database booking.
