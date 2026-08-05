@@ -44,7 +44,7 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       QDRANT_HOST: qdrant
-      BOOKING_API_URL: http://backend:8000
+      BOOKING_API_URL: http://backend:8001
       LOG_FILE: /app/logs/chatbot.log
     volumes:
       - ./booking-ai-chatbot/backend/logs:/app/logs

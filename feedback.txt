@@ -1,0 +1,42 @@
+function calling để  extract intent theo (LLM)  
+
+prompt + pydantic -> parse 
+
+
+
+
+server:
+
+priority queue: 
+intent : 7:00 . state : select date -> context route 
+intent : quality: 2. state select people
+
+course 
+
+
+User nhập câu hỏi dạng text
+→ LLM NLU đọc câu và extract intent + entity
+→ Function calling ép kết quả về đúng cấu trúc JSON
+→ Pydantic kiểm tra và parse JSON
+→ Intent Prioritizer chọn intent phù hợp dựa trên confidence + state + context
+→ State Machine kiểm tra intent có hợp lệ với state hiện tại hay không
+→ Router chọn Handler tương ứng
+→ Handler:
+   - lấy dữ liệu cần thiết từ booking context
+   - kiểm tra dữ liệu đầu vào tối thiểu
+   - gọi PosApiClient hoặc QdrantClient khi cần
+→ POS backend xử lý nghiệp vụ cốt lõi và trả kết quả
+→ Handler map kết quả POS/Qdrant thành outcome + dữ liệu xử lý
+→ Handler chỉ cập nhật booking context khi kết quả hợp lệ
+→ State Machine dựa trên outcome để transition và cập nhật state mới
+→ Instruction Resolver lấy instruction template theo state mới hoặc outcome lỗi
+→ NLG Builder tổng hợp:
+   - instruction template
+   - outcome và dữ liệu Handler
+   - dữ liệu POS/Qdrant
+   - state mới
+   - booking context
+   - lịch sử hội thoại cần thiết
+→ Gọi LLM NLG để tạo text response
+→ SSE/API stream text response về frontend
+→ Hiển thị cho user
