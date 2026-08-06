@@ -1,16 +1,18 @@
+import logging
 from datetime import date
 
 from fastapi import APIRouter, Depends, Header, Query
-from app.core.exceptions import AppError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, parse_uuid
+from app.core.exceptions import AppError
+from app.infrastructure.logging_config import log_event
 from app.schemas.booking import (
     BookingCreate,
     BookingLookupInput,
+    BookingPatchInput,
     PublicBookingListItem,
     PublicBookingResponse,
-    BookingPatchInput,
     ReservationResponse,
 )
 from app.schemas.common import CollectionResponse, DataResponse, PaginatedResponse
@@ -31,6 +33,20 @@ def create_booking(
 
     service = BookingService(db)
     result = PublicBookingResponse.model_validate(service.create(body, idempotency_key))
+    log_event(
+        logging.INFO,
+        "BookingService",
+        "pos_business_rules_checked",
+        operation="create_booking",
+        rules=[
+            "idempotency_checked",
+            "shop_and_courses_valid",
+            "slot_available",
+            "group_therapist_rule_valid",
+        ],
+        status="passed",
+        reservation_count=len(result.reservations),
+    )
     return DataResponse(data=result)
 
 

@@ -8,20 +8,19 @@ from uuid import UUID
 from app.dialog.dialog_controller import DialogTurnResult, DialogTurnStatus
 from app.dialog.flow_loader import FlowDefinition, FlowLoader
 from app.dialog.instruction_builder import InstructionBuilder
-from app.domain.booking import Booking, Customer, Service, Shop
 from app.domain.booking_context import BookingContext
+from app.domain.booking_models import Booking, Course, Customer, Shop
 from app.domain.booking_state import BookingState
 
 FLOW_PATH = (
     Path(__file__).resolve().parents[3]
     / "app"
     / "dialog"
-    / "flows"
-    / "booking-flow.json"
+    / "booking_flow.json"
 )
-CHANGE_HANDLERS_PATH = FLOW_PATH.with_name("change-handlers.json")
+CHANGE_HANDLERS_PATH = FLOW_PATH
 SHOP = Shop(UUID("11111111-1111-1111-1111-111111111111"), "Sen Spa")
-SERVICE = Service(
+COURSE = Course(
     UUID("22222222-2222-2222-2222-222222222222"),
     "Massage thư giãn",
     60,
@@ -53,7 +52,7 @@ def complete_context(state: BookingState) -> BookingContext:
         conversation_id="conversation-1",
         state=state,
         shop=SHOP,
-        service=SERVICE,
+        main_course=COURSE,
         customer=CUSTOMER,
         booking_date=date(2026, 8, 2),
         start_time=time(10, 30),
@@ -126,7 +125,7 @@ def test_real_group_completed_template_without_code_hides_internal_ids() -> None
         booking_id=BOOKING_ID,
         status="confirmed",
         shop=SHOP,
-        service=SERVICE,
+        main_course=COURSE,
         customer=CUSTOMER,
         booking_date=date(2026, 8, 2),
         start_time=time(10, 30),

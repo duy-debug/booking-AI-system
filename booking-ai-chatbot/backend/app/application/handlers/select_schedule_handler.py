@@ -1,0 +1,61 @@
+"""Validate selected time and therapist choices."""
+
+from datetime import time
+
+from app.domain.booking_context import BookingContext
+from app.domain.booking_models import TherapistPreference, TherapistPreferenceType
+from app.domain.outcomes import HandlerOutcome, HandlerResult
+
+
+class SelectScheduleHandler:
+    """Applies only schedule choices already verified against context data."""
+
+    def select_time(self, context: BookingContext, value: time) -> HandlerResult:
+        if context.available_slots is None or value not in context.available_slots:
+            return HandlerResult(
+                HandlerOutcome.CONFLICT,
+                {"available_slots": context.available_slots or ()},
+                error_code="slot_unavailable",
+            )
+        context.set_start_time(value)
+        return HandlerResult(
+            HandlerOutcome.SUCCESS,
+            context_updates={"start_time": value},
+        )
+
+    def select_therapist(
+        self,
+        context: BookingContext,
+        preference: TherapistPreference | None,
+    ) -> HandlerResult:
+        if context.num_customer is None:
+            return HandlerResult(
+                HandlerOutcome.INVALID_INPUT,
+                error_code="people_count_required",
+            )
+        if (
+            context.num_customer >= 2
+            and preference is not None
+            and preference.preference_type is not TherapistPreferenceType.NONE
+        ):
+            return HandlerResult(
+                HandlerOutcome.INVALID_INPUT,
+                error_code="group_therapist_not_allowed",
+            )
+        if (
+            preference is not None
+            and preference.preference_type is TherapistPreferenceType.PERSONAL
+            and not preference.therapist_id
+        ):
+            return HandlerResult(
+                HandlerOutcome.INVALID_INPUT,
+                error_code="therapist_unverified",
+            )
+        if context.num_customer >= 2:
+            preference = TherapistPreference(TherapistPreferenceType.NONE)
+        context.set_therapist_preference(preference)
+        context.set_therapist_verified(True)
+        return HandlerResult(
+            HandlerOutcome.SUCCESS,
+            context_updates={"therapist_preference": preference},
+        )

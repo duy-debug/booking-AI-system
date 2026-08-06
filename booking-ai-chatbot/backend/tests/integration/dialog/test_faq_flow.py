@@ -11,20 +11,20 @@ import httpx
 import pytest
 
 from app.application.handlers.search_shop_handler import SearchShopHandler
-from app.application.ports.knowledge_gateway import (
-    KnowledgeDocument,
-    KnowledgeGatewayUnavailableError,
-)
-from app.application.ports.llm_gateway import LLMMessage, LLMResponse
-from app.core.config import Settings
 from app.dependencies import (
     ApplicationContainer,
     ConversationContextStore,
     create_application_container,
 )
-from app.domain.booking import Shop
 from app.domain.booking_context import BookingContext
+from app.domain.booking_models import Shop
 from app.domain.booking_state import BookingState
+from app.infrastructure.context_store import Settings
+from app.infrastructure.gemini_client import LLMMessage, LLMResponse
+from app.infrastructure.qdrant_client import (
+    KnowledgeDocument,
+    KnowledgeGatewayUnavailableError,
+)
 from app.transport.chat_api import _process_chat_message
 from app.transport.schemas import ChatRequest
 
@@ -293,7 +293,7 @@ async def test_booking_and_change_intents_are_not_intercepted_by_faq(
     container, knowledge, _, _, external = runtime
 
     search_shop = FakeSearchShopHandler()
-    container.tool_bridge._search_shop_handler = search_shop
+    container.action_registry._search_shop_handler = search_shop
     booking_response = await _process_chat_message(
         request=request("Tôi muốn đặt lịch", "booking-intent"),
         container=container,

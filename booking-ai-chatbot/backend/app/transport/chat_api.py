@@ -1,5 +1,6 @@
 """Expose JSON and SSE chat endpoints over one shared orchestration pipeline."""
 
+import asyncio
 import logging
 import os
 from collections.abc import AsyncIterator, Mapping
@@ -12,22 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.application.handlers.check_availability_handler import CheckAvailabilityHandler
-from app.application.handlers.search_service_handler import SearchServiceHandler
+from app.application.handlers.search_course_handler import SearchCourseHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
-from app.application.ports.booking_gateway import (
-    AvailableTherapistRequest,
-    TherapistAvailabilityGateway,
-)
-from app.core.logging import (
-    bind_conversation,
-    bind_correlation_id,
-    bind_turn,
-    elapsed_ms,
-    reset_conversation,
-    reset_correlation_id,
-    reset_turn,
-    trace_log,
-)
 from app.dependencies import (
     ApplicationContainer,
     InvalidCachedContextError,
@@ -35,21 +22,42 @@ from app.dependencies import (
     InvalidConversationIdError,
 )
 from app.dialog.dialog_controller import DialogTurnInput, DialogTurnResult, DialogTurnStatus
-from app.dialog.entity_resolution import (
-    EntityResolutionResult,
-    EntityResolutionStatus,
-    entity_resolution_to_dialog_turn_input,
-)
 from app.dialog.instruction_builder import DialogResponse
 from app.dialog.nlu import (
+    EntityResolutionResult,
+    EntityResolutionStatus,
     NLUEntityKind,
     NLUResolutionStatus,
     NLUResult,
+    entity_resolution_to_dialog_turn_input,
     to_dialog_turn_input,
 )
-from app.domain.booking import CourseType, Service, Shop, TherapistPreference
-from app.domain.booking_context import BookingContext, ServiceSelectionMode
+from app.domain.booking_context import BookingContext, CourseSelectionMode
+from app.domain.booking_models import (
+    AvailableTherapistRequest,
+    Course,
+    CourseType,
+    Shop,
+    TherapistAvailabilityGateway,
+    TherapistPreference,
+)
 from app.domain.booking_state import BookingState
+from app.infrastructure.context_store import (
+    begin_turn_metrics,
+    bind_conversation,
+    bind_correlation_id,
+    bind_trace_context,
+    bind_turn,
+    current_turn_metrics,
+    elapsed_ms,
+    record_turn_metrics,
+    reset_conversation,
+    reset_correlation_id,
+    reset_trace_context,
+    reset_turn,
+    reset_turn_metrics,
+    trace_log,
+)
 from app.transport.schemas import ChatRequest, ChatResponse
 from app.transport.sse import SSEEventType, encode_sse_event
 
@@ -184,11 +192,41 @@ async def _stream_chat_events(
     container: ApplicationContainer,
     correlation_id: str | None = None,
 ) -> AsyncIterator[str]:
+    """Bind session identity for the complete streaming generator lifecycle."""
+    token = bind_trace_context(
+        trace_id=correlation_id,
+        session_id=request.conversation_id,
+    )
+    try:
+        async for event in _stream_bound_chat_events(
+            request=request,
+            container=container,
+            correlation_id=correlation_id,
+        ):
+            yield event
+    finally:
+        reset_trace_context(token)
+
+
+async def _stream_bound_chat_events(
+    *,
+    request: ChatRequest,
+    container: ApplicationContainer,
+    correlation_id: str | None = None,
+) -> AsyncIterator[str]:
     """Yield started, response and terminal events for one shared chat pipeline."""
-    yield encode_sse_event(
+    started_at = perf_counter()
+    chunk_count = 0
+    bytes_sent = 0
+    completed = False
+    trace_log(logger, logging.INFO, "SSETransport", "sse_started")
+    started_event = encode_sse_event(
         event=SSEEventType.STARTED,
         data={"conversation_id": request.conversation_id},
     )
+    chunk_count += 1
+    bytes_sent += len(started_event.encode("utf-8"))
+    yield started_event
 
     try:
         if correlation_id is None:
@@ -216,7 +254,7 @@ async def _stream_chat_events(
             },
         )
     except Exception:
-        yield encode_sse_event(
+        error_event = encode_sse_event(
             event=SSEEventType.ERROR,
             data={
                 "conversation_id": request.conversation_id,
@@ -224,10 +262,58 @@ async def _stream_chat_events(
                 "message": "Hệ thống chưa thể xử lý yêu cầu lúc này.",
             },
         )
+        chunk_count += 1
+        bytes_sent += len(error_event.encode("utf-8"))
+        yield error_event
+        completed = True
+        trace_log(
+            logger,
+            logging.WARNING,
+            "SSETransport",
+            "sse_completed",
+            chunk_count=chunk_count,
+            bytes_sent=bytes_sent,
+            duration_ms=elapsed_ms(started_at),
+            status="error",
+        )
         return
-
-    yield message_event
-    yield completed_event
+    try:
+        for event in (message_event, completed_event):
+            chunk_count += 1
+            bytes_sent += len(event.encode("utf-8"))
+            yield event
+        completed = True
+        trace_log(
+            logger,
+            logging.INFO,
+            "SSETransport",
+            "sse_completed",
+            chunk_count=chunk_count,
+            bytes_sent=bytes_sent,
+            duration_ms=elapsed_ms(started_at),
+            client_disconnected=False,
+        )
+    except (asyncio.CancelledError, GeneratorExit):
+        completed = True
+        trace_log(
+            logger,
+            logging.WARNING,
+            "SSETransport",
+            "sse_client_disconnected",
+            chunks_sent=chunk_count,
+            duration_ms=elapsed_ms(started_at),
+        )
+        raise
+    finally:
+        if not completed:
+            trace_log(
+                logger,
+                logging.WARNING,
+                "SSETransport",
+                "sse_client_disconnected",
+                chunks_sent=chunk_count,
+                duration_ms=elapsed_ms(started_at),
+            )
 
 
 async def _process_chat_message(
@@ -242,9 +328,23 @@ async def _process_chat_message(
     started_at = perf_counter()
     context = await container.conversation_context_store.get_or_create(request.conversation_id)
     turn_token = bind_turn(context.begin_turn())
+    distributed_trace_token = bind_trace_context(
+        trace_id=correlation_id,
+        session_id=request.conversation_id,
+        turn_id=context.turn_sequence,
+    )
+    metrics_token = begin_turn_metrics()
     context_before = _context_snapshot(context)
     initial_state = context.state
-    trace_log(logger, logging.INFO, "Turn", "started", state=initial_state.value)
+    trace_log(
+        logger,
+        logging.INFO,
+        "ChatAPI",
+        "user_message_received",
+        current_state=initial_state.value,
+        message_length=len(request.message),
+    )
+    trace_log(logger, logging.INFO, "DialogController", "turn_started", state=initial_state.value)
     if _local_debug_enabled("LOG_RAW_CHAT_MESSAGES"):
         trace_log(
             logger,
@@ -260,6 +360,11 @@ async def _process_chat_message(
             container=container,
             context=context,
         )
+        if getattr(container, "llm_nlg_required", False):
+            response = await container.response_generator.generate(
+                response=response,
+                context=context,
+            )
         _log_instruction(response)
         _trace_context_diff(context_before, context)
         trace_log(
@@ -276,18 +381,27 @@ async def _process_chat_message(
             trace_log(
                 logger,
                 logging.DEBUG,
-                "Response",
-                "assistant_message",
+                "ResponseGenerator",
+                "ai_response_created",
                 function="_process_chat_message",
                 assistant_message=response.text[:1000],
             )
         trace_log(
             logger,
             logging.INFO,
-            "Turn",
-            "completed",
+            "DialogController",
+            "turn_completed",
             state=response.state.value,
             status=response.status.value,
+            intent=current_turn_metrics().intent or "unresolved",
+            handler=current_turn_metrics().handler or "none",
+            outcome=current_turn_metrics().outcome or response.status.value,
+            state_transition=f"{initial_state.value}->{response.state.value}",
+            pos_calls=current_turn_metrics().pos_calls,
+            qdrant_calls=current_turn_metrics().qdrant_calls,
+            nlu_duration_ms=current_turn_metrics().nlu_duration_ms,
+            handler_duration_ms=current_turn_metrics().handler_duration_ms,
+            nlg_duration_ms=current_turn_metrics().nlg_duration_ms,
             duration_ms=elapsed_ms(started_at),
         )
         return response
@@ -295,14 +409,17 @@ async def _process_chat_message(
         trace_log(
             logger,
             logging.ERROR,
-            "Turn",
-            "failed",
+            "DialogController",
+            "turn_failed",
             state=context.state.value,
             exception_type=type(error).__name__,
             duration_ms=elapsed_ms(started_at),
+            _exc_info=True,
         )
         raise
     finally:
+        reset_turn_metrics(metrics_token)
+        reset_trace_context(distributed_trace_token)
         reset_turn(turn_token)
         reset_correlation_id(correlation_token)
         reset_conversation(token)
@@ -321,12 +438,24 @@ async def _process_bound_chat_message(
     ):
         return _change_menu_response(context)
 
-    nlu_result = container.deterministic_nlu.parse(
-        text=request.message,
-        state=context.state,
-    )
-    resolver = "deterministic"
-    used_llm_fallback = False
+    llm_nlu_required = getattr(container, "llm_nlu_required", False)
+    used_llm_fallback = llm_nlu_required
+    if llm_nlu_required:
+        nlu_result = await container.llm_nlu_fallback.parse(
+            text=request.message,
+            state=context.state,
+            context=context,
+        )
+        resolver = "llm"
+    else:
+        nlu_processor = container.nlu_processor
+        if nlu_processor is None:
+            raise RuntimeError("Rule-based NLU compatibility mode is unavailable.")
+        nlu_result = nlu_processor.parse(
+            text=request.message,
+            state=context.state,
+        )
+        resolver = "deterministic"
 
     if context.state in {
         BookingState.COMPLETED,
@@ -334,7 +463,10 @@ async def _process_bound_chat_message(
     } and nlu_result.matched_rule in {"change_booking_field", "change_entity_query"}:
         return _handled_response(context, _TERMINAL_CHANGE_TEXT)
 
-    if nlu_result.resolution_status is NLUResolutionStatus.UNRESOLVED:
+    if (
+        not llm_nlu_required
+        and nlu_result.resolution_status is NLUResolutionStatus.UNRESOLVED
+    ):
         nlu_result = await container.llm_nlu_fallback.parse(
             text=request.message,
             state=context.state,
@@ -357,6 +489,7 @@ async def _process_bound_chat_message(
         ),
         status=nlu_result.resolution_status.value,
     )
+    record_turn_metrics(intent=nlu_result.intent or "unresolved")
 
     if nlu_result.intent in {"greeting", "thanks", "ask_why", "repeat_last_question"}:
         _trace_route("global_intent", "global_intent", nlu_result, context)
@@ -509,6 +642,12 @@ async def _process_bound_chat_message(
         result=result,
         idempotency_key=request.idempotency_key,
     )
+    record_turn_metrics(
+        intent=result.intent,
+        handler=",".join(result.executed_actions) or "none",
+        outcome=result.status.value,
+        handler_duration_ms=elapsed_ms(controller_started),
+    )
     trace_log(
         logger,
         logging.INFO,
@@ -539,7 +678,7 @@ async def _process_bound_chat_message(
         trace_log(
             logger,
             logging.INFO,
-            "ToolBridge",
+            "ActionRegistry",
             "completed",
             function="execute_actions",
             input_summary=f"action_count={len(result.executed_actions)}",
@@ -665,12 +804,13 @@ def _trace_context_diff(before: Mapping[str, object], context: BookingContext) -
     trace_log(
         logger,
         logging.INFO,
-        "DialogCtrl",
-        "context_diff",
+        "ContextStore",
+        "context_updated",
         function="handle_turn",
         fields_changed=changed,
         fields_preserved=preserved,
         fields_cleared=cleared,
+        updated_fields=changed,
         status="changed" if changed else "unchanged",
     )
 
@@ -715,26 +855,26 @@ async def _with_proactive_suggestions(
         if context.state is BookingState.SELECTING_SERVICE and context.shop is not None:
             course_type = (
                 CourseType.ADDON
-                if context.service_selection_mode is ServiceSelectionMode.ADDON
+                if context.course_selection_mode is CourseSelectionMode.ADDON
                 else CourseType.MAIN
             )
             service_handler = cast(
-                SearchServiceHandler,
-                container.handler(SearchServiceHandler),
+                SearchCourseHandler,
+                container.handler(SearchCourseHandler),
             )
-            services = await service_handler.execute(
+            courses = await service_handler.execute(
                 context.shop.shop_id,
                 course_type=course_type,
             )
             if course_type is CourseType.MAIN and context.duration_minutes is not None:
-                services = [
+                courses = [
                     service
-                    for service in services
+                    for service in courses
                     if service.duration_minutes == context.duration_minutes
                 ]
             return _service_step_response(
                 context,
-                services,
+                courses,
                 course_type=course_type,
             )
 
@@ -800,10 +940,11 @@ def _log_instruction(response: DialogResponse) -> None:
     trace_log(
         logger,
         logging.INFO,
-        "DialogCtrl",
-        "instruction",
+        "InstructionBuilder",
+        "instruction_built",
         instruction_template=response.instruction_template or "none",
         instruction_length=len(response.text),
+        template_key=response.instruction_template or "none",
     )
     if _local_debug_enabled("LOG_FULL_INSTRUCTIONS"):
         trace_log(
@@ -816,8 +957,18 @@ def _log_instruction(response: DialogResponse) -> None:
 
 
 def _local_debug_enabled(name: str) -> bool:
-    environment = os.getenv("ENVIRONMENT", "production").strip().casefold()
-    enabled = os.getenv(name, "false").strip().casefold()
+    environment = os.getenv(
+        "APP_ENV",
+        os.getenv("ENVIRONMENT", "production"),
+    ).strip().casefold()
+    replacement = {
+        "LOG_RAW_CHAT_MESSAGES": "LOG_USER_MESSAGES",
+        "LOG_RAW_CHAT_RESPONSES": "LOG_AI_MESSAGES",
+        "LOG_FULL_INSTRUCTIONS": "LOG_LLM_PROMPTS",
+    }.get(name)
+    raw_enabled = os.getenv(replacement) if replacement is not None else None
+    configured = raw_enabled if raw_enabled is not None else os.getenv(name, "false")
+    enabled = configured.strip().casefold()
     return environment in {"local", "development", "dev"} and enabled in {
         "true",
         "1",
@@ -868,21 +1019,21 @@ async def _handle_discovery(
                 else CourseType.MAIN
             )
             service_handler = cast(
-                SearchServiceHandler,
-                container.handler(SearchServiceHandler),
+                SearchCourseHandler,
+                container.handler(SearchCourseHandler),
             )
-            services = await service_handler.execute(
+            courses = await service_handler.execute(
                 context.shop.shop_id,
                 course_type=course_type,
             )
             if context.duration_minutes is not None:
-                services = [
+                courses = [
                     service
-                    for service in services
+                    for service in courses
                     if course_type is CourseType.ADDON
                     or service.duration_minutes == context.duration_minutes
                 ]
-            return _service_catalog_response(context, services)
+            return _service_catalog_response(context, courses)
 
         if nlu_result.intent == "list_available_times":
             missing = _missing_availability_field(context)
@@ -957,76 +1108,76 @@ def _shop_catalog_response(
 
 def _service_catalog_response(
     context: BookingContext,
-    services: list[Service],
+    courses: list[Course],
 ) -> DialogResponse:
-    if not services:
+    if not courses:
         return _handled_response(
             context,
             "POS không trả về liệu trình phù hợp với cửa hàng và thời lượng hiện tại.",
         )
-    main = [item for item in services if item.course_type is CourseType.MAIN]
-    addons = [item for item in services if item.course_type is CourseType.ADDON]
+    main = [item for item in courses if item.course_type is CourseType.MAIN]
+    addons = [item for item in courses if item.course_type is CourseType.ADDON]
     sections: list[str] = []
     if main:
-        sections.append("Liệu trình chính:\n" + _numbered_service_names(main))
+        sections.append("Liệu trình chính:\n" + _numbered_course_names(main))
     if addons:
-        sections.append("Add-on:\n" + _numbered_service_names(addons))
-    names = tuple(item.name for item in services[:8])
+        sections.append("Add-on:\n" + _numbered_course_names(addons))
+    names = tuple(item.name for item in courses[:8])
     text = "\n".join(sections) + "\nBạn muốn chọn liệu trình nào?"
-    return _catalog_response(context, text, names, len(services))
+    return _catalog_response(context, text, names, len(courses))
 
 
 def _service_step_response(
     context: BookingContext,
-    services: list[Service],
+    courses: list[Course],
     *,
     course_type: CourseType,
 ) -> DialogResponse:
     if course_type is CourseType.MAIN:
-        if not services:
+        if not courses:
             return _handled_response(
                 context,
                 "POS không có liệu trình chính phù hợp với thời lượng đã chọn.",
             )
-        visible = services[:8]
+        visible = courses[:8]
         text = (
             "Các liệu trình chính phù hợp:\n"
-            + _numbered_service_names(visible)
+            + _numbered_course_names(visible)
             + "\nBạn hãy chọn một liệu trình chính."
         )
         return _catalog_response(
             context,
             text,
             tuple(service.name for service in visible),
-            len(services),
+            len(courses),
         )
 
-    if context.service is None:
+    if context.main_course is None:
         raise ValueError("An add-on suggestion requires a selected main course.")
-    visible = services[:7]
+    visible = courses[:7]
     if visible:
         text = (
-            f"Liệu trình chính đã chọn: {context.service.name}.\n"
+            f"Liệu trình chính đã chọn: {context.main_course.name}.\n"
             "Các add-on có thể chọn thêm:\n"
-            + _numbered_service_names(visible)
+            + _numbered_course_names(visible)
             + "\nBạn hãy chọn một add-on hoặc bỏ qua bước này."
         )
     else:
         text = (
-            f"Liệu trình chính đã chọn: {context.service.name}. "
+            f"Liệu trình chính đã chọn: {context.main_course.name}. "
             "Cửa hàng hiện không có add-on khả dụng; bạn có thể tiếp tục chọn giờ."
         )
     return _catalog_response(
         context,
         text,
         tuple(service.name for service in visible) + ("Không chọn add-on",),
-        len(services),
+        len(courses),
     )
 
 
-def _numbered_service_names(services: list[Service]) -> str:
+def _numbered_course_names(courses: list[Course]) -> str:
     return "\n".join(
-        f"{index}. {service.name}" for index, service in enumerate(services[:8], 1)
+        f"{index}. {service.name}" for index, service in enumerate(courses[:8], 1)
     )
 
 
@@ -1052,7 +1203,7 @@ def _missing_availability_field(context: BookingContext) -> str | None:
         (context.booking_date, "Bạn hãy chọn ngày trước khi xem giờ trống."),
         (context.num_customer, "Bạn hãy chọn số người trước khi xem giờ trống."),
         (context.duration_minutes, "Bạn hãy chọn thời lượng trước khi xem giờ trống."),
-        (context.service, "Bạn hãy chọn liệu trình trước khi xem giờ trống."),
+        (context.main_course, "Bạn hãy chọn liệu trình trước khi xem giờ trống."),
     )
     return next((message for value, message in fields if value is None), None)
 
@@ -1070,26 +1221,26 @@ async def _entity_response(
         )
     if result.status is EntityResolutionStatus.NOT_FOUND:
         if result.entity_kind is NLUEntityKind.COURSE and context.shop is not None:
-            handler = cast(SearchServiceHandler, container.handler(SearchServiceHandler))
+            handler = cast(SearchCourseHandler, container.handler(SearchCourseHandler))
             course_type = (
                 CourseType.ADDON
-                if context.service_selection_mode is ServiceSelectionMode.ADDON
+                if context.course_selection_mode is CourseSelectionMode.ADDON
                 else CourseType.MAIN
             )
-            services = await handler.execute(context.shop.shop_id, course_type=course_type)
+            courses = await handler.execute(context.shop.shop_id, course_type=course_type)
             if course_type is CourseType.MAIN and context.duration_minutes is not None:
-                services = [
+                courses = [
                     service
-                    for service in services
+                    for service in courses
                     if service.duration_minutes == context.duration_minutes
                 ]
-            if services:
+            if courses:
                 noun = "add-on" if course_type is CourseType.ADDON else "liệu trình chính"
-                visible = services[:8]
+                visible = courses[:8]
                 return _handled_response(
                     context,
                     f"Không tìm thấy {noun} phù hợp. Bạn có thể chọn:\n"
-                    + _numbered_service_names(visible),
+                    + _numbered_course_names(visible),
                     tuple(service.name for service in visible),
                 )
         return _handled_response(context, _NOT_FOUND_TEXT[result.entity_kind])
@@ -1200,7 +1351,7 @@ def _state_recovery_quick_replies(context: BookingContext) -> tuple[str, ...]:
         names = tuple(shop.name for shop in context.suggested_shops[:8])
         return names or ("Xem danh sách cửa hàng",)
     if context.state is BookingState.SELECTING_SERVICE:
-        if context.service is not None:
+        if context.main_course is not None:
             return ("Không chọn add-on", "Xem danh sách add-on")
         return ("Xem danh sách liệu trình",)
     if context.state is BookingState.SELECTING_TIME:

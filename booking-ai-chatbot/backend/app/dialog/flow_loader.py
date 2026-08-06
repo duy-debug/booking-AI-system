@@ -144,13 +144,17 @@ class FlowLoader:
         """Load the compact target-to-change-rule mapping."""
         with path.open("r", encoding="utf-8") as handlers_file:
             raw: object = json.load(handlers_file)
-        root = _object(raw, "Change handlers root must be a JSON object.")
+        document = _object(raw, "Change handlers root must be a JSON object.")
+        root = _object(
+            document.get("change_handlers", document),
+            "Change handlers must be a JSON object.",
+        )
         allowed_targets = {
             "shop",
             "date",
             "people",
             "duration",
-            "service",
+            "main_course",
             "time",
             "therapist",
             "phone",

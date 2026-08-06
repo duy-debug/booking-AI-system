@@ -14,45 +14,42 @@ from fastapi.testclient import TestClient
 
 import app.dependencies as dependencies
 from app.application.handlers.check_availability_handler import CheckAvailabilityHandler
-from app.application.handlers.search_service_handler import SearchServiceHandler
+from app.application.handlers.search_course_handler import SearchCourseHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
-from app.application.ports.knowledge_gateway import KnowledgeDocument
-from app.application.ports.llm_gateway import LLMMessage, LLMResponse
-from app.core.config import Settings
 from app.dependencies import ApplicationContainer
-from app.dialog.entity_resolution import (
+from app.dialog.nlu import (
     EntityCandidate,
     EntityResolutionCoordinator,
     EntityResolutionResult,
     EntityResolutionStatus,
-)
-from app.dialog.nlu import (
-    DeterministicNLU,
     LLMNLUFallback,
     NLUEntityKind,
+    NLUProcessor,
     NLUResolutionStatus,
     NLUResult,
     NLUSource,
 )
-from app.domain.booking import CourseSelection, CourseType, Service, Shop
 from app.domain.booking_context import BookingContext
+from app.domain.booking_models import Course, CourseSelection, CourseType, Shop
 from app.domain.booking_state import BookingState
+from app.infrastructure.context_store import Settings
+from app.infrastructure.gemini_client import LLMMessage, LLMResponse
+from app.infrastructure.qdrant_client import FAQManager, KnowledgeDocument
 from app.main import create_app
-from app.sidecar.faq_manager import FAQManager
 
 SHOP = Shop(
     shop_id=UUID("11111111-1111-1111-1111-111111111111"),
     name="Shibuya",
     address="Tokyo",
 )
-SERVICE = Service(
-    service_id=UUID("22222222-2222-2222-2222-222222222222"),
+COURSE = Course(
+    course_id=UUID("22222222-2222-2222-2222-222222222222"),
     name="Aromatherapy",
     duration_minutes=60,
     price=Decimal("500000.00"),
 )
-ADDON = Service(
-    service_id=UUID("55555555-5555-5555-5555-555555555555"),
+ADDON = Course(
+    course_id=UUID("55555555-5555-5555-5555-555555555555"),
     name="Chăm sóc da đầu",
     duration_minutes=15,
     price=Decimal("100000.00"),
@@ -85,7 +82,7 @@ class RecordingDiscoveryShopHandler(SearchShopHandler):
         ]
 
 
-class RecordingDiscoveryServiceHandler(SearchServiceHandler):
+class RecordingDiscoveryCourseHandler(SearchCourseHandler):
     def __init__(self) -> None:
         self.calls: list[tuple[UUID, CourseType | None]] = []
 
@@ -96,9 +93,9 @@ class RecordingDiscoveryServiceHandler(SearchServiceHandler):
         *,
         course_type: CourseType | None = None,
         is_active: bool = True,
-    ) -> list[Service]:
+    ) -> list[Course]:
         self.calls.append((shop_id, course_type))
-        return [ADDON] if course_type is CourseType.ADDON else [SERVICE]
+        return [ADDON] if course_type is CourseType.ADDON else [COURSE]
 
 
 class RecordingAvailabilityHandler(CheckAvailabilityHandler):
@@ -195,7 +192,7 @@ def chat_client(
             application.state.application_container,
         )
 
-        container.tool_bridge._search_shop_handler = RecordingSearchShopHandler()
+        container.action_registry._search_shop_handler = RecordingSearchShopHandler()
         yield client, outbound_requests
 
 
@@ -290,9 +287,9 @@ def test_service_package_synonym_lists_services_during_duration_selection(
 ) -> None:
     client, outbound_requests = chat_client
     container = container_of(client)
-    handler = RecordingDiscoveryServiceHandler()
+    handler = RecordingDiscoveryCourseHandler()
     container._handlers = tuple(
-        handler if isinstance(item, SearchServiceHandler) else item
+        handler if isinstance(item, SearchCourseHandler) else item
         for item in container._handlers
     )
     context = BookingContext(
@@ -310,7 +307,7 @@ def test_service_package_synonym_lists_services_during_duration_selection(
 
     assert response.status_code == 200
     assert response.json()["state"] == "selecting_duration"
-    assert response.json()["quick_replies"] == [SERVICE.name]
+    assert response.json()["quick_replies"] == [COURSE.name]
     assert handler.calls == [(SHOP.shop_id, CourseType.MAIN)]
     assert context.duration_minutes is None
     assert outbound_requests == []
@@ -321,13 +318,13 @@ def test_service_discovery_keeps_booking_selection_and_calls_pos_once(
 ) -> None:
     client, outbound_requests = chat_client
     container = container_of(client)
-    handler = RecordingDiscoveryServiceHandler()
+    handler = RecordingDiscoveryCourseHandler()
     container._handlers = tuple(
-        handler if isinstance(item, SearchServiceHandler) else item
+        handler if isinstance(item, SearchCourseHandler) else item
         for item in container._handlers
     )
     context = BookingContext(
-        "conversation-list-services",
+        "conversation-list-courses",
         state=BookingState.SELECTING_SERVICE,
         shop=SHOP,
         booking_date=date(2099, 8, 15),
@@ -346,9 +343,9 @@ def test_service_discovery_keeps_booking_selection_and_calls_pos_once(
     assert response.status_code == 200
     assert body["state"] == "selecting_service"
     assert body["status"] == "success"
-    assert body["quick_replies"] == [SERVICE.name]
+    assert body["quick_replies"] == [COURSE.name]
     assert handler.calls == [(SHOP.shop_id, CourseType.MAIN)]
-    assert context.service is None
+    assert context.main_course is None
     assert outbound_requests == []
 
 
@@ -372,7 +369,7 @@ def test_valid_idle_booking_turn_returns_json_and_persists_state(
     assert response.json()["state"] == "selecting_shop"
     search = cast(
         RecordingSearchShopHandler,
-        container_of(client).tool_bridge._search_shop_handler,
+        container_of(client).action_registry._search_shop_handler,
     )
     assert search.calls == [None]
     assert set(application.openapi()["paths"]) == {
@@ -419,7 +416,7 @@ def test_json_happy_path_reaches_people_without_preload_calls(
     context = container.memory_cache._contexts["conversation-p1"]
     search = cast(
         RecordingSearchShopHandler,
-        container.tool_bridge._search_shop_handler,
+        container.action_registry._search_shop_handler,
     )
 
     assert [
@@ -487,7 +484,7 @@ def test_json_phone_denial_clears_phone_and_returns_to_collection(
         "conversation-phone-denial",
         state=BookingState.VERIFYING_PHONE,
         shop=SHOP,
-        service=SERVICE,
+        main_course=COURSE,
         booking_date=date(2099, 8, 15),
         start_time=time(10, 30),
         num_customer=1,
@@ -510,7 +507,7 @@ def test_json_phone_denial_clears_phone_and_returns_to_collection(
     assert context.phone is None
     assert context.phone_confirmed is False
     assert context.shop is SHOP
-    assert context.service is SERVICE
+    assert context.main_course is COURSE
     assert context.booking_date == date(2099, 8, 15)
     assert context.start_time == time(10, 30)
     assert outbound_requests == []
@@ -521,15 +518,15 @@ def test_booking_proactively_suggests_main_course_then_addon_then_slots(
 ) -> None:
     client, outbound_requests = chat_client
     container = container_of(client)
-    service_handler = RecordingDiscoveryServiceHandler()
+    service_handler = RecordingDiscoveryCourseHandler()
     container._handlers = tuple(
-        service_handler if isinstance(item, SearchServiceHandler) else item
+        service_handler if isinstance(item, SearchCourseHandler) else item
         for item in container._handlers
     )
     availability = RecordingAvailabilityHandler()
-    container.tool_bridge._check_availability_handler = availability
+    container.action_registry._check_availability_handler = availability
     context = BookingContext(
-        "conversation-guided-services",
+        "conversation-guided-courses",
         state=BookingState.SELECTING_DURATION,
         shop=SHOP,
         booking_date=date(2099, 8, 15),
@@ -543,7 +540,7 @@ def test_booking_proactively_suggests_main_course_then_addon_then_slots(
         message="60 phút",
     )
     assert main_response.json()["state"] == "selecting_service"
-    assert main_response.json()["quick_replies"] == [SERVICE.name]
+    assert main_response.json()["quick_replies"] == [COURSE.name]
     assert "liệu trình chính" in main_response.json()["text"].casefold()
     assert service_handler.calls == [(SHOP.shop_id, CourseType.MAIN)]
 
@@ -555,7 +552,7 @@ def test_booking_proactively_suggests_main_course_then_addon_then_slots(
                 entity_kind=NLUEntityKind.COURSE,
                 dispatch_intent="select_course",
                 dispatch_payload={
-                    "course_selection": CourseSelection(main_course=SERVICE)
+                    "course_selection": CourseSelection(main_course=COURSE)
                 },
                 matched_count=1,
             )
@@ -564,7 +561,7 @@ def test_booking_proactively_suggests_main_course_then_addon_then_slots(
     addon_response = post_message(
         client,
         conversation_id=context.conversation_id,
-        message=SERVICE.name,
+        message=COURSE.name,
     )
     assert addon_response.json()["state"] == "selecting_service"
     assert addon_response.json()["quick_replies"] == [
@@ -591,7 +588,7 @@ def test_json_booking_failure_refreshes_slots_without_booking_creation(
     client, outbound_requests = chat_client
     container = container_of(client)
     availability = RecordingAvailabilityHandler()
-    container.tool_bridge._check_availability_handler = availability
+    container.action_registry._check_availability_handler = availability
     gateway = StaticLLMGateway(
         json.dumps(
             {
@@ -611,7 +608,7 @@ def test_json_booking_failure_refreshes_slots_without_booking_creation(
         "conversation-reload-slots",
         state=BookingState.BOOKING_FAILED,
         shop=SHOP,
-        service=SERVICE,
+        main_course=COURSE,
         booking_date=date(2099, 8, 15),
         start_time=time(9, 0),
         num_customer=1,
@@ -653,7 +650,7 @@ def test_valid_structured_llm_fallback_returns_http_200(
             }
         )
     )
-    container.deterministic_nlu = cast(DeterministicNLU, AlwaysUnresolvedNLU())
+    container.nlu_processor = cast(NLUProcessor, AlwaysUnresolvedNLU())
     container.llm_nlu_fallback = LLMNLUFallback(
         llm_gateway=gateway,
         intent_policy=container.state_intent_policy,

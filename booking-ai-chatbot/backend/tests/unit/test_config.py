@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app.core.config import load_runtime_environment
+from app.infrastructure.context_store import load_runtime_environment
 
 
 def test_load_runtime_environment_reads_explicit_file(

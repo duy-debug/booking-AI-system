@@ -16,51 +16,52 @@ import app.dependencies as dependencies
 from app.application.handlers.check_availability_handler import CheckAvailabilityHandler
 from app.application.handlers.create_booking_handler import CreateBookingHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
-from app.application.ports.booking_gateway import (
-    BookingGateway,
-    CreateBookingRequest,
-    CreateBookingResult,
-    FinalAvailabilityRequest,
-    FinalAvailabilityResult,
-)
-from app.application.ports.knowledge_gateway import (
-    KnowledgeDocument,
-    KnowledgeGatewayUnavailableError,
-)
-from app.application.ports.llm_gateway import (
-    LLMGatewayUnavailableError,
-    LLMMessage,
-    LLMResponse,
-)
-from app.core.config import Settings
 from app.dependencies import ApplicationContainer
-from app.dialog.entity_resolution import (
+from app.dialog.nlu import (
     EntityCandidate,
     EntityResolutionCoordinator,
     EntityResolutionResult,
     EntityResolutionStatus,
-)
-from app.dialog.nlu import (
-    DeterministicNLU,
     LLMNLUFallback,
     NLUEntityKind,
+    NLUProcessor,
     NLUResolutionStatus,
     NLUResult,
     NLUSource,
 )
-from app.domain.booking import Booking, Customer, Service, Shop
 from app.domain.booking_context import BookingContext
+from app.domain.booking_models import (
+    Booking,
+    BookingGateway,
+    Course,
+    CreateBookingRequest,
+    CreateBookingResult,
+    Customer,
+    FinalAvailabilityRequest,
+    FinalAvailabilityResult,
+    Shop,
+)
 from app.domain.booking_state import BookingState
+from app.infrastructure.context_store import Settings
+from app.infrastructure.gemini_client import (
+    LLMGatewayUnavailableError,
+    LLMMessage,
+    LLMResponse,
+)
+from app.infrastructure.qdrant_client import (
+    FAQManager,
+    KnowledgeDocument,
+    KnowledgeGatewayUnavailableError,
+)
 from app.main import create_app
-from app.sidecar.faq_manager import FAQManager
 
 SHOP = Shop(
     shop_id=UUID("11111111-1111-1111-1111-111111111111"),
     name="Shibuya",
     address="Tokyo",
 )
-SERVICE = Service(
-    service_id=UUID("22222222-2222-2222-2222-222222222222"),
+COURSE = Course(
+    course_id=UUID("22222222-2222-2222-2222-222222222222"),
     name="Aromatherapy",
     duration_minutes=60,
     price=Decimal("500000.00"),
@@ -108,7 +109,7 @@ class EndpointCreateGateway:
             booking_id=UUID("33333333-3333-3333-3333-333333333333"),
             status="confirmed",
             shop=SHOP,
-            service=SERVICE,
+            main_course=COURSE,
             customer=Customer(request.phone, request.customer_name),
             booking_date=request.booking_date,
             start_time=request.start_time,
@@ -218,7 +219,7 @@ def stream_client(
             application.state.application_container,
         )
 
-        container.tool_bridge._search_shop_handler = RecordingSearchShopHandler()
+        container.action_registry._search_shop_handler = RecordingSearchShopHandler()
         yield client, outbound_requests
 
 
@@ -291,7 +292,7 @@ def test_stream_success_contract_and_event_order(
     }
     search = cast(
         RecordingSearchShopHandler,
-        container_of(client).tool_bridge._search_shop_handler,
+        container_of(client).action_registry._search_shop_handler,
     )
     assert search.calls == [None]
     assert outbound_requests == []
@@ -333,7 +334,7 @@ def test_p2_recovery_keeps_sse_order_and_json_parity(
     client, outbound_requests = stream_client
     container = container_of(client)
     availability = RecordingAvailabilityHandler()
-    container.tool_bridge._check_availability_handler = availability
+    container.action_registry._check_availability_handler = availability
     gateway = StaticLLMGateway(
         json.dumps(
             {
@@ -353,7 +354,7 @@ def test_p2_recovery_keeps_sse_order_and_json_parity(
         "conversation-p2-stream",
         state=BookingState.BOOKING_FAILED,
         shop=SHOP,
-        service=SERVICE,
+        main_course=COURSE,
         booking_date=date(2099, 8, 15),
         start_time=time(9, 0),
         num_customer=1,
@@ -387,7 +388,7 @@ def test_completed_booking_without_code_has_json_sse_parity_and_one_create_per_r
     client, outbound_requests = stream_client
     container = container_of(client)
     gateway = EndpointCreateGateway()
-    container.tool_bridge._create_booking_handler = CreateBookingHandler(
+    container.action_registry._create_booking_handler = CreateBookingHandler(
         cast(BookingGateway, gateway)
     )
 
@@ -396,7 +397,7 @@ def test_completed_booking_without_code_has_json_sse_parity_and_one_create_per_r
             conversation_id,
             state=BookingState.AWAITING_CONFIRMATION,
             shop=SHOP,
-            service=SERVICE,
+            main_course=COURSE,
             customer=Customer("0901234567", "Nguyen An"),
             booking_date=date(2099, 8, 15),
             start_time=time(10, 30),
@@ -486,7 +487,7 @@ def test_unknown_input_is_a_normal_message_not_an_error(
     gateway = StaticLLMGateway(
         error=LLMGatewayUnavailableError("provider unavailable")
     )
-    container.deterministic_nlu = cast(DeterministicNLU, AlwaysUnresolvedNLU())
+    container.nlu_processor = cast(NLUProcessor, AlwaysUnresolvedNLU())
     container.llm_nlu_fallback = LLMNLUFallback(
         llm_gateway=gateway,
         intent_policy=container.state_intent_policy,
@@ -560,7 +561,7 @@ def test_runtime_processing_error_becomes_terminal_safe_error_event(
 ) -> None:
     client, _ = stream_client
     container = container_of(client)
-    container.deterministic_nlu = cast(DeterministicNLU, FailingNLU())
+    container.nlu_processor = cast(NLUProcessor, FailingNLU())
 
     response = post_stream(
         client,
@@ -652,7 +653,7 @@ def test_stream_message_has_parity_with_json_on_independent_contexts(
             }
         )
     )
-    container.deterministic_nlu = cast(DeterministicNLU, AlwaysUnresolvedNLU())
+    container.nlu_processor = cast(NLUProcessor, AlwaysUnresolvedNLU())
     container.llm_nlu_fallback = LLMNLUFallback(
         llm_gateway=gateway,
         intent_policy=container.state_intent_policy,

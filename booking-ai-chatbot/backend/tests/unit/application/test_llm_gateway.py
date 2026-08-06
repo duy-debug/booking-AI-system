@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from app.application.ports.llm_gateway import (
+from app.infrastructure.gemini_client import (
     LLMGateway,
     LLMMessage,
     LLMResponse,

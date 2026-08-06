@@ -1,0 +1,2111 @@
+{
+    "version":  "2.0",
+    "name":  "booking-flow",
+    "description":  "Detailed booking conversation flow.",
+    "initial_state":  "idle",
+    "intent_catalog":  {
+                           "version":  "1",
+                           "intents":  [
+                                           {
+                                               "intent":  "start_booking",
+                                               "priority":  100,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "tôi muốn đặt lịch",
+                                                                "tôi muốn đặt booking",
+                                                                "book lịch giúp tôi",
+                                                                "đặt chỗ cho ngày mai",
+                                                                "đặt hẹn cho tôi",
+                                                                "tôi muốn đi massage"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "đặt lịch",
+                                                                     "tôi muốn đặt lịch",
+                                                                     "tôi muốn đặt booking",
+                                                                     "book lịch giúp tôi",
+                                                                     "tôi muốn đặt chỗ",
+                                                                     "đặt hẹn cho tôi",
+                                                                     "tôi muốn đi massage"
+                                                                 ],
+                                               "required_any_phrases":  [
+                                                                            "đặt lịch",
+                                                                            "đặt booking",
+                                                                            "book lịch",
+                                                                            "đặt chỗ",
+                                                                            "đặt hẹn",
+                                                                            "đi massage"
+                                                                        ],
+                                               "optional_phrases":  [
+                                                                        "tôi muốn",
+                                                                        "giúp tôi",
+                                                                        "cho tôi",
+                                                                        "ngày mai"
+                                                                    ],
+                                               "excluded_phrases":  [
+                                                                        "hủy",
+                                                                        "đổi"
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "idle"
+                                                                  ],
+                                               "entity_hints":  [
+                                                                    "date"
+                                                                ],
+                                               "mutates_context":  true
+                                           },
+                                           {
+                                               "intent":  "change_info",
+                                               "priority":  95,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "đổi ngày",
+                                                                "chọn lại liệu trình"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "đổi ngày",
+                                                                     "chọn lại liệu trình",
+                                                                     "chọn liệu trình khác",
+                                                                     "chọn giờ khác",
+                                                                     "không yêu cầu kỹ thuật viên nữa"
+                                                                 ],
+                                               "required_any_phrases":  [
+                                                                            "đổi",
+                                                                            "chọn lại",
+                                                                            "sửa",
+                                                                            "chọn liệu trình khác",
+                                                                            "chọn giờ khác",
+                                                                            "không yêu cầu kỹ thuật viên"
+                                                                        ],
+                                               "optional_phrases":  [
+                                                                        "ngày",
+                                                                        "người",
+                                                                        "thời lượng",
+                                                                        "liệu trình",
+                                                                        "giờ",
+                                                                        "điện thoại"
+                                                                    ],
+                                               "excluded_phrases":  [
+
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "selecting_shop",
+                                                                      "selecting_date",
+                                                                      "selecting_people",
+                                                                      "selecting_duration",
+                                                                      "selecting_service",
+                                                                      "selecting_time",
+                                                                      "selecting_therapist",
+                                                                      "collecting_phone",
+                                                                      "verifying_phone",
+                                                                      "awaiting_confirmation"
+                                                                  ],
+                                               "entity_hints":  [
+                                                                    "change",
+                                                                    "service"
+                                                                ],
+                                               "mutates_context":  true
+                                           },
+                                           {
+                                               "intent":  "confirm",
+                                               "priority":  90,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "xác nhận",
+                                                                "đúng rồi"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "đồng ý",
+                                                                     "xác nhận",
+                                                                     "đúng",
+                                                                     "đúng rồi",
+                                                                     "ok",
+                                                                     "oke",
+                                                                     "yes",
+                                                                     "tiếp tục"
+                                                                 ],
+                                               "required_any_phrases":  [
+
+                                                                        ],
+                                               "optional_phrases":  [
+
+                                                                    ],
+                                               "excluded_phrases":  [
+
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "verifying_phone",
+                                                                      "awaiting_confirmation",
+                                                                      "booking_failed"
+                                                                  ],
+                                               "entity_hints":  [
+
+                                                                ],
+                                               "mutates_context":  true
+                                           },
+                                           {
+                                               "intent":  "deny",
+                                               "priority":  90,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "không",
+                                                                "nhập lại"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "không",
+                                                                     "không đồng ý",
+                                                                     "sai",
+                                                                     "nhập lại",
+                                                                     "đổi lại",
+                                                                     "no"
+                                                                 ],
+                                               "required_any_phrases":  [
+                                                                            "không phải"
+                                                                        ],
+                                               "optional_phrases":  [
+
+                                                                    ],
+                                               "excluded_phrases":  [
+
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "selecting_people",
+                                                                      "selecting_duration",
+                                                                      "selecting_time",
+                                                                      "selecting_therapist",
+                                                                      "verifying_phone",
+                                                                      "awaiting_confirmation",
+                                                                      "booking_failed"
+                                                                  ],
+                                               "entity_hints":  [
+
+                                                                ],
+                                               "mutates_context":  true
+                                           },
+                                           {
+                                               "intent":  "search_shops",
+                                               "priority":  92,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "có cơ sở nào ở Huế",
+                                                                "tìm giúp cửa hàng ở Quận 1"
+                                                            ],
+                                               "exact_phrases":  [
+
+                                                                 ],
+                                               "required_any_phrases":  [
+                                                                            "cửa hàng",
+                                                                            "shop",
+                                                                            "chi nhánh",
+                                                                            "cơ sở",
+                                                                            "địa điểm"
+                                                                        ],
+                                               "optional_phrases":  [
+                                                                        " ở "
+                                                                    ],
+                                               "excluded_phrases":  [
+                                                                        "đặt tại",
+                                                                        "chọn"
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "idle",
+                                                                      "selecting_shop"
+                                                                  ],
+                                               "entity_hints":  [
+                                                                    "discovery",
+                                                                    "shop",
+                                                                    "location"
+                                                                ],
+                                               "mutates_context":  false
+                                           },
+                                           {
+                                               "intent":  "list_shops",
+                                               "priority":  90,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "tôi muốn xem cửa hàng",
+                                                                "có những cửa hàng nào",
+                                                                "liệt kê chi nhánh cho tôi"
+                                                            ],
+                                               "exact_phrases":  [
+
+                                                                 ],
+                                               "required_any_phrases":  [
+                                                                            "cửa hàng",
+                                                                            "shop",
+                                                                            "chi nhánh",
+                                                                            "cơ sở",
+                                                                            "địa điểm"
+                                                                        ],
+                                               "optional_phrases":  [
+                                                                        "liệt kê",
+                                                                        "cho tôi xem",
+                                                                        "xem",
+                                                                        "xem danh sách",
+                                                                        "có những",
+                                                                        "gồm những",
+                                                                        "danh sách",
+                                                                        "giới thiệu",
+                                                                        "tìm giúp"
+                                                                    ],
+                                               "excluded_phrases":  [
+                                                                        "đặt tại",
+                                                                        "chọn"
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "idle",
+                                                                      "selecting_shop"
+                                                                  ],
+                                               "entity_hints":  [
+                                                                    "discovery",
+                                                                    "shop"
+                                                                ],
+                                               "mutates_context":  false
+                                           },
+                                           {
+                                               "intent":  "list_addons",
+                                               "priority":  85,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "có add on nào",
+                                                                "liệt kê add-on"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "có add on nào",
+                                                                     "liệt kê add on"
+                                                                 ],
+                                               "required_any_phrases":  [
+                                                                            "add on"
+                                                                        ],
+                                               "optional_phrases":  [
+                                                                        "liệt kê",
+                                                                        "cho tôi xem",
+                                                                        "xem",
+                                                                        "xem danh sách",
+                                                                        "có những",
+                                                                        "gồm những",
+                                                                        "danh sách",
+                                                                        "giới thiệu",
+                                                                        "tìm giúp"
+                                                                    ],
+                                               "excluded_phrases":  [
+                                                                        "chọn",
+                                                                        "đặt"
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "idle",
+                                                                      "selecting_shop",
+                                                                      "selecting_date",
+                                                                      "selecting_people",
+                                                                      "selecting_duration",
+                                                                      "selecting_service",
+                                                                      "selecting_time",
+                                                                      "selecting_therapist",
+                                                                      "collecting_phone",
+                                                                      "verifying_phone",
+                                                                      "awaiting_confirmation",
+                                                                      "completed",
+                                                                      "cancelled"
+                                                                  ],
+                                               "entity_hints":  [
+                                                                    "discovery",
+                                                                    "service",
+                                                                    "addon",
+                                                                    "query"
+                                                                ],
+                                               "mutates_context":  false
+                                           },
+                                           {
+                                               "intent":  "list_services",
+                                               "priority":  86,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "có những liệu trình nào",
+                                                                "liệt kê liệu trình chính và add on"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "có những liệu trình nào",
+                                                                     "liệt kê liệu trình chính và add on",
+                                                                     "liệu trình chính",
+                                                                     "các liệu trình chính",
+                                                                     "cho tôi xem các gói",
+                                                                     "có những gói nào"
+                                                                 ],
+                                               "required_any_phrases":  [
+                                                                            "dịch vụ",
+                                                                            "liệu trình",
+                                                                            "menu",
+                                                                            "khóa trị liệu",
+                                                                            "gói"
+                                                                        ],
+                                               "optional_phrases":  [
+                                                                        "liệt kê",
+                                                                        "cho tôi xem",
+                                                                        "xem",
+                                                                        "xem danh sách",
+                                                                        "có những",
+                                                                        "gồm những",
+                                                                        "danh sách",
+                                                                        "giới thiệu",
+                                                                        "tìm giúp"
+                                                                    ],
+                                               "excluded_phrases":  [
+                                                                        "chọn",
+                                                                        "đặt"
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "idle",
+                                                                      "selecting_shop",
+                                                                      "selecting_date",
+                                                                      "selecting_people",
+                                                                      "selecting_duration",
+                                                                      "selecting_service",
+                                                                      "selecting_time",
+                                                                      "selecting_therapist",
+                                                                      "collecting_phone",
+                                                                      "verifying_phone",
+                                                                      "awaiting_confirmation",
+                                                                      "completed",
+                                                                      "cancelled"
+                                                                  ],
+                                               "entity_hints":  [
+                                                                    "discovery",
+                                                                    "service",
+                                                                    "query"
+                                                                ],
+                                               "mutates_context":  false
+                                           },
+                                           {
+                                               "intent":  "list_available_times",
+                                               "priority":  86,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "có những giờ nào trống",
+                                                                "cho tôi xem khung giờ trống"
+                                                            ],
+                                               "exact_phrases":  [
+
+                                                                 ],
+                                               "required_any_phrases":  [
+                                                                            "giờ",
+                                                                            "khung giờ",
+                                                                            "thời gian trống",
+                                                                            "lịch trống",
+                                                                            "slot"
+                                                                        ],
+                                               "optional_phrases":  [
+                                                                        "liệt kê",
+                                                                        "cho tôi xem",
+                                                                        "xem",
+                                                                        "có những",
+                                                                        "danh sách",
+                                                                        "tìm giúp",
+                                                                        "trống"
+                                                                    ],
+                                               "excluded_phrases":  [
+                                                                        "chọn",
+                                                                        "đổi"
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "idle",
+                                                                      "selecting_time"
+                                                                  ],
+                                               "entity_hints":  [
+                                                                    "discovery",
+                                                                    "time"
+                                                                ],
+                                               "mutates_context":  false
+                                           },
+                                           {
+                                               "intent":  "list_therapists",
+                                               "priority":  86,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "có những kỹ thuật viên nào",
+                                                                "liệt kê therapist cho tôi"
+                                                            ],
+                                               "exact_phrases":  [
+
+                                                                 ],
+                                               "required_any_phrases":  [
+                                                                            "therapist",
+                                                                            "kỹ thuật viên",
+                                                                            "chuyên viên",
+                                                                            "nhân viên trị liệu"
+                                                                        ],
+                                               "optional_phrases":  [
+                                                                        "liệt kê",
+                                                                        "cho tôi xem",
+                                                                        "xem",
+                                                                        "có",
+                                                                        "có những",
+                                                                        "hôm đó",
+                                                                        "danh sách",
+                                                                        "giới thiệu",
+                                                                        "tìm giúp"
+                                                                    ],
+                                               "excluded_phrases":  [
+                                                                        "chọn",
+                                                                        "đổi",
+                                                                        "tên là"
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "idle",
+                                                                      "selecting_therapist"
+                                                                  ],
+                                               "entity_hints":  [
+                                                                    "discovery",
+                                                                    "therapist"
+                                                                ],
+                                               "mutates_context":  false
+                                           },
+                                           {
+                                               "intent":  "faq",
+                                               "priority":  80,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "mở cửa lúc mấy giờ",
+                                                                "chính sách hủy lịch",
+                                                                "có dịch vụ cho phụ nữ mang thai không",
+                                                                "dịch vụ có an toàn cho người mang thai không"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "mở cửa lúc mấy giờ",
+                                                                     "đóng cửa lúc mấy giờ",
+                                                                     "giá bao nhiêu",
+                                                                     "có chỗ đậu xe không",
+                                                                     "có nhận khách mang thai không",
+                                                                     "có dịch vụ cho phụ nữ mang thai không",
+                                                                     "dịch vụ có an toàn cho người mang thai không",
+                                                                     "chính sách cho bà bầu",
+                                                                     "chính sách thai kỳ",
+                                                                     "chính sách hủy lịch",
+                                                                     "đến trước bao nhiêu phút"
+                                                                 ],
+                                               "required_any_phrases":  [
+                                                                            "mở cửa lúc mấy giờ",
+                                                                            "đóng cửa lúc mấy giờ",
+                                                                            "giá bao nhiêu",
+                                                                            "chỗ đậu xe",
+                                                                            "nhận khách mang thai",
+                                                                            "phụ nữ mang thai",
+                                                                            "người mang thai",
+                                                                            "khách đang mang thai",
+                                                                            "bà bầu",
+                                                                            "thai kỳ",
+                                                                            "chính sách hủy lịch",
+                                                                            "đến trước bao nhiêu phút"
+                                                                        ],
+                                               "optional_phrases":  [
+
+                                                                    ],
+                                               "excluded_phrases":  [
+
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "idle",
+                                                                      "selecting_shop",
+                                                                      "selecting_date",
+                                                                      "selecting_people",
+                                                                      "selecting_duration",
+                                                                      "selecting_service",
+                                                                      "selecting_time",
+                                                                      "selecting_therapist",
+                                                                      "collecting_phone",
+                                                                      "verifying_phone",
+                                                                      "awaiting_confirmation",
+                                                                      "completed",
+                                                                      "cancelled"
+                                                                  ],
+                                               "entity_hints":  [
+                                                                    "query"
+                                                                ],
+                                               "mutates_context":  false
+                                           },
+                                           {
+                                               "intent":  "greeting",
+                                               "priority":  70,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "xin chào",
+                                                                "chào Kori",
+                                                                "chào bạn",
+                                                                "hi Kori",
+                                                                "alo"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "xin chào",
+                                                                     "chào",
+                                                                     "chào bạn",
+                                                                     "chào kori",
+                                                                     "hello",
+                                                                     "hi",
+                                                                     "hi kori",
+                                                                     "alo"
+                                                                 ],
+                                               "required_any_phrases":  [
+                                                                            "xin chào",
+                                                                            "chào kori"
+                                                                        ],
+                                               "optional_phrases":  [
+                                                                        "kori",
+                                                                        "bạn"
+                                                                    ],
+                                               "excluded_phrases":  [
+                                                                        "đặt lịch",
+                                                                        "booking"
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "idle"
+                                                                  ],
+                                               "entity_hints":  [
+
+                                                                ],
+                                               "mutates_context":  false
+                                           },
+                                           {
+                                               "intent":  "thanks",
+                                               "priority":  70,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "cảm ơn",
+                                                                "thanks"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "cảm ơn",
+                                                                     "cám ơn",
+                                                                     "thanks"
+                                                                 ],
+                                               "required_any_phrases":  [
+
+                                                                        ],
+                                               "optional_phrases":  [
+
+                                                                    ],
+                                               "excluded_phrases":  [
+
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "idle"
+                                                                  ],
+                                               "entity_hints":  [
+
+                                                                ],
+                                               "mutates_context":  false
+                                           },
+                                           {
+                                               "intent":  "select_shop",
+                                               "priority":  60,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "Komorebi Huế"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "komorebi huế"
+                                                                 ],
+                                               "required_any_phrases":  [
+                                                                            "chi nhánh",
+                                                                            "cửa hàng"
+                                                                        ],
+                                               "optional_phrases":  [
+                                                                        "chọn",
+                                                                        "tại"
+                                                                    ],
+                                               "excluded_phrases":  [
+                                                                        "đổi",
+                                                                        "liệt kê"
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "selecting_shop"
+                                                                  ],
+                                               "entity_hints":  [
+                                                                    "shop"
+                                                                ],
+                                               "mutates_context":  true
+                                           },
+                                           {
+                                               "intent":  "select_date",
+                                               "priority":  60,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "ngày mai"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "hôm nay",
+                                                                     "ngày mai",
+                                                                     "ngày kia"
+                                                                 ],
+                                               "required_any_phrases":  [
+
+                                                                        ],
+                                               "optional_phrases":  [
+
+                                                                    ],
+                                               "excluded_phrases":  [
+
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "selecting_date"
+                                                                  ],
+                                               "entity_hints":  [
+                                                                    "date"
+                                                                ],
+                                               "mutates_context":  true
+                                           },
+                                           {
+                                               "intent":  "select_people",
+                                               "priority":  60,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "4 người",
+                                                                "3 người"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "một người",
+                                                                     "hai người",
+                                                                     "ba người",
+                                                                     "3 người",
+                                                                     "4 người"
+                                                                 ],
+                                               "required_any_phrases":  [
+                                                                            "người"
+                                                                        ],
+                                               "optional_phrases":  [
+
+                                                                    ],
+                                               "excluded_phrases":  [
+
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "selecting_people"
+                                                                  ],
+                                               "entity_hints":  [
+                                                                    "number_of_people"
+                                                                ],
+                                               "mutates_context":  true
+                                           },
+                                           {
+                                               "intent":  "select_duration",
+                                               "priority":  60,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "60",
+                                                                "60 phút"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "60",
+                                                                     "60 phút"
+                                                                 ],
+                                               "required_any_phrases":  [
+                                                                            "phút",
+                                                                            "tiếng"
+                                                                        ],
+                                               "optional_phrases":  [
+
+                                                                    ],
+                                               "excluded_phrases":  [
+
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "selecting_duration"
+                                                                  ],
+                                               "entity_hints":  [
+                                                                    "duration"
+                                                                ],
+                                               "mutates_context":  true
+                                           },
+                                           {
+                                               "intent":  "select_service",
+                                               "priority":  60,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "Massage đá nóng 60 phút"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "massage đá nóng 60 phút"
+                                                                 ],
+                                               "required_any_phrases":  [
+                                                                            "massage",
+                                                                            "liệu trình"
+                                                                        ],
+                                               "optional_phrases":  [
+                                                                        "phút",
+                                                                        "chọn"
+                                                                    ],
+                                               "excluded_phrases":  [
+                                                                        "liệt kê",
+                                                                        "những liệu trình",
+                                                                        "danh sách"
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "selecting_service"
+                                                                  ],
+                                               "entity_hints":  [
+                                                                    "service"
+                                                                ],
+                                               "mutates_context":  true
+                                           },
+                                           {
+                                               "intent":  "select_time",
+                                               "priority":  60,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "19:00"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "19:00"
+                                                                 ],
+                                               "required_any_phrases":  [
+                                                                            "giờ",
+                                                                            "sáng",
+                                                                            "chiều",
+                                                                            "tối"
+                                                                        ],
+                                               "optional_phrases":  [
+
+                                                                    ],
+                                               "excluded_phrases":  [
+
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "selecting_time",
+                                                                      "booking_failed"
+                                                                  ],
+                                               "entity_hints":  [
+                                                                    "time"
+                                                                ],
+                                               "mutates_context":  true
+                                           },
+                                           {
+                                               "intent":  "select_therapist",
+                                               "priority":  60,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "kỹ thuật viên nữ"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "nam",
+                                                                     "nữ",
+                                                                     "kỹ thuật viên nam",
+                                                                     "kỹ thuật viên nữ"
+                                                                 ],
+                                               "required_any_phrases":  [
+                                                                            "kỹ thuật viên",
+                                                                            "chọn chị",
+                                                                            "chọn anh"
+                                                                        ],
+                                               "optional_phrases":  [
+
+                                                                    ],
+                                               "excluded_phrases":  [
+                                                                        "không yêu cầu",
+                                                                        "không chọn"
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "selecting_therapist"
+                                                                  ],
+                                               "entity_hints":  [
+                                                                    "therapist"
+                                                                ],
+                                               "mutates_context":  true
+                                           },
+                                           {
+                                               "intent":  "provide_phone",
+                                               "priority":  60,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "0901234567"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "0901234567"
+                                                                 ],
+                                               "required_any_phrases":  [
+                                                                            "số điện thoại"
+                                                                        ],
+                                               "optional_phrases":  [
+
+                                                                    ],
+                                               "excluded_phrases":  [
+
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "collecting_phone",
+                                                                      "verifying_phone"
+                                                                  ],
+                                               "entity_hints":  [
+                                                                    "phone"
+                                                                ],
+                                               "mutates_context":  true
+                                           },
+                                           {
+                                               "intent":  "provide_name",
+                                               "priority":  96,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "Nguyễn Văn An"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "Nguyễn Văn An"
+                                                                 ],
+                                               "required_any_phrases":  [
+
+                                                                        ],
+                                               "optional_phrases":  [
+
+                                                                    ],
+                                               "excluded_phrases":  [
+
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "collecting_name"
+                                                                  ],
+                                               "entity_hints":  [
+                                                                    "customer_name"
+                                                                ],
+                                               "mutates_context":  true
+                                           },
+                                           {
+                                               "intent":  "ask_why",
+                                               "priority":  89,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "tại sao",
+                                                                "tôi phải làm gì tiếp theo"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "tại sao",
+                                                                     "vì sao",
+                                                                     "sao lại thế",
+                                                                     "tôi phải làm gì tiếp theo",
+                                                                     "bạn đang cần tôi nhập gì"
+                                                                 ],
+                                               "required_any_phrases":  [
+
+                                                                        ],
+                                               "optional_phrases":  [
+
+                                                                    ],
+                                               "excluded_phrases":  [
+
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "idle",
+                                                                      "selecting_shop",
+                                                                      "selecting_date",
+                                                                      "selecting_people",
+                                                                      "selecting_duration",
+                                                                      "selecting_service",
+                                                                      "selecting_time",
+                                                                      "selecting_therapist",
+                                                                      "collecting_phone",
+                                                                      "verifying_phone",
+                                                                      "awaiting_confirmation",
+                                                                      "booking_failed",
+                                                                      "completed",
+                                                                      "cancelled"
+                                                                  ],
+                                               "entity_hints":  [
+
+                                                                ],
+                                               "mutates_context":  false
+                                           },
+                                           {
+                                               "intent":  "repeat_last_question",
+                                               "priority":  88,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "nhắc lại"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "nhắc lại",
+                                                                     "hỏi lại đi",
+                                                                     "lặp lại câu hỏi",
+                                                                     "thử lại"
+                                                                 ],
+                                               "required_any_phrases":  [
+
+                                                                        ],
+                                               "optional_phrases":  [
+
+                                                                    ],
+                                               "excluded_phrases":  [
+
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "idle",
+                                                                      "selecting_shop",
+                                                                      "selecting_date",
+                                                                      "selecting_people",
+                                                                      "selecting_duration",
+                                                                      "selecting_service",
+                                                                      "selecting_time",
+                                                                      "selecting_therapist",
+                                                                      "collecting_phone",
+                                                                      "verifying_phone",
+                                                                      "awaiting_confirmation",
+                                                                      "booking_failed",
+                                                                      "completed",
+                                                                      "cancelled"
+                                                                  ],
+                                               "entity_hints":  [
+
+                                                                ],
+                                               "mutates_context":  false
+                                           },
+                                           {
+                                               "intent":  "restart_booking",
+                                               "priority":  99,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "bắt đầu lại"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "bắt đầu lại",
+                                                                     "đặt lại từ đầu",
+                                                                     "restart booking"
+                                                                 ],
+                                               "required_any_phrases":  [
+
+                                                                        ],
+                                               "optional_phrases":  [
+
+                                                                    ],
+                                               "excluded_phrases":  [
+
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "idle",
+                                                                      "selecting_shop",
+                                                                      "selecting_date",
+                                                                      "selecting_people",
+                                                                      "selecting_duration",
+                                                                      "selecting_service",
+                                                                      "selecting_time",
+                                                                      "selecting_therapist",
+                                                                      "collecting_phone",
+                                                                      "verifying_phone",
+                                                                      "awaiting_confirmation",
+                                                                      "booking_failed",
+                                                                      "completed",
+                                                                      "cancelled"
+                                                                  ],
+                                               "entity_hints":  [
+
+                                                                ],
+                                               "mutates_context":  true
+                                           },
+                                           {
+                                               "intent":  "unknown",
+                                               "priority":  0,
+                                               "enabled":  true,
+                                               "examples":  [
+                                                                "nội dung chưa xác định"
+                                                            ],
+                                               "exact_phrases":  [
+                                                                     "nội dung chưa xác định"
+                                                                 ],
+                                               "required_any_phrases":  [
+
+                                                                        ],
+                                               "optional_phrases":  [
+
+                                                                    ],
+                                               "excluded_phrases":  [
+
+                                                                    ],
+                                               "allowed_states":  [
+                                                                      "idle",
+                                                                      "selecting_shop",
+                                                                      "selecting_date",
+                                                                      "selecting_people",
+                                                                      "selecting_duration",
+                                                                      "selecting_service",
+                                                                      "selecting_time",
+                                                                      "selecting_therapist",
+                                                                      "collecting_phone",
+                                                                      "verifying_phone",
+                                                                      "awaiting_confirmation",
+                                                                      "booking_failed"
+                                                                  ],
+                                               "entity_hints":  [
+
+                                                                ],
+                                               "mutates_context":  false
+                                           }
+                                       ]
+                       },
+    "change_handlers":  {
+                            "shop":  {
+                                         "reset_action":  "change_shop",
+                                         "next_state":  "selecting_shop",
+                                         "applied_state":  "selecting_date",
+                                         "prompt_template":  "change_ask_shop"
+                                     },
+                            "date":  {
+                                         "reset_action":  "change_date",
+                                         "next_state":  "selecting_date",
+                                         "applied_state":  "selecting_people",
+                                         "prompt_template":  "change_ask_date"
+                                     },
+                            "people":  {
+                                           "reset_action":  "change_people",
+                                           "next_state":  "selecting_people",
+                                           "applied_state":  "selecting_duration",
+                                           "prompt_template":  "change_ask_people"
+                                       },
+                            "duration":  {
+                                             "reset_action":  "change_duration",
+                                             "next_state":  "selecting_duration",
+                                             "applied_state":  "selecting_service",
+                                             "prompt_template":  "change_ask_duration"
+                                         },
+                            "main_course":  {
+                                                "reset_action":  "change_course",
+                                                "next_state":  "selecting_service",
+                                                "applied_state":  "selecting_time",
+                                                "prompt_template":  "change_ask_course"
+                                            },
+                            "time":  {
+                                         "reset_action":  "change_time",
+                                         "next_state":  "selecting_time",
+                                         "applied_state":  "selecting_therapist",
+                                         "prompt_template":  "change_ask_time"
+                                     },
+                            "therapist":  {
+                                              "reset_action":  "change_therapist",
+                                              "next_state":  "selecting_therapist",
+                                              "applied_state":  "collecting_phone",
+                                              "prompt_template":  "change_ask_therapist"
+                                          },
+                            "phone":  {
+                                          "reset_action":  "change_phone",
+                                          "next_state":  "collecting_phone",
+                                          "applied_state":  "verifying_phone",
+                                          "prompt_template":  "change_ask_phone"
+                                      }
+                        },
+    "states":  {
+                   "idle":  {
+                                "description":  "Waiting for a booking request.",
+                                "on_enter":  {
+                                                 "instruction_template":  "greeting"
+                                             },
+                                "transitions":  [
+                                                    {
+                                                        "intent":  "greeting",
+                                                        "target":  "idle",
+                                                        "actions":  [
+
+                                                                    ]
+                                                    },
+                                                    {
+                                                        "intent":  "thanks",
+                                                        "target":  "idle",
+                                                        "actions":  [
+
+                                                                    ]
+                                                    },
+                                                    {
+                                                        "intent":  "start_booking",
+                                                        "target":  "selecting_shop",
+                                                        "actions":  [
+                                                                        "search_shop"
+                                                                    ],
+                                                        "on_fail":  [
+                                                                        {
+                                                                            "condition":  "*",
+                                                                            "target":  "idle",
+                                                                            "instruction_template":  "shop_lookup_unavailable"
+                                                                        }
+                                                                    ]
+                                                    },
+                                                    {
+                                                        "intent":  "unknown",
+                                                        "target":  "idle",
+                                                        "actions":  [
+                                                                        "ask_to_clarify"
+                                                                    ]
+                                                    },
+                                                    {
+                                                        "intent":  "*",
+                                                        "target":  "idle",
+                                                        "actions":  [
+                                                                        "log_unhandled",
+                                                                        "ask_to_clarify"
+                                                                    ]
+                                                    }
+                                                ]
+                            },
+                   "selecting_shop":  {
+                                          "description":  "Waiting for a store selection.",
+                                          "on_enter":  {
+                                                           "instruction_template":  "ask_shop"
+                                                       },
+                                          "transitions":  [
+                                                              {
+                                                                  "intent":  "select_store",
+                                                                  "target":  "selecting_date",
+                                                                  "actions":  [
+                                                                                  "handle_store_selection"
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "change_info",
+                                                                  "target":  "selecting_shop",
+                                                                  "actions":  [
+                                                                                  "defer_change_info"
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "unknown",
+                                                                  "target":  "selecting_shop",
+                                                                  "actions":  [
+                                                                                  "ask_to_clarify"
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "cancel_flow",
+                                                                  "target":  "cancelled",
+                                                                  "actions":  [
+
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "*",
+                                                                  "target":  "selecting_shop",
+                                                                  "actions":  [
+                                                                                  "log_unhandled",
+                                                                                  "ask_to_clarify"
+                                                                              ]
+                                                              }
+                                                          ]
+                                      },
+                   "selecting_date":  {
+                                          "description":  "Waiting for a booking date.",
+                                          "on_enter":  {
+                                                           "instruction_template":  "ask_date"
+                                                       },
+                                          "transitions":  [
+                                                              {
+                                                                  "intent":  "select_date",
+                                                                  "target":  "selecting_people",
+                                                                  "actions":  [
+                                                                                  "handle_date_selection"
+                                                                              ],
+                                                                  "on_fail":  [
+                                                                                  {
+                                                                                      "condition":  "date_in_past",
+                                                                                      "target":  "selecting_date",
+                                                                                      "actions":  [
+                                                                                                      "ask_date"
+                                                                                                  ]
+                                                                                  },
+                                                                                  {
+                                                                                      "condition":  "date_missing",
+                                                                                      "target":  "selecting_date",
+                                                                                      "actions":  [
+                                                                                                      "ask_date"
+                                                                                                  ]
+                                                                                  },
+                                                                                  {
+                                                                                      "condition":  "no_slots_on_date",
+                                                                                      "target":  "selecting_date",
+                                                                                      "actions":  [
+                                                                                                      "no_slots_available"
+                                                                                                  ]
+                                                                                  }
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "change_info",
+                                                                  "target":  "selecting_date",
+                                                                  "actions":  [
+                                                                                  "defer_change_info"
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "unknown",
+                                                                  "target":  "selecting_date",
+                                                                  "actions":  [
+                                                                                  "ask_to_clarify"
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "cancel_flow",
+                                                                  "target":  "cancelled",
+                                                                  "actions":  [
+
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "*",
+                                                                  "target":  "selecting_date",
+                                                                  "actions":  [
+                                                                                  "log_unhandled",
+                                                                                  "ask_to_clarify"
+                                                                              ]
+                                                              }
+                                                          ]
+                                      },
+                   "selecting_people":  {
+                                            "description":  "Waiting for the number of customers.",
+                                            "on_enter":  {
+                                                             "instruction_template":  "ask_people"
+                                                         },
+                                            "transitions":  [
+                                                                {
+                                                                    "intent":  "select_people",
+                                                                    "target":  "selecting_duration",
+                                                                    "actions":  [
+                                                                                    "handle_people_selection"
+                                                                                ],
+                                                                    "on_fail":  [
+                                                                                    {
+                                                                                        "condition":  "num_customer_invalid",
+                                                                                        "target":  "selecting_people",
+                                                                                        "actions":  [
+                                                                                                        "ask_people"
+                                                                                                    ]
+                                                                                    },
+                                                                                    {
+                                                                                        "condition":  "num_customer_too_many",
+                                                                                        "target":  "selecting_people",
+                                                                                        "actions":  [
+                                                                                                        "people_too_many"
+                                                                                                    ]
+                                                                                    }
+                                                                                ]
+                                                                },
+                                                                {
+                                                                    "intent":  "deny",
+                                                                    "target":  "selecting_date",
+                                                                    "actions":  [
+
+                                                                                ]
+                                                                },
+                                                                {
+                                                                    "intent":  "change_info",
+                                                                    "target":  "selecting_people",
+                                                                    "actions":  [
+                                                                                    "defer_change_info"
+                                                                                ]
+                                                                },
+                                                                {
+                                                                    "intent":  "unknown",
+                                                                    "target":  "selecting_people",
+                                                                    "actions":  [
+                                                                                    "ask_to_clarify"
+                                                                                ]
+                                                                },
+                                                                {
+                                                                    "intent":  "cancel_flow",
+                                                                    "target":  "cancelled",
+                                                                    "actions":  [
+
+                                                                                ]
+                                                                },
+                                                                {
+                                                                    "intent":  "*",
+                                                                    "target":  "selecting_people",
+                                                                    "actions":  [
+                                                                                    "log_unhandled",
+                                                                                    "ask_to_clarify"
+                                                                                ]
+                                                                }
+                                                            ]
+                                        },
+                   "selecting_duration":  {
+                                              "description":  "Waiting for a total duration or course.",
+                                              "on_enter":  {
+                                                               "instruction_template":  "ask_duration"
+                                                           },
+                                              "transitions":  [
+                                                                  {
+                                                                      "intent":  "select_duration",
+                                                                      "target":  "selecting_service",
+                                                                      "actions":  [
+                                                                                      "handle_duration_selection"
+                                                                                  ],
+                                                                      "on_fail":  {
+                                                                                      "condition":  "duration_not_multiple_15",
+                                                                                      "target":  "selecting_duration",
+                                                                                      "instruction_template":  "duration_invalid"
+                                                                                  }
+                                                                  },
+                                                                  {
+                                                                      "intent":  "select_course",
+                                                                      "target":  "selecting_service",
+                                                                      "actions":  [
+                                                                                      "handle_course_selection",
+                                                                                      "infer_duration_from_course"
+                                                                                  ],
+                                                                      "on_fail":  [
+                                                                                      {
+                                                                                          "condition":  "duration_not_multiple_15",
+                                                                                          "target":  "selecting_duration",
+                                                                                          "instruction_template":  "duration_invalid"
+                                                                                      },
+                                                                                      {
+                                                                                          "condition":  "course_not_found",
+                                                                                          "target":  "selecting_duration",
+                                                                                          "instruction_template":  "ask_course"
+                                                                                      },
+                                                                                      {
+                                                                                          "condition":  "addon_without_main_course",
+                                                                                          "target":  "selecting_duration",
+                                                                                          "instruction_template":  "addon_needs_main"
+                                                                                      }
+                                                                                  ]
+                                                                  },
+                                                                  {
+                                                                      "intent":  "deny",
+                                                                      "target":  "selecting_people",
+                                                                      "actions":  [
+
+                                                                                  ]
+                                                                  },
+                                                                  {
+                                                                      "intent":  "change_info",
+                                                                      "target":  "selecting_duration",
+                                                                      "actions":  [
+                                                                                      "defer_change_info"
+                                                                                  ]
+                                                                  },
+                                                                  {
+                                                                      "intent":  "unknown",
+                                                                      "target":  "selecting_duration",
+                                                                      "actions":  [
+                                                                                      "ask_to_clarify"
+                                                                                  ]
+                                                                  },
+                                                                  {
+                                                                      "intent":  "cancel_flow",
+                                                                      "target":  "cancelled",
+                                                                      "actions":  [
+
+                                                                                  ]
+                                                                  },
+                                                                  {
+                                                                      "intent":  "*",
+                                                                      "target":  "selecting_duration",
+                                                                      "actions":  [
+                                                                                      "log_unhandled",
+                                                                                      "ask_to_clarify"
+                                                                                  ]
+                                                                  }
+                                                              ]
+                                          },
+                   "selecting_service":  {
+                                             "description":  "Waiting for a main course, then an optional add-on.",
+                                             "on_enter":  {
+                                                              "instruction_template":  "ask_course"
+                                                          },
+                                             "transitions":  [
+                                                                 {
+                                                                     "intent":  "select_course",
+                                                                     "target":  "selecting_service",
+                                                                     "conditions":  [
+                                                                                        {
+                                                                                            "field":  "main_course",
+                                                                                            "op":  "null"
+                                                                                        }
+                                                                                    ],
+                                                                     "actions":  [
+                                                                                     "handle_course_selection"
+                                                                                 ],
+                                                                     "on_fail":  [
+                                                                                     {
+                                                                                         "condition":  "course_not_found",
+                                                                                         "target":  "selecting_service",
+                                                                                         "instruction_template":  "ask_course"
+                                                                                     },
+                                                                                     {
+                                                                                         "condition":  "main_course_missing",
+                                                                                         "target":  "selecting_service",
+                                                                                         "instruction_template":  "main_course_required"
+                                                                                     },
+                                                                                     {
+                                                                                         "condition":  "course_duration_mismatch",
+                                                                                         "target":  "selecting_duration",
+                                                                                         "actions":  [
+                                                                                                         "clear_course_for_reselect"
+                                                                                                     ],
+                                                                                         "instruction_template":  "duration_invalid"
+                                                                                     }
+                                                                                 ]
+                                                                 },
+                                                                 {
+                                                                     "intent":  "select_course",
+                                                                     "target":  "selecting_time",
+                                                                     "conditions":  [
+                                                                                        {
+                                                                                            "field":  "main_course",
+                                                                                            "op":  "not_null"
+                                                                                        }
+                                                                                    ],
+                                                                     "actions":  [
+                                                                                     "handle_course_selection",
+                                                                                     "load_time_slots"
+                                                                                 ],
+                                                                     "on_fail":  [
+                                                                                     {
+                                                                                         "condition":  "course_not_found",
+                                                                                         "target":  "selecting_service",
+                                                                                         "instruction_template":  "ask_course"
+                                                                                     },
+                                                                                     {
+                                                                                         "condition":  "main_course_missing",
+                                                                                         "target":  "selecting_service",
+                                                                                         "instruction_template":  "main_course_required"
+                                                                                     },
+                                                                                     {
+                                                                                         "condition":  "addon_without_main_course",
+                                                                                         "target":  "selecting_service",
+                                                                                         "instruction_template":  "addon_needs_main"
+                                                                                     },
+                                                                                     {
+                                                                                         "condition":  "combo_not_bookable",
+                                                                                         "target":  "selecting_service",
+                                                                                         "actions":  [
+                                                                                                         "clear_course_for_reselect"
+                                                                                                     ],
+                                                                                         "instruction_template":  "combo_not_bookable_retry"
+                                                                                     },
+                                                                                     {
+                                                                                         "condition":  "course_duration_mismatch",
+                                                                                         "target":  "selecting_duration",
+                                                                                         "actions":  [
+                                                                                                         "clear_course_for_reselect"
+                                                                                                     ],
+                                                                                         "instruction_template":  "duration_invalid"
+                                                                                     },
+                                                                                     {
+                                                                                         "condition":  "no_slots_available",
+                                                                                         "target":  "selecting_service",
+                                                                                         "instruction_template":  "no_slots_available"
+                                                                                     },
+                                                                                     {
+                                                                                         "condition":  "slot_api_error",
+                                                                                         "target":  "selecting_service",
+                                                                                         "instruction_template":  "slot_api_error"
+                                                                                     }
+                                                                                 ]
+                                                                 },
+                                                                 {
+                                                                     "intent":  "deny",
+                                                                     "target":  "selecting_time",
+                                                                     "conditions":  [
+                                                                                        {
+                                                                                            "field":  "main_course",
+                                                                                            "op":  "not_null"
+                                                                                        }
+                                                                                    ],
+                                                                     "actions":  [
+                                                                                     "skip_addon",
+                                                                                     "load_time_slots"
+                                                                                 ],
+                                                                     "on_fail":  [
+                                                                                     {
+                                                                                         "condition":  "no_slots_available",
+                                                                                         "target":  "selecting_service",
+                                                                                         "instruction_template":  "no_slots_available"
+                                                                                     },
+                                                                                     {
+                                                                                         "condition":  "slot_api_error",
+                                                                                         "target":  "selecting_service",
+                                                                                         "instruction_template":  "slot_api_error"
+                                                                                     }
+                                                                                 ]
+                                                                 },
+                                                                 {
+                                                                     "intent":  "select_duration",
+                                                                     "target":  "selecting_service",
+                                                                     "actions":  [
+                                                                                     "handle_duration_selection"
+                                                                                 ],
+                                                                     "on_fail":  {
+                                                                                     "condition":  "duration_not_multiple_15",
+                                                                                     "target":  "selecting_duration",
+                                                                                     "instruction_template":  "duration_invalid"
+                                                                                 }
+                                                                 },
+                                                                 {
+                                                                     "intent":  "select_people",
+                                                                     "target":  "selecting_people",
+                                                                     "actions":  [
+
+                                                                                 ]
+                                                                 },
+                                                                 {
+                                                                     "intent":  "change_info",
+                                                                     "target":  "selecting_service",
+                                                                     "actions":  [
+                                                                                     "defer_change_info"
+                                                                                 ]
+                                                                 },
+                                                                 {
+                                                                     "intent":  "unknown",
+                                                                     "target":  "selecting_service",
+                                                                     "actions":  [
+                                                                                     "ask_to_clarify"
+                                                                                 ]
+                                                                 },
+                                                                 {
+                                                                     "intent":  "cancel_flow",
+                                                                     "target":  "cancelled",
+                                                                     "actions":  [
+
+                                                                                 ]
+                                                                 },
+                                                                 {
+                                                                     "intent":  "*",
+                                                                     "target":  "selecting_service",
+                                                                     "actions":  [
+                                                                                     "log_unhandled",
+                                                                                     "ask_to_clarify"
+                                                                                 ]
+                                                                 }
+                                                             ]
+                                         },
+                   "selecting_time":  {
+                                          "description":  "Waiting for an available start time.",
+                                          "on_enter":  {
+                                                           "instruction_template":  "suggest_time_slots"
+                                                       },
+                                          "transitions":  [
+                                                              {
+                                                                  "intent":  "select_time",
+                                                                  "target":  "selecting_therapist",
+                                                                  "actions":  [
+                                                                                  "handle_time_selection"
+                                                                              ],
+                                                                  "on_fail":  [
+                                                                                  {
+                                                                                      "condition":  "slot_unavailable",
+                                                                                      "target":  "selecting_time",
+                                                                                      "instruction_template":  "slot_unavailable"
+                                                                                  },
+                                                                                  {
+                                                                                      "condition":  "slot_api_error",
+                                                                                      "target":  "selecting_time",
+                                                                                      "instruction_template":  "slot_api_error"
+                                                                                  }
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "select_time",
+                                                                  "conditions":  [
+                                                                                     {
+                                                                                         "field":  "num_customer",
+                                                                                         "op":  "gte",
+                                                                                         "value":  2
+                                                                                     }
+                                                                                 ],
+                                                                  "target":  "collecting_phone",
+                                                                  "actions":  [
+                                                                                  "handle_time_selection",
+                                                                                  "skip_therapist_for_group"
+                                                                              ],
+                                                                  "on_fail":  [
+                                                                                  {
+                                                                                      "condition":  "slot_unavailable",
+                                                                                      "target":  "selecting_time",
+                                                                                      "instruction_template":  "slot_unavailable"
+                                                                                  },
+                                                                                  {
+                                                                                      "condition":  "slot_api_error",
+                                                                                      "target":  "selecting_time",
+                                                                                      "instruction_template":  "slot_api_error"
+                                                                                  }
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "select_course",
+                                                                  "target":  "selecting_service",
+                                                                  "actions":  [
+
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "select_people",
+                                                                  "target":  "selecting_people",
+                                                                  "actions":  [
+
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "deny",
+                                                                  "target":  "selecting_service",
+                                                                  "actions":  [
+
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "change_info",
+                                                                  "target":  "selecting_time",
+                                                                  "actions":  [
+                                                                                  "defer_change_info"
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "unknown",
+                                                                  "target":  "selecting_time",
+                                                                  "actions":  [
+                                                                                  "ask_to_clarify"
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "cancel_flow",
+                                                                  "target":  "cancelled",
+                                                                  "actions":  [
+
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "*",
+                                                                  "target":  "selecting_time",
+                                                                  "actions":  [
+                                                                                  "log_unhandled",
+                                                                                  "ask_to_clarify"
+                                                                              ]
+                                                              }
+                                                          ]
+                                      },
+                   "selecting_therapist":  {
+                                               "description":  "Waiting for an optional therapist preference.",
+                                               "on_enter":  {
+                                                                "instruction_template":  "ask_therapist"
+                                                            },
+                                               "transitions":  [
+                                                                   {
+                                                                       "intent":  "select_therapist",
+                                                                       "target":  "collecting_phone",
+                                                                       "actions":  [
+                                                                                       "handle_therapist_selection"
+                                                                                   ],
+                                                                       "on_fail":  [
+                                                                                       {
+                                                                                           "condition":  "therapist_unavailable",
+                                                                                           "target":  "selecting_therapist",
+                                                                                           "instruction_template":  "therapist_unavailable"
+                                                                                       },
+                                                                                       {
+                                                                                           "condition":  "therapist_not_found",
+                                                                                           "target":  "selecting_therapist",
+                                                                                           "instruction_template":  "ask_therapist"
+                                                                                       }
+                                                                                   ]
+                                                                   },
+                                                                   {
+                                                                       "intent":  "deny",
+                                                                       "target":  "collecting_phone",
+                                                                       "actions":  [
+                                                                                       "skip_therapist"
+                                                                                   ]
+                                                                   },
+                                                                   {
+                                                                       "intent":  "select_time",
+                                                                       "target":  "selecting_time",
+                                                                       "actions":  [
+                                                                                       "handle_time_selection"
+                                                                                   ]
+                                                                   },
+                                                                   {
+                                                                       "intent":  "change_info",
+                                                                       "target":  "selecting_therapist",
+                                                                       "actions":  [
+                                                                                       "defer_change_info"
+                                                                                   ]
+                                                                   },
+                                                                   {
+                                                                       "intent":  "unknown",
+                                                                       "target":  "selecting_therapist",
+                                                                       "actions":  [
+                                                                                       "ask_to_clarify"
+                                                                                   ]
+                                                                   },
+                                                                   {
+                                                                       "intent":  "cancel_flow",
+                                                                       "target":  "cancelled",
+                                                                       "actions":  [
+
+                                                                                   ]
+                                                                   },
+                                                                   {
+                                                                       "intent":  "*",
+                                                                       "target":  "selecting_therapist",
+                                                                       "actions":  [
+                                                                                       "log_unhandled",
+                                                                                       "ask_to_clarify"
+                                                                                   ]
+                                                                   }
+                                                               ]
+                                           },
+                   "collecting_phone":  {
+                                            "description":  "Waiting for a customer phone number.",
+                                            "on_enter":  {
+                                                             "instruction_template":  "ask_phone"
+                                                         },
+                                            "transitions":  [
+                                                                {
+                                                                    "intent":  "provide_phone",
+                                                                    "target":  "collecting_name",
+                                                                    "actions":  [
+                                                                                    "handle_phone_collection",
+                                                                                    "validate_phone"
+                                                                                ],
+                                                                    "on_fail":  [
+                                                                                    {
+                                                                                        "condition":  "invalid_phone",
+                                                                                        "target":  "collecting_phone",
+                                                                                        "instruction_template":  "phone_invalid"
+                                                                                    },
+                                                                                    {
+                                                                                        "condition":  "customer_ng_blocked",
+                                                                                        "target":  "collecting_phone",
+                                                                                        "instruction_template":  "customer_not_allowed"
+                                                                                    },
+                                                                                    {
+                                                                                        "condition":  "customer_verification_mismatch",
+                                                                                        "target":  "collecting_phone",
+                                                                                        "instruction_template":  "customer_verification_failed"
+                                                                                    },
+                                                                                    {
+                                                                                        "condition":  "booking_api_error",
+                                                                                        "target":  "collecting_phone",
+                                                                                        "instruction_template":  "customer_verification_unavailable"
+                                                                                    }
+                                                                                ]
+                                                                },
+                                                                {
+                                                                    "intent":  "change_info",
+                                                                    "target":  "collecting_phone",
+                                                                    "actions":  [
+                                                                                    "defer_change_info"
+                                                                                ]
+                                                                },
+                                                                {
+                                                                    "intent":  "unknown",
+                                                                    "target":  "collecting_phone",
+                                                                    "actions":  [
+                                                                                    "ask_to_clarify"
+                                                                                ]
+                                                                },
+                                                                {
+                                                                    "intent":  "cancel_flow",
+                                                                    "target":  "cancelled",
+                                                                    "actions":  [
+
+                                                                                ]
+                                                                },
+                                                                {
+                                                                    "intent":  "*",
+                                                                    "target":  "collecting_phone",
+                                                                    "actions":  [
+                                                                                    "log_unhandled",
+                                                                                    "ask_to_clarify"
+                                                                                ]
+                                                                }
+                                                            ],
+                                            "phone_split_mode":  {
+                                                                     "segment_count":  3,
+                                                                     "max_full_resets":  3,
+                                                                     "silence_timeout_ms":  5000
+                                                                 }
+                                        },
+                   "collecting_name":  {
+                                           "description":  "Waiting for a first-time customer\u0027s name.",
+                                           "on_enter":  {
+                                                            "instruction_template":  "ask_customer_name"
+                                                        },
+                                           "transitions":  [
+                                                               {
+                                                                   "intent":  "provide_name",
+                                                                   "target":  "verifying_phone",
+                                                                   "actions":  [
+                                                                                   "handle_customer_name"
+                                                                               ]
+                                                               },
+                                                               {
+                                                                   "intent":  "provide_phone",
+                                                                   "target":  "collecting_name",
+                                                                   "actions":  [
+                                                                                   "handle_phone_collection",
+                                                                                   "validate_phone"
+                                                                               ]
+                                                               },
+                                                               {
+                                                                   "intent":  "cancel_flow",
+                                                                   "target":  "cancelled",
+                                                                   "actions":  [
+
+                                                                               ]
+                                                               },
+                                                               {
+                                                                   "intent":  "*",
+                                                                   "target":  "collecting_name",
+                                                                   "actions":  [
+                                                                                   "ask_to_clarify"
+                                                                               ]
+                                                               }
+                                                           ],
+                                           "auto_transition":  {
+                                                                   "condition":  {
+                                                                                     "field":  "customer_id",
+                                                                                     "op":  "not_null"
+                                                                                 },
+                                                                   "target":  "verifying_phone",
+                                                                   "actions":  [
+
+                                                                               ]
+                                                               }
+                                       },
+                   "verifying_phone":  {
+                                           "description":  "Waiting for phone number confirmation.",
+                                           "on_enter":  {
+                                                            "instruction_template":  "readback_phone"
+                                                        },
+                                           "transitions":  [
+                                                               {
+                                                                   "intent":  "confirm",
+                                                                   "target":  "awaiting_confirmation",
+                                                                   "actions":  [
+                                                                                   "mark_phone_confirmed"
+                                                                               ]
+                                                               },
+                                                               {
+                                                                   "intent":  "deny",
+                                                                   "target":  "collecting_phone",
+                                                                   "actions":  [
+                                                                                   "clear_phone_confirmation"
+                                                                               ]
+                                                               },
+                                                               {
+                                                                   "intent":  "provide_phone",
+                                                                   "target":  "verifying_phone",
+                                                                   "actions":  [
+                                                                                   "handle_phone_collection",
+                                                                                   "validate_phone"
+                                                                               ]
+                                                               },
+                                                               {
+                                                                   "intent":  "change_info",
+                                                                   "target":  "verifying_phone",
+                                                                   "actions":  [
+                                                                                   "defer_change_info"
+                                                                               ]
+                                                               },
+                                                               {
+                                                                   "intent":  "unknown",
+                                                                   "target":  "verifying_phone",
+                                                                   "actions":  [
+                                                                                   "ask_to_clarify"
+                                                                               ]
+                                                               },
+                                                               {
+                                                                   "intent":  "cancel_flow",
+                                                                   "target":  "cancelled",
+                                                                   "actions":  [
+
+                                                                               ]
+                                                               },
+                                                               {
+                                                                   "intent":  "*",
+                                                                   "target":  "verifying_phone",
+                                                                   "actions":  [
+                                                                                   "log_unhandled",
+                                                                                   "ask_to_clarify"
+                                                                               ]
+                                                               }
+                                                           ]
+                                       },
+                   "awaiting_confirmation":  {
+                                                 "description":  "Waiting for final booking confirmation.",
+                                                 "on_enter":  {
+                                                                  "instruction_template":  "final_confirmation"
+                                                              },
+                                                 "transitions":  [
+                                                                     {
+                                                                         "intent":  "confirm",
+                                                                         "target":  "booking_executing"
+                                                                     },
+                                                                     {
+                                                                         "intent":  "deny",
+                                                                         "target":  "cancelled",
+                                                                         "actions":  [
+
+                                                                                     ]
+                                                                     },
+                                                                     {
+                                                                         "intent":  "change_info",
+                                                                         "target":  "awaiting_confirmation",
+                                                                         "actions":  [
+                                                                                         "defer_change_info"
+                                                                                     ]
+                                                                     },
+                                                                     {
+                                                                         "intent":  "unknown",
+                                                                         "target":  "awaiting_confirmation",
+                                                                         "actions":  [
+                                                                                         "ask_to_clarify"
+                                                                                     ]
+                                                                     },
+                                                                     {
+                                                                         "intent":  "cancel_flow",
+                                                                         "target":  "cancelled",
+                                                                         "actions":  [
+
+                                                                                     ]
+                                                                     },
+                                                                     {
+                                                                         "intent":  "*",
+                                                                         "target":  "awaiting_confirmation",
+                                                                         "actions":  [
+                                                                                         "log_unhandled",
+                                                                                         "ask_to_clarify"
+                                                                                     ]
+                                                                     }
+                                                                 ]
+                                             },
+                   "booking_executing":  {
+                                             "description":  "Creating the booking through the backend.",
+                                             "on_enter":  {
+                                                              "instruction_template":  "booking_processing",
+                                                              "actions":  [
+                                                                              "create_booking"
+                                                                          ],
+                                                              "on_fail":  [
+                                                                              {
+                                                                                  "condition":  "booking_conflict",
+                                                                                  "target":  "selecting_time",
+                                                                                  "actions":  [
+
+                                                                                              ],
+                                                                                  "instruction_template":  "slot_unavailable"
+                                                                              },
+                                                                              {
+                                                                                  "condition":  "booking_api_error",
+                                                                                  "target":  "booking_failed",
+                                                                                  "actions":  [
+
+                                                                                              ],
+                                                                                  "instruction_template":  "booking_failed"
+                                                                              },
+                                                                              {
+                                                                                  "condition":  "booking_data_incomplete",
+                                                                                  "target":  "awaiting_confirmation",
+                                                                                  "actions":  [
+
+                                                                                              ],
+                                                                                  "instruction_template":  "booking_data_incomplete"
+                                                                              },
+                                                                              {
+                                                                                  "condition":  "*",
+                                                                                  "target":  "booking_failed",
+                                                                                  "actions":  [
+
+                                                                                              ],
+                                                                                  "instruction_template":  "booking_failed"
+                                                                              }
+                                                                          ]
+                                                          },
+                                             "transitions":  [
+                                                                 {
+                                                                     "intent":  "booking_succeeded",
+                                                                     "target":  "completed",
+                                                                     "actions":  [
+
+                                                                                 ]
+                                                                 },
+                                                                 {
+                                                                     "intent":  "booking_failed",
+                                                                     "target":  "booking_failed",
+                                                                     "actions":  [
+                                                                                     "handle_booking_failure"
+                                                                                 ]
+                                                                 }
+                                                             ],
+                                             "auto_transition":  {
+                                                                     "condition":  {
+                                                                                       "field":  "booking",
+                                                                                       "op":  "not_null"
+                                                                                   },
+                                                                     "target":  "completed",
+                                                                     "actions":  [
+
+                                                                                 ],
+                                                                     "on_fail":  {
+                                                                                     "condition":  "booking_api_error",
+                                                                                     "target":  "booking_failed",
+                                                                                     "actions":  [
+                                                                                                     "handle_booking_failure"
+                                                                                                 ],
+                                                                                     "instruction_template":  "booking_failed"
+                                                                                 }
+                                                                 }
+                                         },
+                   "completed":  {
+                                     "description":  "Booking was created successfully.",
+                                     "on_enter":  {
+                                                      "instruction_template":  "booking_complete"
+                                                  },
+                                     "transitions":  [
+
+                                                     ],
+                                     "terminal":  true
+                                 },
+                   "booking_failed":  {
+                                          "description":  "Booking creation failed.",
+                                          "on_enter":  {
+                                                           "instruction_template":  "booking_failed"
+                                                       },
+                                          "transitions":  [
+                                                              {
+                                                                  "intent":  "confirm",
+                                                                  "target":  "booking_executing",
+                                                                  "actions":  [
+                                                                                  "retry_booking"
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "select_time",
+                                                                  "target":  "selecting_time",
+                                                                  "actions":  [
+                                                                                  "reload_time_slots"
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "deny",
+                                                                  "target":  "cancelled",
+                                                                  "actions":  [
+
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "unknown",
+                                                                  "target":  "booking_failed",
+                                                                  "actions":  [
+                                                                                  "ask_to_clarify"
+                                                                              ]
+                                                              },
+                                                              {
+                                                                  "intent":  "*",
+                                                                  "target":  "booking_failed",
+                                                                  "actions":  [
+                                                                                  "log_unhandled",
+                                                                                  "ask_to_clarify"
+                                                                              ]
+                                                              }
+                                                          ]
+                                      },
+                   "cancelled":  {
+                                     "description":  "The booking flow was cancelled.",
+                                     "on_enter":  {
+                                                      "instruction_template":  "booking_cancelled"
+                                                  },
+                                     "transitions":  [
+
+                                                     ],
+                                     "terminal":  true
+                                 }
+               }
+}

@@ -8,39 +8,35 @@ import httpx
 import pytest
 
 import app.dependencies as dependencies
+from app.application.action_registry import ActionExecutionContext, ActionResult
 from app.application.handlers.check_availability_handler import CheckAvailabilityHandler
-from app.application.handlers.confirm_phone_handler import ConfirmPhoneHandler
-from app.application.ports.booking_gateway import (
+from app.dependencies import ApplicationContainer, create_application_container
+from app.dialog.dialog_controller import DialogTurnInput, DialogTurnStatus
+from app.dialog.instruction_builder import DialogResponseDraft
+from app.domain.booking_context import BookingContext
+from app.domain.booking_models import (
     AvailabilityRequest,
+    Booking,
     BookingGateway,
     ChildReservationReference,
+    Course,
     CourseSearchRequest,
+    CourseSelection,
     CreateBookingRequest,
     CreateBookingResult,
+    Customer,
     CustomerVerificationRequest,
     CustomerVerificationResult,
     FinalAvailabilityRequest,
     FinalAvailabilityResult,
-)
-from app.core.config import Settings
-from app.dependencies import ApplicationContainer, create_application_container
-from app.dialog.dialog_controller import DialogTurnInput, DialogTurnStatus
-from app.dialog.instruction_builder import DialogResponseDraft
-from app.dialog.tool_bridge import ActionExecutionContext, ActionResult
-from app.domain.booking import (
-    Booking,
-    CourseSelection,
-    Customer,
-    Service,
     Shop,
     TherapistPreference,
     TherapistPreferenceType,
 )
-from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
-from app.infrastructure.booking_api.http_booking_gateway import HTTPBookingGateway
-from app.infrastructure.cache.memory_cache import MemoryCache
-from app.infrastructure.llm.gemini_llm_gateway import GeminiLLMGateway
+from app.infrastructure.context_store import ContextStore, Settings
+from app.infrastructure.gemini_client import GeminiClient
+from app.infrastructure.pos_api_client import PosApiClient
 
 REQUIRED_ACTIONS = {
     "search_shop",
@@ -48,7 +44,7 @@ REQUIRED_ACTIONS = {
     "handle_date_selection",
     "handle_people_selection",
     "handle_duration_selection",
-    "handle_service_selection",
+    "handle_course_selection",
     "load_time_slots",
     "handle_time_selection",
     "handle_therapist_selection",
@@ -66,8 +62,8 @@ SHOP = Shop(
     name="Shibuya",
     address="Tokyo",
 )
-SERVICE = Service(
-    service_id=UUID("22222222-2222-2222-2222-222222222222"),
+COURSE = Course(
+    course_id=UUID("22222222-2222-2222-2222-222222222222"),
     name="Aromatherapy",
     duration_minutes=60,
     price=Decimal("500000.00"),
@@ -94,8 +90,8 @@ class RecordingBookingGateway:
     async def search_shops(self, query: str | None = None) -> list[Shop]:
         return [SHOP]
 
-    async def search_services(self, request: CourseSearchRequest) -> list[Service]:
-        return [SERVICE]
+    async def search_courses(self, request: CourseSearchRequest) -> list[Course]:
+        return [COURSE]
 
     async def get_available_slots(
         self,
@@ -134,7 +130,7 @@ class RecordingBookingGateway:
             booking_id=UUID("33333333-3333-3333-3333-333333333333"),
             status="confirmed",
             shop=SHOP,
-            service=SERVICE,
+            main_course=COURSE,
             customer=Customer(request.phone, request.customer_name),
             booking_date=request.booking_date,
             start_time=request.start_time,
@@ -190,7 +186,7 @@ async def advance_to_awaiting_confirmation(
     await turn("select_duration", {"duration_minutes": 60})
     await turn(
         "select_course",
-        {"course_selection": CourseSelection(main_course=SERVICE)},
+        {"course_selection": CourseSelection(main_course=COURSE)},
     )
     await turn("deny", {})
     await turn("select_time", {"start_time": time(10, 30)})
@@ -202,8 +198,6 @@ async def advance_to_awaiting_confirmation(
                 "select_therapist",
                 {"therapist_preference": therapist_preference},
             )
-    else:
-        await turn("deny", {})
     await turn("provide_phone", {"phone": "0901234567", "name": "Nguyen An"})
     await turn("confirm", {})
     return context, tuple(states)
@@ -274,26 +268,25 @@ async def test_container_assembles_shared_dependencies_without_network_calls() -
     )
     container = await create_application_container(settings(), http_client=client)
 
-    assert isinstance(container.booking_gateway, HTTPBookingGateway)
+    assert isinstance(container.booking_gateway, PosApiClient)
     gateway_handlers = tuple(
-        handler
-        for handler in container._handlers
-        if not isinstance(handler, ConfirmPhoneHandler)
+        handler for handler in container._handlers if hasattr(handler, "_booking_gateway")
     )
     assert gateway_handlers
     assert all(
-        handler._booking_gateway is container.booking_gateway  # type: ignore[attr-defined]
+        handler._booking_gateway is container.booking_gateway
         for handler in gateway_handlers
     )
-    assert REQUIRED_ACTIONS <= set(container.tool_bridge.registered_actions())
+    assert REQUIRED_ACTIONS <= set(container.action_registry.registered_actions())
     assert container.state_machine._flow is container.flow_definition
     assert container.dialog_controller._flow is container.flow_definition
     assert container.dialog_controller._state_machine is container.state_machine
-    assert container.dialog_controller._tool_bridge is container.tool_bridge
-    assert isinstance(container.memory_cache, MemoryCache)
+    assert container.dialog_controller._action_registry is container.action_registry
+    assert isinstance(container.memory_cache, ContextStore)
     assert container.conversation_context_store._cache is container.memory_cache
     assert container.instruction_builder.registered_templates()
-    assert container.deterministic_nlu.parse(
+    assert container.nlu_processor is not None
+    assert container.nlu_processor.parse(
         text="2 người",
         state=BookingState.SELECTING_PEOPLE,
     ).intent == "select_people"
@@ -305,10 +298,10 @@ async def test_container_assembles_shared_dependencies_without_network_calls() -
     assert container.entity_resolution_coordinator._search_shop_handler is (
         container._handlers[0]
     )
-    assert container.entity_resolution_coordinator._search_service_handler is (
+    assert container.entity_resolution_coordinator._search_course_handler is (
         container._handlers[1]
     )
-    assert isinstance(container.llm_gateway, GeminiLLMGateway)
+    assert isinstance(container.llm_gateway, GeminiClient)
     assert container.llm_nlu_fallback._llm_gateway is container.llm_gateway
     assert container.llm_nlu_fallback._intent_policy is container.state_intent_policy
     assert container.faq_manager._knowledge_gateway is None
@@ -337,7 +330,7 @@ async def test_two_containers_are_isolated_except_for_injected_client() -> None:
     assert first.http_client is second.http_client
     assert first.booking_gateway is not second.booking_gateway
     assert first.dialog_controller is not second.dialog_controller
-    assert first.tool_bridge is not second.tool_bridge
+    assert first.action_registry is not second.action_registry
     assert first.state_machine is not second.state_machine
     assert first.flow_definition is not second.flow_definition
     assert first.memory_cache is not second.memory_cache
@@ -345,7 +338,7 @@ async def test_two_containers_are_isolated_except_for_injected_client() -> None:
     assert first.conversation_context_store._cache is first.memory_cache
     assert second.conversation_context_store._cache is second.memory_cache
     assert first.instruction_builder is not second.instruction_builder
-    assert first.deterministic_nlu is not second.deterministic_nlu
+    assert first.nlu_processor is not second.nlu_processor
     assert first.state_intent_policy is not second.state_intent_policy
     assert (
         first.entity_resolution_coordinator
@@ -360,13 +353,13 @@ async def test_two_containers_are_isolated_except_for_injected_client() -> None:
     async def custom_action(context: ActionExecutionContext) -> ActionResult:
         return ActionResult("container_only")
 
-    first.tool_bridge.register_action("container_only", custom_action)
+    first.action_registry.register_action("container_only", custom_action)
     first.instruction_builder.register_template(
         "container_only",
         lambda context, result: DialogResponseDraft("Chỉ container đầu."),
     )
-    assert first.tool_bridge.has_action("container_only")
-    assert not second.tool_bridge.has_action("container_only")
+    assert first.action_registry.has_action("container_only")
+    assert not second.action_registry.has_action("container_only")
     assert first.instruction_builder.has_template("container_only")
     assert not second.instruction_builder.has_template("container_only")
 
@@ -472,7 +465,7 @@ async def test_phone_denial_uses_production_binding_and_commits_collection_state
         conversation_id="conversation-phone",
         state=BookingState.VERIFYING_PHONE,
         shop=SHOP,
-        service=SERVICE,
+        main_course=COURSE,
         booking_date=date(2099, 8, 5),
         start_time=time(10, 30),
         num_customer=1,
@@ -492,7 +485,7 @@ async def test_phone_denial_uses_production_binding_and_commits_collection_state
     assert context.state is BookingState.COLLECTING_PHONE
     assert context.phone is None
     assert context.shop is SHOP
-    assert context.service == SERVICE
+    assert context.main_course == COURSE
     assert context.start_time == time(10, 30)
 
     await container.close()
@@ -507,13 +500,13 @@ async def test_reload_failure_rolls_back_and_does_not_commit_selecting_time() ->
     )
     container = await create_application_container(settings(), http_client=client)
     handler = FailingAvailabilityHandler()
-    container.tool_bridge._check_availability_handler = handler
+    container.action_registry._check_availability_handler = handler
     stale_slots = (time(9, 0),)
     context = BookingContext(
         conversation_id="conversation-reload-failure",
         state=BookingState.BOOKING_FAILED,
         shop=SHOP,
-        service=SERVICE,
+        main_course=COURSE,
         booking_date=date(2099, 8, 5),
         start_time=time(9, 0),
         num_customer=1,
@@ -554,7 +547,7 @@ async def test_booking_happy_path_reaches_completed_once_without_user_code(
     therapist_preference: TherapistPreference | None,
 ) -> None:
     gateway = RecordingBookingGateway()
-    monkeypatch.setattr(dependencies, "HTTPBookingGateway", lambda **kwargs: gateway)
+    monkeypatch.setattr(dependencies, "PosApiClient", lambda **kwargs: gateway)
     client = httpx.AsyncClient(base_url="http://pos.test")
     container = await create_application_container(settings(), http_client=client)
     context, states = await advance_to_awaiting_confirmation(
@@ -628,7 +621,7 @@ async def test_final_denial_cancels_without_pos_create(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     gateway = RecordingBookingGateway()
-    monkeypatch.setattr(dependencies, "HTTPBookingGateway", lambda **kwargs: gateway)
+    monkeypatch.setattr(dependencies, "PosApiClient", lambda **kwargs: gateway)
     client = httpx.AsyncClient(base_url="http://pos.test")
     container = await create_application_container(settings(), http_client=client)
     context, _ = await advance_to_awaiting_confirmation(
@@ -658,7 +651,7 @@ async def test_empty_availability_returns_to_date_without_selecting_a_slot(
 ) -> None:
     gateway = RecordingBookingGateway()
     gateway.available_slots = ()
-    monkeypatch.setattr(dependencies, "HTTPBookingGateway", lambda **kwargs: gateway)
+    monkeypatch.setattr(dependencies, "PosApiClient", lambda **kwargs: gateway)
     client = httpx.AsyncClient(base_url="http://pos.test")
     container = await create_application_container(settings(), http_client=client)
     context = BookingContext(
@@ -674,7 +667,7 @@ async def test_empty_availability_returns_to_date_without_selecting_a_slot(
         context,
         DialogTurnInput(
             intent="select_course",
-            payload={"course_selection": CourseSelection(main_course=SERVICE)},
+            payload={"course_selection": CourseSelection(main_course=COURSE)},
         ),
     )
 
@@ -690,7 +683,7 @@ async def test_empty_availability_returns_to_date_without_selecting_a_slot(
     assert result.failure_code == "no_slots_available"
     assert context.state is BookingState.SELECTING_SERVICE
     assert context.booking_date == date(2099, 8, 5)
-    assert context.service == SERVICE
+    assert context.main_course == COURSE
     assert context.start_time is None
     assert context.available_slots is None
     assert gateway.create_requests == []
@@ -704,14 +697,14 @@ async def test_time_selection_rejects_a_slot_outside_latest_availability(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     gateway = RecordingBookingGateway()
-    monkeypatch.setattr(dependencies, "HTTPBookingGateway", lambda **kwargs: gateway)
+    monkeypatch.setattr(dependencies, "PosApiClient", lambda **kwargs: gateway)
     client = httpx.AsyncClient(base_url="http://pos.test")
     container = await create_application_container(settings(), http_client=client)
     context = BookingContext(
         conversation_id="e2e-stale-slot",
         state=BookingState.SELECTING_TIME,
         shop=SHOP,
-        service=SERVICE,
+        main_course=COURSE,
         booking_date=date(2099, 8, 5),
         num_customer=1,
         duration_minutes=60,
@@ -739,7 +732,7 @@ async def test_create_failure_rolls_back_result_and_enters_recovery_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     gateway = RecordingBookingGateway(create_error=RuntimeError("POS unavailable"))
-    monkeypatch.setattr(dependencies, "HTTPBookingGateway", lambda **kwargs: gateway)
+    monkeypatch.setattr(dependencies, "PosApiClient", lambda **kwargs: gateway)
     client = httpx.AsyncClient(base_url="http://pos.test")
     container = await create_application_container(settings(), http_client=client)
     context, _ = await advance_to_awaiting_confirmation(
@@ -780,7 +773,7 @@ def accepts_booking_gateway(gateway: BookingGateway) -> BookingGateway:
 @pytest.mark.asyncio
 async def test_http_gateway_satisfies_booking_gateway_protocol_statically() -> None:
     client = httpx.AsyncClient()
-    gateway = HTTPBookingGateway(client=client, base_url="http://pos.test")
+    gateway = PosApiClient(client=client, base_url="http://pos.test")
 
     assert accepts_booking_gateway(gateway) is gateway
     await client.aclose()

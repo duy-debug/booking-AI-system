@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from app.application.ports.knowledge_gateway import (
+from app.infrastructure.qdrant_client import (
     KnowledgeDocument,
     KnowledgeGateway,
 )
@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 
 
 def use_knowledge_gateway(gateway: KnowledgeGateway) -> KnowledgeGateway:
-    """Accept the abstraction consumed by application services."""
+    """Accept the abstraction consumed by application courses."""
     return gateway
 
 

@@ -1,6 +1,8 @@
 # Repository cho Booking — truy vấn booking và eager-load relationship cần thiết,
 # chỉ thực hiện data access và không chứa business logic.
+import logging
 from datetime import date
+from time import perf_counter
 from uuid import UUID
 
 from sqlalchemy import select, tuple_
@@ -9,6 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.db.models.booking import Booking
 from app.db.models.reservation import Reservation
 from app.db.models.reservation_course import ReservationCourse
+from app.infrastructure.logging_config import log_event
 
 
 class BookingRepository:
@@ -158,13 +161,32 @@ class BookingRepository:
             key_uuid = UUID(idempotency_key)
         except ValueError:
             return None
+        started = perf_counter()
         stmt = select(Booking).where(Booking.idempotency_key == key_uuid)
-        return self.session.scalar(stmt)
+        result = self.session.scalar(stmt)
+        log_event(
+            logging.DEBUG,
+            "BookingRepository",
+            "database_operation_completed",
+            operation="find_by_idempotency_key",
+            row_count=1 if result is not None else 0,
+            duration_ms=round((perf_counter() - started) * 1000),
+        )
+        return result
 
     # Lưu booking mới — add + flush
     def save(self, booking: Booking) -> Booking:
+        started = perf_counter()
         self.session.add(booking)
         self.session.flush()
+        log_event(
+            logging.DEBUG,
+            "BookingRepository",
+            "database_operation_completed",
+            operation="save_booking",
+            row_count=1,
+            duration_ms=round((perf_counter() - started) * 1000),
+        )
         return booking
 
     # Xóa booking theo ID (dùng cho hủy)

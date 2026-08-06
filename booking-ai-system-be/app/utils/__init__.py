@@ -1,0 +1,1 @@
+"""Shared POS utilities."""

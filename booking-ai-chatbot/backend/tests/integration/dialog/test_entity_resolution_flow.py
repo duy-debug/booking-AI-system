@@ -9,34 +9,31 @@ from uuid import UUID
 
 import pytest
 
-from app.application.handlers.search_service_handler import SearchServiceHandler
+from app.application.handlers.search_course_handler import SearchCourseHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
-from app.dialog.entity_resolution import (
+from app.dialog.flow_loader import FlowLoader
+from app.dialog.nlu import (
     EntityResolutionCoordinator,
     EntityResolutionNotDispatchableError,
     EntityResolutionStatus,
-    entity_resolution_to_dialog_turn_input,
-)
-from app.dialog.flow_loader import FlowLoader
-from app.dialog.nlu import (
-    DeterministicNLU,
+    NLUProcessor,
     StateIntentPolicy,
     build_state_intent_policy,
+    entity_resolution_to_dialog_turn_input,
 )
-from app.domain.booking import CourseSelection, Service, Shop
 from app.domain.booking_context import BookingContext
+from app.domain.booking_models import Course, CourseSelection, Shop
 from app.domain.booking_state import BookingState
 
 FLOW_PATH = (
     Path(__file__).resolve().parents[3]
     / "app"
     / "dialog"
-    / "flows"
-    / "booking-flow.json"
+    / "booking_flow.json"
 )
 SHOP = Shop(UUID("11111111-1111-1111-1111-111111111111"), "Sen Spa")
 OTHER_SHOP = Shop(UUID("22222222-2222-2222-2222-222222222222"), "Sen Riverside")
-SERVICE = Service(
+COURSE = Course(
     UUID("33333333-3333-3333-3333-333333333333"),
     "Massage thư giãn",
     60,
@@ -55,7 +52,7 @@ class ShopHandler:
 
 
 class ServiceHandler:
-    def __init__(self, values: list[Service]) -> None:
+    def __init__(self, values: list[Course]) -> None:
         self.values = values
         self.calls = 0
 
@@ -64,16 +61,16 @@ class ServiceHandler:
         shop_id: UUID,
         query: str | None = None,
         **kwargs: object,
-    ) -> list[Service]:
+    ) -> list[Course]:
         self.calls += 1
         return self.values
 
 
 def components(
     shops: list[Shop],
-    services: list[Service],
+    courses: list[Course],
 ) -> tuple[
-    DeterministicNLU,
+    NLUProcessor,
     EntityResolutionCoordinator,
     StateIntentPolicy,
     ShopHandler,
@@ -82,12 +79,12 @@ def components(
     flow = FlowLoader.load(FLOW_PATH)
     policy = build_state_intent_policy(flow)
     shop_handler = ShopHandler(shops)
-    service_handler = ServiceHandler(services)
+    service_handler = ServiceHandler(courses)
     resolver = EntityResolutionCoordinator(
         search_shop_handler=cast(SearchShopHandler, shop_handler),
-        search_service_handler=cast(SearchServiceHandler, service_handler),
+        search_course_handler=cast(SearchCourseHandler, service_handler),
     )
-    parser = DeterministicNLU(
+    parser = NLUProcessor(
         intent_policy=policy,
         today_provider=lambda: date(2026, 8, 1),
     )
@@ -121,7 +118,7 @@ async def test_shop_nlu_resolves_real_shop_and_maps_to_dialog_turn() -> None:
 
 @pytest.mark.asyncio
 async def test_course_nlu_resolves_domain_course_selection() -> None:
-    parser, resolver, policy, _, service_handler = components([], [SERVICE])
+    parser, resolver, policy, _, service_handler = components([], [COURSE])
     context = BookingContext(
         "conversation-1",
         state=BookingState.SELECTING_SERVICE,
@@ -143,7 +140,7 @@ async def test_course_nlu_resolves_domain_course_selection() -> None:
     )
 
     assert turn.intent == "select_course"
-    assert turn.payload == {"course_selection": CourseSelection(SERVICE)}
+    assert turn.payload == {"course_selection": CourseSelection(COURSE)}
     assert service_handler.calls == 1
     assert context == snapshot
 
@@ -181,7 +178,7 @@ async def test_non_resolved_shop_result_never_maps_to_dialog_turn(
 
 @pytest.mark.asyncio
 async def test_therapist_name_fails_safely_without_availability_gateway() -> None:
-    parser, resolver, _, shop_handler, service_handler = components([SHOP], [SERVICE])
+    parser, resolver, _, shop_handler, service_handler = components([SHOP], [COURSE])
     context = BookingContext(
         "conversation-1",
         state=BookingState.SELECTING_THERAPIST,

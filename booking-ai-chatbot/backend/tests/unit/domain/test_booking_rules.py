@@ -7,24 +7,22 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.domain.booking import (
-    Customer,
-    Service,
-    Shop,
-    TherapistPreference,
-    TherapistPreferenceType,
-)
 from app.domain.booking_context import BookingContext
-from app.domain.booking_rules import BookingRules
-from app.domain.exceptions import (
+from app.domain.booking_models import (
     BookingContextNotReadyError,
+    BookingRules,
+    Course,
+    Customer,
     CustomerNotAllowedError,
     CustomerVerificationRequiredError,
     InvalidBookingDataError,
     InvalidCustomerCountError,
     InvalidDurationError,
     PhoneNotConfirmedError,
+    Shop,
     TherapistNotAllowedForGroupError,
+    TherapistPreference,
+    TherapistPreferenceType,
 )
 
 VIETNAM_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
@@ -33,8 +31,8 @@ SHOP = Shop(
     shop_id=UUID("11111111-1111-1111-1111-111111111111"),
     name="Central Spa",
 )
-SERVICE = Service(
-    service_id=UUID("22222222-2222-2222-2222-222222222222"),
+COURSE = Course(
+    course_id=UUID("22222222-2222-2222-2222-222222222222"),
     name="Aromatherapy",
     duration_minutes=60,
     price=Decimal("500000.00"),
@@ -46,7 +44,7 @@ def make_valid_context() -> BookingContext:
     return BookingContext(
         conversation_id="conversation-1",
         shop=SHOP,
-        service=SERVICE,
+        main_course=COURSE,
         customer=CUSTOMER,
         booking_date=date(2099, 1, 1),
         start_time=time(10, 30),
@@ -86,16 +84,16 @@ def test_validate_phone_rejects_invalid_values(phone: str) -> None:
 
 
 @pytest.mark.parametrize("duration_minutes", [30, 45, 60, 75, 90, 120])
-def test_validate_service_duration_accepts_valid_value(duration_minutes: int) -> None:
-    BookingRules.validate_service_duration(duration_minutes)
+def test_validate_course_duration_accepts_valid_value(duration_minutes: int) -> None:
+    BookingRules.validate_course_duration(duration_minutes)
 
 
 @pytest.mark.parametrize("duration_minutes", [0, -15, 20, 50])
-def test_validate_service_duration_rejects_invalid_values(
+def test_validate_course_duration_rejects_invalid_values(
     duration_minutes: int,
 ) -> None:
     with pytest.raises(InvalidDurationError):
-        BookingRules.validate_service_duration(duration_minutes)
+        BookingRules.validate_course_duration(duration_minutes)
 
 
 def test_validate_booking_datetime_accepts_future_datetime() -> None:
@@ -153,7 +151,7 @@ def test_validate_create_context_rejects_missing_required_data(
 
 def test_validate_create_context_requires_main_course() -> None:
     context = make_valid_context()
-    context.service = None
+    context.main_course = None
 
     with pytest.raises(BookingContextNotReadyError):
         BookingRules.validate_create_context(context)
@@ -218,7 +216,7 @@ def test_validate_create_context_does_not_mutate_context() -> None:
         context.conversation_id,
         context.state,
         context.shop,
-        context.service,
+        context.main_course,
         context.customer,
         context.booking_date,
         context.start_time,
@@ -238,7 +236,7 @@ def test_validate_create_context_does_not_mutate_context() -> None:
         context.conversation_id,
         context.state,
         context.shop,
-        context.service,
+        context.main_course,
         context.customer,
         context.booking_date,
         context.start_time,

@@ -5,11 +5,11 @@ from typing import cast
 
 import pytest
 
+from app.application.action_registry import ActionRegistry
 from app.application.handlers.check_availability_handler import (
     CheckAvailabilityHandler,
 )
-from app.application.handlers.collect_customer_handler import CollectCustomerHandler
-from app.application.handlers.confirm_phone_handler import ConfirmPhoneHandler
+from app.application.handlers.check_customer_handler import CheckCustomerHandler
 from app.application.handlers.create_booking_handler import CreateBookingHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.dialog.flow_loader import (
@@ -19,19 +19,17 @@ from app.dialog.flow_loader import (
     FlowTransition,
 )
 from app.dialog.state_machine import StateMachine
-from app.dialog.tool_bridge import ToolBridge
-from app.domain.booking import Booking
 from app.domain.booking_context import BookingContext
+from app.domain.booking_models import Booking
 from app.domain.booking_state import BookingState
 
 FLOW_PATH = (
     Path(__file__).resolve().parents[3]
     / "app"
     / "dialog"
-    / "flows"
-    / "booking-flow.json"
+    / "booking_flow.json"
 )
-CHANGE_HANDLERS_PATH = FLOW_PATH.with_name("change-handlers.json")
+CHANGE_HANDLERS_PATH = FLOW_PATH
 CONVERSATIONAL_STATES = (
     BookingState.SELECTING_SHOP,
     BookingState.SELECTING_DATE,
@@ -55,7 +53,7 @@ def test_change_handlers_define_one_rule_per_supported_target() -> None:
         "date",
         "people",
         "duration",
-        "service",
+        "main_course",
         "time",
         "therapist",
         "phone",
@@ -197,20 +195,20 @@ def test_complete_happy_path(
 
 
 @pytest.mark.parametrize("num_customer", [2, 3])
-def test_group_booking_waits_for_gender_or_no_preference(
+def test_group_booking_skips_therapist_step(
     flow: FlowDefinition,
     num_customer: int,
 ) -> None:
     context = BookingContext(
         conversation_id="group-conversation",
-        state=BookingState.SELECTING_THERAPIST,
+        state=BookingState.SELECTING_TIME,
         num_customer=num_customer,
     )
 
-    auto = StateMachine(flow).resolve_auto_transition(context)
+    transition = StateMachine(flow).resolve_transition(context, "select_time")
 
-    assert auto is None
-    assert context.state is BookingState.SELECTING_THERAPIST
+    assert transition.target is BookingState.COLLECTING_PHONE
+    assert transition.actions == ("handle_time_selection", "skip_therapist_for_group")
 
 
 def test_single_booking_does_not_auto_skip_therapist(flow: FlowDefinition) -> None:
@@ -289,9 +287,9 @@ def test_service_selection_owns_addons_and_slot_loading(
 
     assert len(transitions) == 2
     assert transitions[0].target is BookingState.SELECTING_SERVICE
-    assert transitions[0].actions == ("handle_service_selection",)
+    assert transitions[0].actions == ("handle_course_selection",)
     assert transitions[1].target is BookingState.SELECTING_TIME
-    assert transitions[1].actions == ("handle_service_selection", "load_time_slots")
+    assert transitions[1].actions == ("handle_course_selection", "load_time_slots")
 
 
 def test_service_failure_contract_is_complete(flow: FlowDefinition) -> None:
@@ -307,12 +305,12 @@ def test_service_failure_contract_is_complete(flow: FlowDefinition) -> None:
         "main_course_missing",
         "addon_without_main_course",
         "combo_not_bookable",
-        "service_duration_mismatch",
+        "course_duration_mismatch",
         "no_slots_available",
         "slot_api_error",
     }
     assert failures["combo_not_bookable"].actions == ("clear_course_for_reselect",)
-    assert failures["service_duration_mismatch"].target is (
+    assert failures["course_duration_mismatch"].target is (
         BookingState.SELECTING_DURATION
     )
     assert failures["no_slots_available"].target is BookingState.SELECTING_SERVICE
@@ -326,8 +324,8 @@ def test_duration_step_accepts_course_without_loading_slots(
 
     assert transition.target is BookingState.SELECTING_SERVICE
     assert transition.actions == (
-        "handle_service_selection",
-        "infer_duration_from_service",
+        "handle_course_selection",
+        "infer_duration_from_course",
     )
     assert "load_time_slots" not in transition.actions
     assert {failure.condition for failure in transition.on_fail} == {
@@ -564,20 +562,19 @@ def test_removed_option_actions_are_not_used(flow: FlowDefinition) -> None:
     )
 
 
-def test_tool_bridge_audits_declared_actions_without_reading_json(
+def test_action_registry_audits_declared_actions_without_reading_json(
     flow: FlowDefinition,
 ) -> None:
-    bridge = ToolBridge(
+    bridge = ActionRegistry(
         search_shop_handler=cast(SearchShopHandler, object()),
         check_availability_handler=cast(CheckAvailabilityHandler, object()),
-        collect_customer_handler=cast(CollectCustomerHandler, object()),
-        confirm_phone_handler=cast(ConfirmPhoneHandler, object()),
+        check_customer_handler=cast(CheckCustomerHandler, object()),
         create_booking_handler=cast(CreateBookingHandler, object()),
     )
     declared_actions = _all_declared_actions(flow)
     unregistered = bridge.find_unregistered_actions(declared_actions)
 
-    assert len(set(declared_actions)) == 29
+    assert len(set(declared_actions)) == 30
     assert {
         "search_shop",
         "load_time_slots",
@@ -594,11 +591,10 @@ def test_tool_bridge_audits_declared_actions_without_reading_json(
 def test_happy_path_actions_are_bound_with_explicit_non_runtime_allowlists(
     flow: FlowDefinition,
 ) -> None:
-    bridge = ToolBridge(
+    bridge = ActionRegistry(
         search_shop_handler=cast(SearchShopHandler, object()),
         check_availability_handler=cast(CheckAvailabilityHandler, object()),
-        collect_customer_handler=cast(CollectCustomerHandler, object()),
-        confirm_phone_handler=cast(ConfirmPhoneHandler, object()),
+        check_customer_handler=cast(CheckCustomerHandler, object()),
         create_booking_handler=cast(CreateBookingHandler, object()),
     )
     happy_path_steps = (
@@ -624,7 +620,7 @@ def test_happy_path_actions_are_bound_with_explicit_non_runtime_allowlists(
         "ask_people",
         "clear_course_for_reselect",
         "handle_booking_failure",
-        "infer_duration_from_service",
+        "infer_duration_from_course",
         "no_slots_available",
         "people_too_many",
     }
@@ -689,7 +685,7 @@ def test_declared_failure_codes_are_audited_against_mapper(
     flow: FlowDefinition,
 ) -> None:
     declared = {failure.condition for failure in _all_failures(flow)}
-    mapped = set(ToolBridge().mapped_failure_codes())
+    mapped = set(ActionRegistry().mapped_failure_codes())
 
     assert {
         "invalid_phone",
@@ -698,7 +694,7 @@ def test_declared_failure_codes_are_audited_against_mapper(
         "booking_api_error",
         "slot_api_error",
         "slot_unavailable",
-        "service_duration_mismatch",
+        "course_duration_mismatch",
     }.issubset(declared)
     assert {
         "invalid_phone",
@@ -706,7 +702,7 @@ def test_declared_failure_codes_are_audited_against_mapper(
         "customer_verification_mismatch",
         "booking_api_error",
         "slot_api_error",
-        "service_duration_mismatch",
+        "course_duration_mismatch",
     }.issubset(mapped)
     assert "course_not_found" in declared - mapped
     assert "booking_conflict" in mapped & declared

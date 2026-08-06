@@ -6,11 +6,6 @@ from datetime import date, time
 
 import pytest
 
-from app.application.ports.llm_gateway import (
-    LLMGatewayUnavailableError,
-    LLMMessage,
-    LLMResponse,
-)
 from app.dialog.nlu import (
     LLMNLUFallback,
     NLUEntityKind,
@@ -19,6 +14,11 @@ from app.dialog.nlu import (
     StateIntentPolicy,
 )
 from app.domain.booking_state import BookingState
+from app.infrastructure.gemini_client import (
+    LLMGatewayUnavailableError,
+    LLMMessage,
+    LLMResponse,
+)
 
 
 class FakeLLMGateway:
@@ -31,6 +31,7 @@ class FakeLLMGateway:
         self.error = error
         self.calls = 0
         self.messages: list[LLMMessage] = []
+        self.tools: list[dict[str, object]] | None = None
 
     async def generate(
         self,
@@ -40,6 +41,7 @@ class FakeLLMGateway:
     ) -> LLMResponse:
         self.calls += 1
         self.messages = messages
+        self.tools = tools
         if self.error is not None:
             raise self.error
         return self.response
@@ -159,6 +161,10 @@ async def test_valid_people_output_maps_to_typed_nlu_result() -> None:
     assert result.source is NLUSource.FALLBACK
     assert result.confidence == 0.9
     assert gateway.calls == 1
+    assert gateway.tools is not None
+    tool_function = gateway.tools[0]["function"]
+    assert isinstance(tool_function, dict)
+    assert tool_function["name"] == "extract_intent_candidates"
 
 
 @pytest.mark.asyncio

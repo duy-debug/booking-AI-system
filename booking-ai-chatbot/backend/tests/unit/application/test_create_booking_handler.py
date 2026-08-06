@@ -6,37 +6,34 @@ from uuid import UUID
 
 import pytest
 
-from app.application.exceptions import InvalidIdempotencyKeyError, SlotConflictError
 from app.application.handlers.create_booking_handler import CreateBookingHandler
-from app.application.ports.booking_gateway import (
+from app.domain.booking_context import BookingContext
+from app.domain.booking_models import (
     AvailabilityRequest,
+    Booking,
     BookingGateway,
     ChildReservationReference,
+    Course,
     CourseSearchRequest,
+    CourseType,
     CreateBookingRequest,
     CreateBookingResult,
+    Customer,
+    CustomerNotAllowedError,
     CustomerVerificationRequest,
+    CustomerVerificationRequiredError,
     CustomerVerificationResult,
     FinalAvailabilityRequest,
     FinalAvailabilityResult,
-)
-from app.domain.booking import (
-    Booking,
-    CourseType,
-    Customer,
-    Service,
+    InvalidBookingDataError,
+    InvalidIdempotencyKeyError,
+    PhoneNotConfirmedError,
     Shop,
+    SlotConflictError,
     TherapistPreference,
     TherapistPreferenceType,
 )
-from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
-from app.domain.exceptions import (
-    CustomerNotAllowedError,
-    CustomerVerificationRequiredError,
-    InvalidBookingDataError,
-    PhoneNotConfirmedError,
-)
 
 SHOP_ID = UUID("11111111-1111-1111-1111-111111111111")
 MAIN_ID = UUID("22222222-2222-2222-2222-222222222222")
@@ -46,8 +43,8 @@ RESERVATION_ID = UUID("55555555-5555-5555-5555-555555555555")
 BOOKING_DATE = date(2099, 8, 1)
 START_TIME = time(10, 30)
 SHOP = Shop(SHOP_ID, "Central Spa")
-MAIN = Service(MAIN_ID, "Aromatherapy", 60, Decimal("500000.00"))
-ADDON = Service(
+MAIN = Course(MAIN_ID, "Aromatherapy", 60, Decimal("500000.00"))
+ADDON = Course(
     ADDON_ID,
     "Essential oil",
     15,
@@ -59,7 +56,7 @@ BOOKING = Booking(
     booking_id=BOOKING_ID,
     status="confirmed",
     shop=SHOP,
-    service=MAIN,
+    main_course=MAIN,
     customer=CUSTOMER,
     booking_date=BOOKING_DATE,
     start_time=START_TIME,
@@ -100,11 +97,11 @@ class FakeBookingGateway:
     async def search_shops(self, query: str | None = None) -> list[Shop]:
         raise AssertionError("Unexpected search_shops call.")
 
-    async def search_services(
+    async def search_courses(
         self,
         request: CourseSearchRequest,
-    ) -> list[Service]:
-        raise AssertionError("Unexpected search_services call.")
+    ) -> list[Course]:
+        raise AssertionError("Unexpected search_courses call.")
 
     async def get_available_slots(
         self,
@@ -158,7 +155,7 @@ def make_context() -> BookingContext:
         conversation_id="conversation-1",
         state=BookingState.BOOKING_EXECUTING,
         shop=SHOP,
-        service=MAIN,
+        main_course=MAIN,
         addons=(ADDON,),
         customer=CUSTOMER,
         booking_date=BOOKING_DATE,

@@ -5,7 +5,12 @@ from typing import cast
 
 import pytest
 
-from app.application.exceptions import SlotConflictError
+from app.application.action_registry import (
+    ActionCallable,
+    ActionExecutionContext,
+    ActionRegistry,
+    ActionResult,
+)
 from app.dialog.dialog_controller import (
     DialogController,
     DialogTurnInput,
@@ -22,14 +27,8 @@ from app.dialog.flow_loader import (
     FlowTransition,
 )
 from app.dialog.state_machine import StateMachine
-from app.dialog.tool_bridge import (
-    ActionCallable,
-    ActionExecutionContext,
-    ActionResult,
-    ToolBridge,
-)
-from app.domain.booking import Booking
 from app.domain.booking_context import BookingContext
+from app.domain.booking_models import Booking, SlotConflictError
 from app.domain.booking_state import BookingState
 
 
@@ -61,14 +60,14 @@ def flow_for(states: dict[BookingState, FlowState]) -> FlowDefinition:
 
 def controller(
     flow: FlowDefinition,
-    bridge: ToolBridge,
+    bridge: ActionRegistry,
     *,
     max_auto_transitions: int = 8,
 ) -> DialogController:
     return DialogController(
         flow=flow,
         state_machine=StateMachine(flow),
-        tool_bridge=bridge,
+        action_registry=bridge,
         max_auto_transitions=max_auto_transitions,
     )
 
@@ -100,13 +99,13 @@ def test_controller_rejects_invalid_auto_transition_limit() -> None:
     flow = flow_for({BookingState.IDLE: state()})
 
     with pytest.raises(ValueError):
-        controller(flow, ToolBridge(), max_auto_transitions=0)
+        controller(flow, ActionRegistry(), max_auto_transitions=0)
 
 
 @pytest.mark.asyncio
 async def test_success_executes_transition_on_enter_and_auto_in_order() -> None:
     calls: list[str] = []
-    bridge = ToolBridge()
+    bridge = ActionRegistry()
     for name in (
         "transition_action",
         "target_enter_action",
@@ -183,7 +182,7 @@ async def test_empty_transition_actions_apply_target_normally() -> None:
     )
     context = BookingContext(conversation_id="c-1")
 
-    result = await controller(flow, ToolBridge()).handle_turn(
+    result = await controller(flow, ActionRegistry()).handle_turn(
         context,
         DialogTurnInput("go", {}),
     )
@@ -197,7 +196,7 @@ async def test_empty_transition_actions_apply_target_normally() -> None:
 @pytest.mark.asyncio
 async def test_transition_target_is_not_applied_before_action_success() -> None:
     observed_states: list[BookingState] = []
-    bridge = ToolBridge()
+    bridge = ActionRegistry()
 
     async def fail(context: ActionExecutionContext) -> ActionResult:
         observed_states.append(context.booking_context.state)
@@ -236,7 +235,7 @@ async def test_transition_failure_uses_exact_or_wildcard_route(
     use_wildcard: bool,
 ) -> None:
     calls: list[str] = []
-    bridge = ToolBridge(failure_code_provider=lambda error: "typed_failure")
+    bridge = ActionRegistry(failure_code_provider=lambda error: "typed_failure")
 
     async def fail(context: ActionExecutionContext) -> ActionResult:
         context.booking_context.phone = "rolled-back"
@@ -296,7 +295,7 @@ async def test_transition_failure_uses_exact_or_wildcard_route(
 
 @pytest.mark.asyncio
 async def test_failed_recovery_is_unhandled_and_does_not_apply_target() -> None:
-    bridge = ToolBridge(failure_code_provider=lambda error: "typed_failure")
+    bridge = ActionRegistry(failure_code_provider=lambda error: "typed_failure")
 
     async def transition_failure(context: ActionExecutionContext) -> ActionResult:
         raise RuntimeError("transition failed")
@@ -373,7 +372,7 @@ async def test_on_enter_create_failure_uses_declarative_route(
     expected_code: str,
 ) -> None:
     create_calls = 0
-    bridge = ToolBridge()
+    bridge = ActionRegistry()
 
     async def create(context: ActionExecutionContext) -> ActionResult:
         nonlocal create_calls
@@ -431,7 +430,7 @@ async def test_on_enter_create_failure_uses_declarative_route(
 
 @pytest.mark.asyncio
 async def test_unknown_on_enter_failure_keeps_applied_target() -> None:
-    bridge = ToolBridge()
+    bridge = ActionRegistry()
 
     async def enter_failure(context: ActionExecutionContext) -> ActionResult:
         raise RuntimeError("unknown")
@@ -463,7 +462,7 @@ async def test_unknown_on_enter_failure_keeps_applied_target() -> None:
 
 @pytest.mark.asyncio
 async def test_on_enter_missing_idempotency_uses_incomplete_data_route() -> None:
-    bridge = ToolBridge()
+    bridge = ActionRegistry()
     calls = 0
 
     async def create(context: ActionExecutionContext) -> ActionResult:
@@ -514,7 +513,7 @@ async def test_on_enter_missing_idempotency_uses_incomplete_data_route() -> None
 @pytest.mark.asyncio
 async def test_booking_success_auto_completes_without_double_create() -> None:
     create_calls = 0
-    bridge = ToolBridge()
+    bridge = ActionRegistry()
 
     async def create(context: ActionExecutionContext) -> ActionResult:
         nonlocal create_calls
@@ -568,7 +567,7 @@ async def test_booking_success_auto_completes_without_double_create() -> None:
 
 @pytest.mark.asyncio
 async def test_auto_action_failure_does_not_apply_auto_target() -> None:
-    bridge = ToolBridge()
+    bridge = ActionRegistry()
 
     async def auto_failure(context: ActionExecutionContext) -> ActionResult:
         raise RuntimeError("auto failure")
@@ -607,7 +606,7 @@ async def test_auto_action_failure_does_not_apply_auto_target() -> None:
 
 @pytest.mark.asyncio
 async def test_auto_action_failure_uses_its_own_failure_routes() -> None:
-    bridge = ToolBridge(failure_code_provider=lambda error: "auto_failed")
+    bridge = ActionRegistry(failure_code_provider=lambda error: "auto_failed")
 
     async def auto_failure(context: ActionExecutionContext) -> ActionResult:
         raise RuntimeError("auto failure")
@@ -690,7 +689,7 @@ async def test_group_booking_auto_skips_therapist_and_enters_phone_state() -> No
         available_slots=(time(10, 30),),
     )
 
-    result = await controller(flow, ToolBridge()).handle_turn(
+    result = await controller(flow, ActionRegistry()).handle_turn(
         context,
         DialogTurnInput("select_time", {"start_time": time(10, 30)}),
     )
@@ -737,7 +736,7 @@ async def test_multi_step_auto_transitions_finish_in_order() -> None:
         pending_action="continue",
     )
 
-    result = await controller(flow, ToolBridge()).handle_turn(
+    result = await controller(flow, ActionRegistry()).handle_turn(
         context,
         DialogTurnInput("go", {}),
     )
@@ -769,7 +768,7 @@ async def test_auto_transition_cycle_is_detected_after_valid_commit() -> None:
     )
     context = BookingContext(conversation_id="c-1", pending_action="loop")
 
-    result = await controller(flow, ToolBridge()).handle_turn(
+    result = await controller(flow, ActionRegistry()).handle_turn(
         context,
         DialogTurnInput("go", {}),
     )
@@ -783,7 +782,7 @@ async def test_auto_transition_cycle_is_detected_after_valid_commit() -> None:
 @pytest.mark.asyncio
 async def test_auto_transition_limit_stops_before_next_action() -> None:
     calls: list[str] = []
-    bridge = ToolBridge()
+    bridge = ActionRegistry()
     bridge.register_action("first_auto", recording_action("first_auto", calls))
     bridge.register_action("second_auto", recording_action("second_auto", calls))
     condition = FlowCondition("pending_action", "eq", "continue")

@@ -118,12 +118,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .composer-submit .send-button { color: white; background: var(--primary); }.composer-submit .send-button:hover { background: var(--primary-hover); transform: scale(1.03); }
 .composer-wrap > p { margin: 7px 0 0; color: var(--text-muted); text-align: center; font-size: 7px; }
 .stop-generation { position: absolute; left: 50%; top: -40px; z-index: 3; display: flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: 0 7px 20px rgba(25,27,39,.1); transform: translateX(-50%); font-size: 9px; font-weight: 650; }.stop-generation:hover { color: var(--danger); }.stop-generation svg { width: 11px; }
-.composer-submit .mic-button.recording { color: white; background: var(--danger); animation: voice-pulse 1.3s ease-in-out infinite; }
-.voice-status { width: min(850px, 100%); min-height: 36px; display: flex; align-items: center; gap: 8px; margin: 0 auto 7px; padding: 7px 10px; color: var(--primary); border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--border)); border-radius: 11px; background: var(--primary-soft); font-size: 9px; }
-.voice-status > i { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--danger); animation: voice-pulse 1.2s ease-in-out infinite; }
-.voice-status span:nth-child(2) { flex: 1; }.voice-status button { margin-left: auto; padding: 5px 8px; border: 0; border-radius: 7px; color: inherit; background: var(--surface); font-size: 8px; font-weight: 700; }
-.voice-status.error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 25%, var(--border)); background: color-mix(in srgb, var(--danger) 7%, var(--surface)); }
-.voice-spinner { width: 13px; height: 13px; flex: 0 0 auto; border: 2px solid color-mix(in srgb, var(--primary) 25%, transparent); border-top-color: var(--primary); border-radius: 50%; animation: voice-spin .7s linear infinite; }
 
 /* Structured booking blocks returned by the chatbot */
 .option-list, .selection-card, .inline-form, .structured-form, .summary-card, .result-card { margin-top: 9px; }
@@ -157,8 +151,6 @@ button:disabled { opacity: .52; cursor: default; }
 
 @keyframes blink { 0%,70%,100%{opacity:.25;transform:translateY(0)}35%{opacity:1;transform:translateY(-3px)} }
 @keyframes stream-caret { 0%,45%{opacity:1}46%,100%{opacity:0} }
-@keyframes voice-pulse { 0%,100%{opacity:.65;transform:scale(.92)}50%{opacity:1;transform:scale(1.06)} }
-@keyframes voice-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 760px) {
   .messenger-shell { width: 100%; height: 100dvh; margin: 0; grid-template-columns: 1fr; border: 0; border-radius: 0; }

@@ -6,43 +6,39 @@ from uuid import UUID
 
 import pytest
 
-from app.application.exceptions import SlotConflictError
 from app.application.handlers.check_availability_handler import (
     CheckAvailabilityHandler,
 )
-from app.application.ports.booking_gateway import (
+from app.domain.booking_context import BookingContext
+from app.domain.booking_models import (
     AvailabilityRequest,
+    Booking,
+    BookingContextNotReadyError,
     BookingGateway,
+    Course,
     CourseSearchRequest,
+    CourseType,
     CreateBookingRequest,
     CreateBookingResult,
     CustomerVerificationRequest,
     CustomerVerificationResult,
     FinalAvailabilityRequest,
     FinalAvailabilityResult,
-)
-from app.domain.booking import (
-    Booking,
-    CourseType,
-    Service,
+    InvalidBookingDataError,
+    InvalidCourseSelectionError,
     Shop,
+    SlotConflictError,
     TherapistPreference,
     TherapistPreferenceType,
 )
-from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
-from app.domain.exceptions import (
-    BookingContextNotReadyError,
-    InvalidBookingDataError,
-    InvalidCourseSelectionError,
-)
 
 SHOP_ID = UUID("11111111-1111-1111-1111-111111111111")
 MAIN_ID = UUID("22222222-2222-2222-2222-222222222222")
 ADDON_ID = UUID("33333333-3333-3333-3333-333333333333")
 BOOKING_DATE = date(2026, 8, 1)
-MAIN = Service(MAIN_ID, "Aromatherapy", 60, Decimal("500000.00"))
-ADDON = Service(
+MAIN = Course(MAIN_ID, "Aromatherapy", 60, Decimal("500000.00"))
+ADDON = Course(
     ADDON_ID,
     "Essential oil",
     15,
@@ -71,11 +67,11 @@ class FakeBookingGateway:
     async def search_shops(self, query: str | None = None) -> list[Shop]:
         raise AssertionError("Unexpected search_shops call.")
 
-    async def search_services(
+    async def search_courses(
         self,
         request: CourseSearchRequest,
-    ) -> list[Service]:
-        raise AssertionError("Unexpected search_services call.")
+    ) -> list[Course]:
+        raise AssertionError("Unexpected search_courses call.")
 
     async def get_available_slots(
         self,
@@ -128,7 +124,7 @@ def make_context(
         conversation_id="conversation-1",
         state=BookingState.SELECTING_TIME,
         shop=SHOP,
-        service=MAIN,
+        main_course=MAIN,
         addons=(ADDON,),
         booking_date=BOOKING_DATE,
         num_customer=num_customer,
@@ -207,7 +203,7 @@ async def test_group_with_gender_preference_reaches_gateway() -> None:
     )
 
 
-@pytest.mark.parametrize("missing_field", ["booking_date", "service"])
+@pytest.mark.parametrize("missing_field", ["booking_date", "main_course"])
 @pytest.mark.asyncio
 async def test_missing_context_data_is_rejected_before_gateway(
     missing_field: str,
@@ -225,7 +221,7 @@ async def test_missing_context_data_is_rejected_before_gateway(
 @pytest.mark.asyncio
 async def test_addon_cannot_be_used_as_main_course() -> None:
     context = make_context()
-    context.service = ADDON
+    context.main_course = ADDON
     context.addons = ()
     fake = FakeBookingGateway()
 

@@ -17,26 +17,26 @@ from app.dialog.instruction_builder import (
     InvalidInstructionTemplateNameError,
     UnknownInstructionTemplateError,
 )
-from app.domain.booking import (
+from app.domain.booking_context import BookingContext
+from app.domain.booking_models import (
     Booking,
+    Course,
     CourseType,
     Customer,
-    Service,
     Shop,
     TherapistPreference,
     TherapistPreferenceType,
 )
-from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 
 SHOP = Shop(UUID("11111111-1111-1111-1111-111111111111"), "Sen Spa")
-SERVICE = Service(
+COURSE = Course(
     UUID("22222222-2222-2222-2222-222222222222"),
     "Massage thư giãn",
     60,
     Decimal("500000"),
 )
-ADDON = Service(
+ADDON = Course(
     UUID("33333333-3333-3333-3333-333333333333"),
     "Đá nóng",
     15,
@@ -71,7 +71,7 @@ def ready_context(
         conversation_id="conversation-1",
         state=state,
         shop=SHOP,
-        service=SERVICE,
+        main_course=COURSE,
         customer=CUSTOMER,
         booking_date=date(2026, 8, 2),
         start_time=time(10, 30),
@@ -89,7 +89,7 @@ def booking(reservation_code: str | None = None) -> Booking:
         booking_id=BOOKING_ID,
         status="confirmed",
         shop=SHOP,
-        service=SERVICE,
+        main_course=COURSE,
         customer=CUSTOMER,
         booking_date=date(2026, 8, 2),
         start_time=time(10, 30),

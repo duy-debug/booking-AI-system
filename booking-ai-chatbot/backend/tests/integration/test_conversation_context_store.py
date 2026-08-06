@@ -5,9 +5,9 @@ from datetime import date
 import httpx
 import pytest
 
-from app.core.config import Settings
 from app.dependencies import create_application_container
 from app.domain.booking_state import BookingState
+from app.infrastructure.context_store import Settings
 
 
 def settings() -> Settings:

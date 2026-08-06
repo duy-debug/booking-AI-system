@@ -7,23 +7,21 @@ from uuid import UUID
 
 import pytest
 
-from app.domain.booking import (
+from app.domain.booking_models import (
     Booking,
     BookingOption,
+    Course,
     CourseSelection,
     CourseType,
     Customer,
-    Service,
-    Shop,
-    TherapistPreference,
-    TherapistPreferenceType,
-)
-from app.domain.exceptions import (
     InvalidBookingDataError,
     InvalidCourseSelectionError,
     InvalidCustomerCountError,
     InvalidDurationError,
+    Shop,
     TherapistNotAllowedForGroupError,
+    TherapistPreference,
+    TherapistPreferenceType,
 )
 
 SHOP_ID = UUID("11111111-1111-1111-1111-111111111111")
@@ -36,9 +34,9 @@ def make_shop() -> Shop:
     return Shop(shop_id=SHOP_ID, name="Central Spa")
 
 
-def make_service() -> Service:
-    return Service(
-        service_id=SERVICE_ID,
+def make_service() -> Course:
+    return Course(
+        course_id=SERVICE_ID,
         name="Aromatherapy",
         duration_minutes=60,
         price=Decimal("500000.00"),
@@ -50,11 +48,11 @@ def make_customer() -> Customer:
 
 
 def make_addon(
-    service_id: UUID = ADDON_ID,
+    course_id: UUID = ADDON_ID,
     name: str = "Essential oil",
-) -> Service:
-    return Service(
-        service_id=service_id,
+) -> Course:
+    return Course(
+        course_id=course_id,
         name=name,
         duration_minutes=15,
         price=Decimal("100000.00"),
@@ -67,14 +65,14 @@ def make_booking(
     num_customer: int = 1,
     duration_minutes: int = 60,
     therapist_preference: TherapistPreference | None = None,
-    addons: tuple[Service, ...] = (),
+    addons: tuple[Course, ...] = (),
     reservation_code: str | None = None,
 ) -> Booking:
     return Booking(
         booking_id=BOOKING_ID,
         status="confirmed",
         shop=make_shop(),
-        service=make_service(),
+        main_course=make_service(),
         customer=make_customer(),
         booking_date=date(2026, 8, 1),
         start_time=time(10, 30),
@@ -96,7 +94,7 @@ def test_create_shop() -> None:
 def test_create_service() -> None:
     service = make_service()
 
-    assert service.service_id == SERVICE_ID
+    assert service.course_id == SERVICE_ID
     assert service.duration_minutes == 60
     assert service.price == Decimal("500000.00")
     assert service.course_type is CourseType.MAIN
@@ -105,8 +103,8 @@ def test_create_service() -> None:
 @pytest.mark.parametrize("duration_minutes", [0, -15, 20, 50])
 def test_service_rejects_invalid_duration(duration_minutes: int) -> None:
     with pytest.raises(InvalidDurationError):
-        Service(
-            service_id=SERVICE_ID,
+        Course(
+            course_id=SERVICE_ID,
             name="Invalid service",
             duration_minutes=duration_minutes,
             price=Decimal("500000.00"),
@@ -126,7 +124,7 @@ def test_booking_contains_domain_objects() -> None:
     assert booking.booking_id == BOOKING_ID
     assert booking.status == "confirmed"
     assert booking.shop == make_shop()
-    assert booking.service == make_service()
+    assert booking.main_course == make_service()
     assert booking.customer == make_customer()
     assert booking.num_customer == 1
     assert booking.duration_minutes == 60
@@ -137,7 +135,7 @@ def test_booking_contains_domain_objects() -> None:
     "model,field_name,new_value",
     [
         (make_shop(), "name", "Another Shop"),
-        (make_service(), "name", "Another Service"),
+        (make_service(), "name", "Another Course"),
         (make_customer(), "phone", "0900000000"),
         (make_booking(), "status", "cancelled"),
     ],
@@ -188,7 +186,7 @@ def test_booking_rejects_invalid_customer_count(num_customer: int) -> None:
             booking_id=BOOKING_ID,
             status="confirmed",
             shop=make_shop(),
-            service=make_service(),
+            main_course=make_service(),
             customer=make_customer(),
             booking_date=date(2026, 8, 1),
             start_time=time(10, 30),
@@ -203,7 +201,7 @@ def test_booking_rejects_invalid_duration(duration: int) -> None:
             booking_id=BOOKING_ID,
             status="confirmed",
             shop=make_shop(),
-            service=make_service(),
+            main_course=make_service(),
             customer=make_customer(),
             booking_date=date(2026, 8, 1),
             start_time=time(10, 30),
@@ -243,7 +241,7 @@ def test_booking_rejects_duplicate_option_ids() -> None:
             booking_id=BOOKING_ID,
             status="confirmed",
             shop=make_shop(),
-            service=make_service(),
+            main_course=make_service(),
             customer=make_customer(),
             booking_date=date(2026, 8, 1),
             start_time=time(10, 30),
@@ -257,7 +255,7 @@ def test_booking_options_are_stored_as_immutable_tuple() -> None:
         booking_id=BOOKING_ID,
         status="confirmed",
         shop=make_shop(),
-        service=make_service(),
+        main_course=make_service(),
         customer=make_customer(),
         booking_date=date(2026, 8, 1),
         start_time=time(10, 30),
@@ -318,9 +316,9 @@ def test_course_selection_rejects_duplicate_addons() -> None:
         CourseSelection(main_course=make_service(), addons=(addon, addon))
 
 
-def test_course_selection_rejects_main_service_repeated_as_addon() -> None:
-    repeated = Service(
-        service_id=SERVICE_ID,
+def test_course_selection_rejects_main_course_repeated_as_addon() -> None:
+    repeated = Course(
+        course_id=SERVICE_ID,
         name="Invalid duplicate",
         duration_minutes=15,
         price=Decimal("100000.00"),

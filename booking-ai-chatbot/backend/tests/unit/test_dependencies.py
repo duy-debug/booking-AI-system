@@ -8,9 +8,6 @@ import httpx
 import pytest
 
 import app.dependencies as dependencies
-from app.application.ports.knowledge_gateway import KnowledgeDocument
-from app.application.ports.llm_gateway import LLMMessage, LLMResponse
-from app.core.config import Settings
 from app.dependencies import (
     ConversationContextStore,
     InvalidCachedContextError,
@@ -20,10 +17,9 @@ from app.dependencies import (
 from app.dialog.flow_loader import FlowDefinition, FlowLoader
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
-from app.infrastructure.cache.memory_cache import MemoryCache
-from app.infrastructure.vector_db.qdrant_knowledge_gateway import (
-    QdrantKnowledgeGateway,
-)
+from app.infrastructure.context_store import ContextStore, Settings
+from app.infrastructure.gemini_client import LLMMessage, LLMResponse
+from app.infrastructure.qdrant_client import KnowledgeDocument, KnowledgeQdrantClient
 
 
 class FakeLLMGateway:
@@ -174,7 +170,7 @@ async def test_qdrant_feature_enabled_injects_lazy_gateway_without_query(
 
     container = await dependencies.create_application_container(configured)
 
-    assert isinstance(container.knowledge_gateway, QdrantKnowledgeGateway)
+    assert isinstance(container.knowledge_gateway, KnowledgeQdrantClient)
     assert container.faq_manager._knowledge_gateway is container.knowledge_gateway
     assert clients[0].kwargs == {
         "host": "qdrant.test",
@@ -402,7 +398,7 @@ async def test_invalid_llm_confidence_setting_is_rejected() -> None:
 async def test_context_store_rejects_invalid_conversation_ids(
     conversation_id: str,
 ) -> None:
-    store = ConversationContextStore(cache=MemoryCache())
+    store = ConversationContextStore(cache=ContextStore())
 
     with pytest.raises(InvalidConversationIdError):
         await store.get_or_create(conversation_id)
@@ -410,7 +406,7 @@ async def test_context_store_rejects_invalid_conversation_ids(
 
 @pytest.mark.asyncio
 async def test_context_store_normalizes_and_reuses_a_valid_conversation_id() -> None:
-    cache = MemoryCache()
+    cache = ContextStore()
     store = ConversationContextStore(cache=cache)
 
     created = await store.get_or_create("  conversation-1  ")
@@ -423,7 +419,7 @@ async def test_context_store_normalizes_and_reuses_a_valid_conversation_id() -> 
 
 @pytest.mark.asyncio
 async def test_context_store_keeps_conversations_independent() -> None:
-    store = ConversationContextStore(cache=MemoryCache())
+    store = ConversationContextStore(cache=ContextStore())
 
     first = await store.get_or_create("conversation-1")
     second = await store.get_or_create("conversation-2")
@@ -434,7 +430,7 @@ async def test_context_store_keeps_conversations_independent() -> None:
 
 @pytest.mark.asyncio
 async def test_context_store_save_preserves_identity_and_state() -> None:
-    store = ConversationContextStore(cache=MemoryCache())
+    store = ConversationContextStore(cache=ContextStore())
     context = BookingContext(
         conversation_id="conversation-1",
         state=BookingState.SELECTING_SERVICE,
@@ -449,7 +445,7 @@ async def test_context_store_save_preserves_identity_and_state() -> None:
 
 @pytest.mark.asyncio
 async def test_context_store_save_rejects_non_booking_context() -> None:
-    store = ConversationContextStore(cache=MemoryCache())
+    store = ConversationContextStore(cache=ContextStore())
 
     with pytest.raises(InvalidConversationContextError):
         await store.save("conversation-1", cast(BookingContext, object()))
@@ -457,7 +453,7 @@ async def test_context_store_save_rejects_non_booking_context() -> None:
 
 @pytest.mark.asyncio
 async def test_context_store_save_rejects_mismatched_identity() -> None:
-    store = ConversationContextStore(cache=MemoryCache())
+    store = ConversationContextStore(cache=ContextStore())
     context = BookingContext(conversation_id="conversation-2")
 
     with pytest.raises(InvalidConversationContextError):
@@ -466,7 +462,7 @@ async def test_context_store_save_rejects_mismatched_identity() -> None:
 
 @pytest.mark.asyncio
 async def test_context_store_rejects_invalid_cached_value() -> None:
-    cache = MemoryCache()
+    cache = ContextStore()
     cache._contexts["conversation-1"] = cast(BookingContext, object())
     store = ConversationContextStore(cache=cache)
 
@@ -476,13 +472,13 @@ async def test_context_store_rejects_invalid_cached_value() -> None:
 
 @pytest.mark.asyncio
 async def test_context_store_reset_replaces_context_and_preserves_other_conversation() -> None:
-    cache = MemoryCache()
+    cache = ContextStore()
     store = ConversationContextStore(cache=cache)
     original = BookingContext(
         conversation_id="conversation-1",
         state=BookingState.SELECTING_SERVICE,
         phone="0901234567",
-        pending_action="search_services",
+        pending_action="search_courses",
     )
     other = BookingContext(
         conversation_id="conversation-2",

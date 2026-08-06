@@ -15,21 +15,19 @@ from app.dialog.dialog_controller import (
     DialogTurnResult,
     DialogTurnStatus,
 )
-from app.dialog.entity_resolution import (
+from app.dialog.instruction_builder import DialogResponse
+from app.dialog.nlu import (
     EntityCandidate,
     EntityResolutionResult,
     EntityResolutionStatus,
-)
-from app.dialog.instruction_builder import DialogResponse
-from app.dialog.nlu import (
     NLUEntityKind,
     NLUResolutionStatus,
     NLUResult,
     NLUSource,
     StateIntentPolicy,
 )
-from app.domain.booking import Shop
 from app.domain.booking_context import BookingContext
+from app.domain.booking_models import Shop
 from app.domain.booking_state import BookingState
 from app.transport.chat_api import _process_chat_message, _to_chat_response
 from app.transport.schemas import ChatRequest
@@ -69,7 +67,13 @@ class FakeLLMFallback:
         self.result = result
         self.calls: list[tuple[str, BookingState]] = []
 
-    async def parse(self, *, text: str, state: BookingState) -> NLUResult:
+    async def parse(
+        self,
+        *,
+        text: str,
+        state: BookingState,
+        context: BookingContext | None = None,
+    ) -> NLUResult:
         self.calls.append((text, state))
         return self.result
 
@@ -219,11 +223,13 @@ class FakeContainer:
         nlu_result: NLUResult,
         resolution: EntityResolutionResult | None = None,
         llm_result: NLUResult | None = None,
+        llm_nlu_required: bool = False,
         faq_manager: FakeFAQManager | None = None,
     ) -> None:
         self.conversation_context_store = FakeStore(context)
-        self.deterministic_nlu = FakeNLU(nlu_result)
+        self.nlu_processor = FakeNLU(nlu_result)
         self.llm_nlu_fallback = FakeLLMFallback(llm_result or unresolved_nlu())
+        self.llm_nlu_required = llm_nlu_required
         self.entity_resolution_coordinator = FakeResolver(
             resolution or failed_resolution(NLUEntityKind.SHOP)
         )
@@ -331,7 +337,7 @@ async def test_resolved_branch_runs_controller_renderer_and_save_once() -> None:
     )
 
     assert fake.conversation_context_store.loaded_ids == ["conversation-a"]
-    assert fake.deterministic_nlu.calls == [("Tôi muốn đặt lịch", BookingState.IDLE)]
+    assert fake.nlu_processor.calls == [("Tôi muốn đặt lịch", BookingState.IDLE)]
     assert fake.entity_resolution_coordinator.calls == []
     assert fake.llm_nlu_fallback.calls == []
     assert len(fake.dialog_controller.calls) == 1
@@ -365,8 +371,10 @@ async def test_turn_trace_logs_lifecycle_intent_transition_without_raw_content(
         )
 
     output = caplog.text
-    assert "[Turn #1] started" in output
-    assert "[Turn #1] completed" in output
+    assert "[DialogController #1] turn_started" in output
+    assert "[DialogController #1] turn_completed" in output
+    assert output.count("turn_completed") == 1
+    assert "turn_failed" not in output
     assert "[NLU #1] resolved intent=start_booking resolver=deterministic" in output
     assert "[Router #1] dispatch route=dialog" in output
     assert "[DialogCtrl #1] dispatch" in output
@@ -391,8 +399,8 @@ async def test_turn_trace_sequence_increments_for_same_conversation(
         await _process_chat_message(request=request(), container=as_container(fake))
         await _process_chat_message(request=request(), container=as_container(fake))
 
-    assert "[Turn #1] started" in caplog.text
-    assert "[Turn #2] started" in caplog.text
+    assert "[DialogController #1] turn_started" in caplog.text
+    assert "[DialogController #2] turn_started" in caplog.text
     assert context.turn_sequence == 2
 
 
@@ -421,7 +429,7 @@ async def test_local_raw_turn_text_flags_log_truncated_user_and_assistant(
     assert f"user_message={'u' * 500}" in caplog.text
     assert "u" * 501 not in caplog.text
     assert "assistant_message=Safe response" in caplog.text
-    assert "[DialogCtrl #1] context_diff" in caplog.text
+    assert "[ContextStore #1] context_updated" in caplog.text
     assert "fields_changed=['state']" in caplog.text
     assert caplog.text.count("correlation=") > 3
     correlations = {
@@ -503,11 +511,28 @@ async def test_unresolved_deterministic_result_uses_one_valid_llm_result() -> No
         container=as_container(fake),
     )
 
-    assert len(fake.deterministic_nlu.calls) == 1
+    assert len(fake.nlu_processor.calls) == 1
     assert len(fake.llm_nlu_fallback.calls) == 1
     assert len(fake.dialog_controller.calls) == 1
     assert len(fake.instruction_builder.calls) == 1
     assert fake.conversation_context_store.saved == [("conversation-a", context)]
+    assert response.text == "Safe response"
+
+
+@pytest.mark.asyncio
+async def test_required_llm_nlu_never_calls_deterministic_parser() -> None:
+    context = BookingContext("conversation-a")
+    fake = FakeContainer(
+        context=context,
+        nlu_result=unresolved_nlu(),
+        llm_result=resolved_nlu(),
+        llm_nlu_required=True,
+    )
+
+    response = await _process_chat_message(request=request(), container=as_container(fake))
+
+    assert fake.nlu_processor.calls == []
+    assert fake.llm_nlu_fallback.calls == [(request().message, BookingState.IDLE)]
     assert response.text == "Safe response"
 
 

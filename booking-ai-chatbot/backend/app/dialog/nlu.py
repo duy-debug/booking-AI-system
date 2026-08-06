@@ -1,13 +1,298 @@
-"""Deterministic and LLM-backed intent and entity parsing for dialog input."""
+"""Parse Vietnamese dialog input with local rules and Gemini fallback."""
+# ruff: noqa: E402
 
 import json
 import re
 import unicodedata
+from dataclasses import dataclass
+from enum import StrEnum
+from functools import lru_cache
+from pathlib import Path
+
+from app.domain.booking_state import BookingState
+
+_WHITESPACE = re.compile(r"\s+")
+_PUNCTUATION = re.compile(r'[.,!?;()\[\]{}"]')
+_ADDON = re.compile(r"\badd[ -]?on\b")
+
+
+class Intent(StrEnum):
+    """Authoritative identifiers understood by the recognition catalog."""
+
+    GREETING = "greeting"
+    THANKS = "thanks"
+    START_BOOKING = "start_booking"
+    SELECT_SHOP = "select_shop"
+    SELECT_DATE = "select_date"
+    SELECT_PEOPLE = "select_people"
+    SELECT_DURATION = "select_duration"
+    SELECT_SERVICE = "select_service"
+    LIST_SERVICES = "list_services"
+    LIST_ADDONS = "list_addons"
+    LIST_SHOPS = "list_shops"
+    SEARCH_SHOPS = "search_shops"
+    LIST_AVAILABLE_TIMES = "list_available_times"
+    LIST_THERAPISTS = "list_therapists"
+    SELECT_TIME = "select_time"
+    SELECT_THERAPIST = "select_therapist"
+    PROVIDE_PHONE = "provide_phone"
+    PROVIDE_NAME = "provide_name"
+    CONFIRM = "confirm"
+    DENY = "deny"
+    CHANGE_INFO = "change_info"
+    ASK_WHY = "ask_why"
+    REPEAT_LAST_QUESTION = "repeat_last_question"
+    RESTART_BOOKING = "restart_booking"
+    FAQ = "faq"
+    UNKNOWN = "unknown"
+
+
+class InvalidIntentCatalogError(ValueError):
+    """Raised when recognition data violates the catalog contract."""
+
+
+@dataclass(frozen=True, slots=True)
+class IntentCatalogEntry:
+    intent: Intent
+    priority: int
+    enabled: bool
+    examples: tuple[str, ...]
+    exact_phrases: tuple[str, ...]
+    required_any_phrases: tuple[str, ...]
+    optional_phrases: tuple[str, ...]
+    excluded_phrases: tuple[str, ...]
+    allowed_states: frozenset[BookingState]
+    entity_hints: tuple[str, ...]
+    mutates_context: bool
+
+
+@dataclass(frozen=True, slots=True)
+class IntentCatalog:
+    entries: tuple[IntentCatalogEntry, ...]
+
+    def match(
+        self,
+        text: str,
+        state: BookingState | None = None,
+    ) -> IntentCatalogEntry | None:
+        """Return the first priority-ordered, state-safe phrase match."""
+        candidates: list[tuple[IntentCatalogEntry, str]] = []
+        for entry in self.entries:
+            if not entry.enabled or (
+                state is not None and state not in entry.allowed_states
+            ):
+                continue
+            course_context = "service" in entry.entity_hints
+            normalized = normalize_vietnamese(text, course_context=course_context)
+            if any(_contains_phrase(normalized, phrase) for phrase in entry.excluded_phrases):
+                continue
+            candidates.append((entry, normalized))
+
+        for entry, normalized in candidates:
+            if normalized in entry.exact_phrases:
+                return entry
+
+        combination_matches: list[tuple[int, int, IntentCatalogEntry]] = []
+        for order, (entry, normalized) in enumerate(candidates):
+            if entry.required_any_phrases and any(
+                _contains_phrase(normalized, phrase)
+                for phrase in entry.required_any_phrases
+            ):
+                optional_hits = sum(
+                    _contains_phrase(normalized, phrase)
+                    for phrase in entry.optional_phrases
+                )
+                if "discovery" in entry.entity_hints and optional_hits == 0:
+                    continue
+                combination_matches.append((optional_hits, -order, entry))
+        if not combination_matches:
+            return None
+        highest_priority = max(match[2].priority for match in combination_matches)
+        same_priority = [
+            match for match in combination_matches if match[2].priority == highest_priority
+        ]
+        return max(same_priority, key=lambda match: (match[0], match[1]))[2]
+
+
+class IntentCatalogLoader:
+    """Validate and load one UTF-8 JSON intent catalog."""
+
+    @staticmethod
+    def load(path: Path) -> IntentCatalog:
+        try:
+            raw: object = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise InvalidIntentCatalogError(f"Cannot load intent catalog: {error}") from error
+        if isinstance(raw, dict) and "intent_catalog" in raw:
+            raw = raw["intent_catalog"]
+        if not isinstance(raw, dict) or set(raw) != {"version", "intents"}:
+            raise InvalidIntentCatalogError(
+                "Intent catalog root must contain exactly 'version' and 'intents'."
+            )
+        if raw["version"] != "1":
+            raise InvalidIntentCatalogError("Intent catalog version must be '1'.")
+        definitions = raw["intents"]
+        if not isinstance(definitions, list):
+            raise InvalidIntentCatalogError("Intent catalog 'intents' must be a list.")
+        entries: list[IntentCatalogEntry] = []
+        seen: set[Intent] = set()
+        for index, definition in enumerate(definitions):
+            entry = _parse_entry(definition, index)
+            if entry.intent in seen:
+                raise InvalidIntentCatalogError(
+                    f"Duplicate intent '{entry.intent.value}' in intent catalog."
+                )
+            seen.add(entry.intent)
+            entries.append(entry)
+        missing = set(Intent) - seen
+        if missing:
+            names = ", ".join(sorted(intent.value for intent in missing))
+            raise InvalidIntentCatalogError(f"Intent catalog is missing: {names}.")
+        ordered = tuple(
+            entry
+            for _, entry in sorted(
+                enumerate(entries), key=lambda item: (-item[1].priority, item[0])
+            )
+        )
+        return IntentCatalog(ordered)
+
+
+def default_intent_catalog_path() -> Path:
+    return Path(__file__).resolve().parent / "booking_flow.json"
+
+
+@lru_cache(maxsize=1)
+def load_default_intent_catalog() -> IntentCatalog:
+    """Load the process-wide default catalog once."""
+    return IntentCatalogLoader.load(default_intent_catalog_path())
+
+
+def normalize_vietnamese(text: str, *, course_context: bool = False) -> str:
+    """Apply narrow deterministic normalization without fuzzy matching."""
+    normalized = unicodedata.normalize("NFC", text).casefold().strip()
+    normalized = _ADDON.sub("add on", normalized)
+    normalized = _PUNCTUATION.sub(" ", normalized)
+    normalized = _WHITESPACE.sub(" ", normalized).strip()
+    if course_context:
+        normalized = normalized.replace("lộ trình", "liệu trình")
+    return normalized
+
+
+def _contains_phrase(text: str, phrase: str) -> bool:
+    return f" {phrase} " in f" {text} "
+
+
+def _parse_entry(raw: object, index: int) -> IntentCatalogEntry:
+    fields = {
+        "intent",
+        "priority",
+        "enabled",
+        "examples",
+        "exact_phrases",
+        "required_any_phrases",
+        "optional_phrases",
+        "excluded_phrases",
+        "allowed_states",
+        "entity_hints",
+        "mutates_context",
+    }
+    if not isinstance(raw, dict) or set(raw) != fields:
+        raise InvalidIntentCatalogError(f"Intent entry {index} has an invalid schema.")
+    try:
+        intent = Intent(_required_text(raw["intent"], f"Intent entry {index} intent"))
+    except ValueError as error:
+        raise InvalidIntentCatalogError(
+            f"Intent entry {index} has unknown intent '{raw.get('intent')}'."
+        ) from error
+    priority = raw["priority"]
+    if type(priority) is not int:
+        raise InvalidIntentCatalogError(f"Intent '{intent.value}' priority must be an integer.")
+    enabled = raw["enabled"]
+    mutates_context = raw["mutates_context"]
+    if type(enabled) is not bool or type(mutates_context) is not bool:
+        raise InvalidIntentCatalogError(
+            f"Intent '{intent.value}' boolean fields must be booleans."
+        )
+    course_context = "service" in _string_tuple(
+        raw["entity_hints"], f"Intent '{intent.value}' entity_hints", normalize=False
+    )
+    phrases = {
+        field: _string_tuple(
+            raw[field],
+            f"Intent '{intent.value}' {field}",
+            course_context=course_context,
+        )
+        for field in (
+            "examples",
+            "exact_phrases",
+            "required_any_phrases",
+            "optional_phrases",
+            "excluded_phrases",
+        )
+    }
+    raw_states = _string_tuple(
+        raw["allowed_states"], f"Intent '{intent.value}' allowed_states", normalize=False
+    )
+    try:
+        states = frozenset(BookingState(value) for value in raw_states)
+    except ValueError as error:
+        raise InvalidIntentCatalogError(
+            f"Intent '{intent.value}' contains an unknown state."
+        ) from error
+    if not states:
+        raise InvalidIntentCatalogError(f"Intent '{intent.value}' must allow a state.")
+    return IntentCatalogEntry(
+        intent=intent,
+        priority=priority,
+        enabled=enabled,
+        examples=phrases["examples"],
+        exact_phrases=phrases["exact_phrases"],
+        required_any_phrases=phrases["required_any_phrases"],
+        optional_phrases=phrases["optional_phrases"],
+        excluded_phrases=phrases["excluded_phrases"],
+        allowed_states=states,
+        entity_hints=_string_tuple(
+            raw["entity_hints"], f"Intent '{intent.value}' entity_hints", normalize=False
+        ),
+        mutates_context=mutates_context,
+    )
+
+
+def _required_text(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise InvalidIntentCatalogError(f"{label} must be a non-empty string.")
+    return value.strip()
+
+
+def _string_tuple(
+    value: object,
+    label: str,
+    *,
+    normalize: bool = True,
+    course_context: bool = False,
+) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise InvalidIntentCatalogError(f"{label} must be a list.")
+    result: list[str] = []
+    for item in value:
+        text = _required_text(item, label)
+        result.append(
+            normalize_vietnamese(text, course_context=course_context)
+            if normalize
+            else text
+        )
+    return tuple(result)
+
+"""Deterministic and LLM-backed intent and entity parsing for dialog input."""
+
+import logging
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, time, timedelta
 from enum import StrEnum
 from math import isfinite
+from time import perf_counter
 from types import MappingProxyType
 from typing import Literal, TypeAlias
 
@@ -19,19 +304,22 @@ from pydantic import (
     StrictFloat,
     StrictInt,
     StrictStr,
+    ValidationError,
 )
 
-from app.application.ports.llm_gateway import LLMGateway, LLMGatewayError, LLMMessage
 from app.dialog.dialog_controller import DialogTurnInput
 from app.dialog.flow_loader import FlowDefinition
-from app.dialog.nlu_catalog import (
-    Intent,
-    IntentCatalog,
-    load_default_intent_catalog,
-    normalize_vietnamese,
-)
-from app.domain.booking import CourseSelection, Shop
+from app.dialog.intent_prioritizer import IntentCandidate, IntentPrioritizer
+from app.domain.booking_context import BookingContext
+from app.domain.booking_models import CourseSelection, Shop
 from app.domain.booking_state import BookingState
+from app.infrastructure.context_store import elapsed_ms, record_turn_metrics, trace_log
+from app.infrastructure.gemini_client import (
+    LLMGateway,
+    LLMGatewayError,
+    LLMMessage,
+    LLMResponse,
+)
 
 TodayProvider: TypeAlias = Callable[[], date]
 BookingChangeTarget: TypeAlias = Literal[
@@ -302,7 +590,7 @@ class NLUResult:
             raise ValueError("Unresolved NLU result cannot contain an entity query.")
 
 
-class DeterministicNLU:
+class NLUProcessor:
     """Parse high-confidence Vietnamese booking input using state-aware rules."""
 
     def __init__(
@@ -426,19 +714,19 @@ class DeterministicNLU:
         if catalog_match is not None and catalog_match.intent is Intent.START_BOOKING:
             booking_date, _ = _extract_date(normalized, today)
             start_time = _extract_time(normalized)
-            payload: dict[str, object] = {}
+            start_payload: dict[str, object] = {}
             if booking_date is not None:
-                payload["booking_date"] = booking_date
+                start_payload["booking_date"] = booking_date
             if start_time is not None:
-                payload["start_time"] = start_time
+                start_payload["start_time"] = start_time
             return _resolved(
                 self._intent_policy,
                 state,
                 "start_booking",
-                payload,
+                start_payload,
                 0.95,
                 "start_booking_phrase",
-                has_unconsumed_entities=bool(payload),
+                has_unconsumed_entities=bool(start_payload),
             )
 
         correction = state is BookingState.SELECTING_PEOPLE and " mà " in normalized
@@ -1099,7 +1387,7 @@ def _looks_like_shop_selection(text: str) -> bool:
 
 
 def _extract_course_query(text: str) -> str | None:
-    text = normalize_vietnamese(text, service_context=True)
+    text = normalize_vietnamese(text, course_context=True)
     without_duration = _COURSE_DURATION_PATTERN.sub(" ", text)
     query = _WHITESPACE_PATTERN.sub(" ", without_duration).strip()
     query = _strip_prefixes(
@@ -1370,6 +1658,14 @@ class LLMNLUOutput(BaseModel):
     entity_query: StrictStr | None = None
 
 
+class LLMNLUCandidatesOutput(BaseModel):
+    """Function-call envelope containing alternative intent hypotheses."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidates: list[IntentCandidate] = Field(min_length=1, max_length=5)
+
+
 _LLM_ISO_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
 _LLM_CLOCK_PATTERN = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d")
 _LLM_INTENT_ALIASES = {
@@ -1422,26 +1718,106 @@ class LLMNLUFallback:
         self._intent_policy = intent_policy
         self._min_confidence = float(min_confidence)
         self._enabled = enabled
+        self._prioritizer = IntentPrioritizer(intent_policy)
 
-    async def parse(self, *, text: str, state: BookingState) -> NLUResult:
+    async def parse(
+        self,
+        *,
+        text: str,
+        state: BookingState,
+        context: BookingContext | None = None,
+    ) -> NLUResult:
         """Call the gateway once and return a policy-safe NLU result."""
         if not self._enabled:
             return _llm_unresolved()
+        started_at = perf_counter()
         messages = _build_llm_messages(
             text=text,
             state=state,
             allowed_intents=self._intent_policy.allowed_for(state),
         )
+        trace_log(
+            logging.getLogger(__name__),
+            logging.INFO,
+            "LLMNLU",
+            "nlu_started",
+            provider="gemini",
+            current_state=state.value,
+            prompt_chars=sum(len(message.content) for message in messages),
+        )
         try:
-            response = await self._llm_gateway.generate(messages)
-        except (LLMGatewayError, TimeoutError):
-            return _llm_unresolved()
-        if response.content is None or not response.content.strip():
+            response = await self._llm_gateway.generate(messages, tools=[_INTENT_TOOL])
+        except (LLMGatewayError, TimeoutError) as error:
+            record_turn_metrics(nlu_duration_ms=elapsed_ms(started_at))
+            trace_log(
+                logging.getLogger(__name__),
+                logging.WARNING,
+                "LLMNLU",
+                "nlu_failed",
+                current_state=state.value,
+                error_code="nlu_unavailable",
+                exception_type=type(error).__name__,
+                duration_ms=elapsed_ms(started_at),
+            )
             return _llm_unresolved()
         try:
-            output = LLMNLUOutput.model_validate_json(response.content)
-        except (ValueError, json.JSONDecodeError):
+            candidates = _parse_llm_candidates(response)
+        except (ValueError, json.JSONDecodeError) as error:
+            record_turn_metrics(nlu_duration_ms=elapsed_ms(started_at))
+            invalid_fields = (
+                [
+                    ".".join(str(part) for part in item["loc"])
+                    for item in error.errors()
+                ]
+                if isinstance(error, ValidationError)
+                else []
+            )
+            trace_log(
+                logging.getLogger(__name__),
+                logging.WARNING,
+                "NLUSchema",
+                "pydantic_validation_failed",
+                exception_type=type(error).__name__,
+                invalid_fields=invalid_fields,
+                error_code="invalid_nlu_output",
+            )
             return _llm_unresolved()
+        trace_log(
+            logging.getLogger(__name__),
+            logging.INFO,
+            "NLUSchema",
+            "pydantic_validation_completed",
+            status="success",
+            candidate_count=len(candidates),
+        )
+        trace_log(
+            logging.getLogger(__name__),
+            logging.INFO,
+            "LLMNLU",
+            "nlu_completed",
+            candidates=[
+                {"intent": item.intent, "confidence": item.confidence}
+                for item in candidates
+            ],
+            entity_fields=sorted(
+                {
+                    key
+                    for item in candidates
+                    for key, value in item.entities.items()
+                    if value is not None
+                }
+            ),
+            duration_ms=elapsed_ms(started_at),
+        )
+        record_turn_metrics(nlu_duration_ms=elapsed_ms(started_at))
+        selected = self._prioritizer.choose(
+            candidates,
+            state=state,
+            context=context,
+        )
+        if selected is None:
+            return _llm_unresolved()
+        output = LLMNLUOutput.model_validate(selected.model_dump())
         return self._to_nlu_result(output, state)
 
     def _to_nlu_result(
@@ -1534,6 +1910,57 @@ def _build_llm_messages(
     ]
 
 
+_INTENT_TOOL: dict[str, object] = {
+    "type": "function",
+    "function": {
+        "name": "extract_intent_candidates",
+        "description": "Extract state-aware booking intents and primitive entities.",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["candidates"],
+            "properties": {
+                "candidates": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 5,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["intent", "confidence", "entities"],
+                        "properties": {
+                            "intent": {"type": "string"},
+                            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                            "entities": {"type": "object"},
+                            "entity_kind": {
+                                "type": ["string", "null"],
+                                "enum": ["shop", "course", "therapist", None],
+                            },
+                            "entity_query": {"type": ["string", "null"]},
+                        },
+                    },
+                }
+            },
+        },
+    },
+}
+
+
+def _parse_llm_candidates(response: LLMResponse) -> list[IntentCandidate]:
+    if response.tool_calls:
+        call = response.tool_calls[0]
+        if call.name != "extract_intent_candidates":
+            raise ValueError("Unexpected NLU function call.")
+        return LLMNLUCandidatesOutput.model_validate(call.arguments).candidates
+    if response.content is None or not response.content.strip():
+        raise ValueError("LLM NLU response is empty.")
+    raw = json.loads(response.content)
+    if isinstance(raw, dict) and "candidates" in raw:
+        return LLMNLUCandidatesOutput.model_validate(raw).candidates
+    legacy = LLMNLUOutput.model_validate(raw)
+    return [IntentCandidate.model_validate(legacy.model_dump())]
+
+
 def _llm_entity_reference(
     output: LLMNLUOutput,
 ) -> tuple[NLUEntityKind | None, str | None]:
@@ -1621,3 +2048,616 @@ def _llm_time_payload(value: str) -> dict[str, object] | None:
 
 def _llm_unresolved() -> NLUResult:
     return _unresolved(matched_rule="llm_nlu_fallback")
+
+"""Resolve NLU entity queries through application search use cases."""
+
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from datetime import datetime
+from decimal import Decimal
+from enum import StrEnum
+from types import MappingProxyType
+
+from app.application.handlers.search_course_handler import SearchCourseHandler
+from app.application.handlers.search_shop_handler import SearchShopHandler
+from app.dialog.dialog_controller import DialogTurnInput
+from app.domain.booking_context import BookingContext, CourseSelectionMode
+from app.domain.booking_models import (
+    AvailableTherapistRequest,
+    Course,
+    CourseType,
+    InvalidCourseSelectionError,
+    TherapistAvailabilityGateway,
+    TherapistPreference,
+    TherapistPreferenceType,
+)
+from app.domain.booking_state import BookingState
+
+_SAFE_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+_SELECTION_KEY_PATTERN = re.compile(r"^(?:shop|course|therapist):\d+$")
+_SAFE_METADATA_KEYS = frozenset(
+    {"address", "duration_minutes", "price", "course_type"}
+)
+
+
+class EntityResolutionStatus(StrEnum):
+    """Describes the outcome of one authoritative entity lookup."""
+
+    RESOLVED = "resolved"
+    AMBIGUOUS = "ambiguous"
+    NOT_FOUND = "not_found"
+    UNSUPPORTED = "unsupported"
+    FAILED = "failed"
+
+
+class EntityResolutionError(Exception):
+    """Base exception for entity-resolution contract misuse."""
+
+
+class InvalidEntityResolutionRequestError(EntityResolutionError):
+    """Raised when a coordinator receives an invalid NLU resolution request."""
+
+
+class InvalidCandidateSelectionError(EntityResolutionError):
+    """Raised when an ambiguous candidate cannot be selected safely."""
+
+
+class EntityResolutionNotDispatchableError(EntityResolutionError):
+    """Raised when a resolution result cannot become a dialog turn."""
+
+
+@dataclass(frozen=True, slots=True)
+class EntityCandidate:
+    """Contains UI-safe candidate data and an opaque local selection key."""
+
+    kind: NLUEntityKind
+    display_name: str
+    selection_key: str
+    metadata: Mapping[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.kind, NLUEntityKind):
+            raise TypeError("Entity candidate kind is invalid.")
+        if not isinstance(self.display_name, str) or not self.display_name.strip():
+            raise ValueError("Entity candidate display name must not be empty.")
+        if not _SELECTION_KEY_PATTERN.fullmatch(self.selection_key):
+            raise ValueError("Entity candidate selection key is invalid.")
+        object.__setattr__(self, "display_name", self.display_name.strip())
+        object.__setattr__(self, "metadata", _safe_candidate_metadata(self.metadata))
+
+
+@dataclass(frozen=True, slots=True)
+class _CandidateDispatch:
+    dispatch_intent: str
+    dispatch_payload: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "dispatch_payload",
+            MappingProxyType(dict(self.dispatch_payload)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class EntityResolutionResult:
+    """Contains a safe entity-resolution outcome without raw adapter data."""
+
+    status: EntityResolutionStatus
+    entity_kind: NLUEntityKind
+    dispatch_intent: str | None
+    dispatch_payload: Mapping[str, object]
+    candidates: tuple[EntityCandidate, ...] = ()
+    failure_code: str | None = None
+    matched_count: int = 0
+    _candidate_dispatches: Mapping[str, _CandidateDispatch] = field(
+        default_factory=dict,
+        repr=False,
+        compare=False,
+    )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, EntityResolutionStatus):
+            raise TypeError("Entity resolution status is invalid.")
+        if not isinstance(self.entity_kind, NLUEntityKind):
+            raise TypeError("Entity resolution kind is invalid.")
+        if type(self.matched_count) is not int or self.matched_count < 0:
+            raise ValueError("Matched count must be a non-negative integer.")
+        if self.failure_code is not None and not _SAFE_CODE_PATTERN.fullmatch(
+            self.failure_code
+        ):
+            raise ValueError("Entity resolution failure code is invalid.")
+        object.__setattr__(
+            self,
+            "dispatch_payload",
+            MappingProxyType(dict(self.dispatch_payload)),
+        )
+        object.__setattr__(self, "candidates", tuple(self.candidates))
+        object.__setattr__(
+            self,
+            "_candidate_dispatches",
+            MappingProxyType(dict(self._candidate_dispatches)),
+        )
+        self._validate_status_shape()
+
+    def _validate_status_shape(self) -> None:
+        if self.status is EntityResolutionStatus.RESOLVED:
+            if self.dispatch_intent is None or not self.dispatch_payload:
+                raise ValueError("Resolved entity requires dispatch intent and payload.")
+            if self.failure_code is not None:
+                raise ValueError("Resolved entity cannot contain a failure code.")
+            return
+        if self.dispatch_intent is not None or self.dispatch_payload:
+            raise ValueError("Non-resolved entity result cannot contain dispatch data.")
+        if self.status is EntityResolutionStatus.AMBIGUOUS:
+            if len(self.candidates) < 2 or self.matched_count != len(self.candidates):
+                raise ValueError("Ambiguous entity result requires all matched candidates.")
+            if self.failure_code is not None:
+                raise ValueError("Ambiguous entity result cannot contain a failure code.")
+        elif self.candidates:
+            raise ValueError("Only ambiguous results may expose candidates.")
+        if self.status in {
+            EntityResolutionStatus.NOT_FOUND,
+            EntityResolutionStatus.UNSUPPORTED,
+            EntityResolutionStatus.FAILED,
+        } and self.failure_code is None:
+            raise ValueError("Unsuccessful entity result requires a safe failure code.")
+
+
+class EntityResolutionCoordinator:
+    """Coordinate safe shop, course and therapist entity resolution."""
+
+    def __init__(
+        self,
+        *,
+        search_shop_handler: SearchShopHandler,
+        search_course_handler: SearchCourseHandler,
+        booking_gateway: TherapistAvailabilityGateway | None = None,
+    ) -> None:
+        self._search_shop_handler = search_shop_handler
+        self._search_course_handler = search_course_handler
+        self._booking_gateway = booking_gateway
+
+    async def resolve(
+        self,
+        *,
+        nlu_result: NLUResult,
+        state: BookingState,
+        context: BookingContext,
+    ) -> EntityResolutionResult:
+        """Resolve one valid entity query without mutating dialog context."""
+        kind, query, change_target = _validate_resolution_request(nlu_result, state)
+        if kind is NLUEntityKind.SHOP:
+            return await self._resolve_shop(query, change=change_target == "shop")
+        if kind is NLUEntityKind.COURSE:
+            return await self._resolve_course(
+                query,
+                context,
+                change=change_target == "service",
+            )
+        return await self._resolve_therapist(query, context)
+
+    def select_candidate(
+        self,
+        *,
+        result: EntityResolutionResult,
+        selection_key: str,
+    ) -> EntityResolutionResult:
+        """Resolve an existing ambiguous candidate without another lookup."""
+        if result.status is not EntityResolutionStatus.AMBIGUOUS:
+            raise InvalidCandidateSelectionError(
+                "Candidate selection requires an ambiguous resolution result."
+            )
+        try:
+            selected = result._candidate_dispatches[selection_key]
+        except KeyError as error:
+            raise InvalidCandidateSelectionError(
+                "Candidate selection key does not exist in this result."
+            ) from error
+        return EntityResolutionResult(
+            status=EntityResolutionStatus.RESOLVED,
+            entity_kind=result.entity_kind,
+            dispatch_intent=selected.dispatch_intent,
+            dispatch_payload=selected.dispatch_payload,
+            matched_count=1,
+        )
+
+    async def _resolve_shop(
+        self,
+        query: str,
+        *,
+        change: bool = False,
+    ) -> EntityResolutionResult:
+        try:
+            shops = await self._search_shop_handler.execute(query)
+        except Exception:
+            return _failure(
+                NLUEntityKind.SHOP,
+                "shop_resolution_unavailable",
+            )
+        if not shops:
+            return _not_found(NLUEntityKind.SHOP, "shop_not_found")
+        dispatches = tuple(
+            _CandidateDispatch(
+                "change_info" if change else "select_store",
+                (
+                    {"change_target": "shop", "shop": shop}
+                    if change
+                    else {"shop": shop}
+                ),
+            )
+            for shop in shops
+        )
+        if len(shops) == 1:
+            return _resolved_result(NLUEntityKind.SHOP, dispatches[0])
+        candidates = tuple(
+            EntityCandidate(
+                kind=NLUEntityKind.SHOP,
+                display_name=shop.name,
+                selection_key=f"shop:{index}",
+                metadata={"address": shop.address} if shop.address else {},
+            )
+            for index, shop in enumerate(shops)
+        )
+        return _ambiguous_result(NLUEntityKind.SHOP, candidates, dispatches)
+
+    async def _resolve_course(
+        self,
+        query: str,
+        context: BookingContext,
+        *,
+        change: bool = False,
+    ) -> EntityResolutionResult:
+        if context.shop is None:
+            return _failure(
+                NLUEntityKind.COURSE,
+                "shop_required_before_course_resolution",
+            )
+        try:
+            course_type = None
+            if not change:
+                course_type = (
+                    CourseType.ADDON
+                    if context.course_selection_mode is CourseSelectionMode.ADDON
+                    else CourseType.MAIN
+                )
+            courses = await self._search_course_handler.execute(
+                context.shop.shop_id,
+                query,
+                course_type=course_type,
+            )
+        except Exception:
+            return _failure(
+                NLUEntityKind.COURSE,
+                "course_resolution_unavailable",
+            )
+        if course_type is CourseType.MAIN and context.duration_minutes is not None:
+            courses = [
+                service
+                for service in courses
+                if service.course_type is CourseType.MAIN
+                and service.duration_minutes == context.duration_minutes
+            ]
+        if not courses:
+            return _not_found(NLUEntityKind.COURSE, "course_not_found")
+
+        dispatches: list[_CandidateDispatch] = []
+        for service in courses:
+            selection = _build_course_selection(
+                service,
+                context,
+                replace_existing=change,
+            )
+            if selection is None:
+                return _unsupported(NLUEntityKind.COURSE, "main_course_required")
+            dispatches.append(
+                _CandidateDispatch(
+                    "change_info" if change else "select_course",
+                    (
+                        {
+                            "change_target": "service",
+                            "course_selection": selection,
+                        }
+                        if change
+                        else {"course_selection": selection}
+                    ),
+                )
+            )
+        if len(courses) == 1:
+            return _resolved_result(NLUEntityKind.COURSE, dispatches[0])
+        candidates = tuple(
+            EntityCandidate(
+                kind=NLUEntityKind.COURSE,
+                display_name=service.name,
+                selection_key=f"course:{index}",
+                metadata={
+                    "duration_minutes": service.duration_minutes,
+                    "price": service.price,
+                    "course_type": service.course_type.value,
+                },
+            )
+            for index, service in enumerate(courses)
+        )
+        return _ambiguous_result(
+            NLUEntityKind.COURSE,
+            candidates,
+            tuple(dispatches),
+        )
+
+    async def _resolve_therapist(
+        self,
+        query: str,
+        context: BookingContext,
+    ) -> EntityResolutionResult:
+        preference_type = {
+            "male": TherapistPreferenceType.MALE,
+            "female": TherapistPreferenceType.FEMALE,
+        }.get(query)
+        if preference_type is not None:
+            preference = TherapistPreference(preference_type)
+            return _resolved_result(
+                NLUEntityKind.THERAPIST,
+                _CandidateDispatch(
+                    "select_therapist",
+                    {"therapist_preference": preference},
+                ),
+            )
+        if context.num_customer != 1:
+            return _unsupported(NLUEntityKind.THERAPIST, "personal_therapist_group_forbidden")
+        if (
+            self._booking_gateway is None
+            or context.shop is None
+            or context.booking_date is None
+            or context.start_time is None
+            or context.total_duration_minutes is None
+        ):
+            return _failure(NLUEntityKind.THERAPIST, "therapist_resolution_unavailable")
+        end_time = (
+            datetime.combine(context.booking_date, context.start_time)
+            + timedelta(minutes=context.total_duration_minutes)
+        ).time()
+        try:
+            therapists = await self._booking_gateway.search_available_therapists(
+                AvailableTherapistRequest(
+                    shop_id=context.shop.shop_id,
+                    booking_date=context.booking_date,
+                    start_time=context.start_time,
+                    end_time=end_time,
+                )
+            )
+        except Exception:
+            return _failure(NLUEntityKind.THERAPIST, "therapist_resolution_unavailable")
+        normalized_query = query.casefold().strip()
+        matches = [
+            therapist
+            for therapist in therapists
+            if therapist.therapist_name is not None
+            and normalized_query in therapist.therapist_name.casefold()
+        ]
+        if not matches:
+            return _not_found(NLUEntityKind.THERAPIST, "therapist_not_found")
+        dispatches = tuple(
+            _CandidateDispatch("select_therapist", {"therapist_preference": item})
+            for item in matches
+        )
+        if len(matches) == 1:
+            return _resolved_result(NLUEntityKind.THERAPIST, dispatches[0])
+        candidates = tuple(
+            EntityCandidate(
+                kind=NLUEntityKind.THERAPIST,
+                display_name=item.therapist_name or "Kỹ thuật viên",
+                selection_key=f"therapist:{index}",
+            )
+            for index, item in enumerate(matches)
+        )
+        return _ambiguous_result(NLUEntityKind.THERAPIST, candidates, dispatches)
+
+
+def entity_resolution_to_dialog_turn_input(
+    result: EntityResolutionResult,
+    *,
+    state: BookingState,
+    intent_policy: StateIntentPolicy,
+    idempotency_key: str | None = None,
+) -> DialogTurnInput:
+    """Map only a resolved, policy-valid Domain payload to a dialog turn."""
+    if (
+        result.status is not EntityResolutionStatus.RESOLVED
+        or result.dispatch_intent is None
+    ):
+        raise EntityResolutionNotDispatchableError(
+            "Entity resolution result is not resolved for dispatch."
+        )
+    if not intent_policy.is_allowed(state, result.dispatch_intent):
+        raise EntityResolutionNotDispatchableError(
+            "Resolved entity intent is not allowed in the current state."
+        )
+    _validate_resolution_payload(result.dispatch_intent, result.dispatch_payload)
+    return DialogTurnInput(
+        intent=result.dispatch_intent,
+        payload=result.dispatch_payload,
+        idempotency_key=idempotency_key,
+    )
+
+
+def _validate_resolution_request(
+    result: NLUResult,
+    state: BookingState,
+) -> tuple[NLUEntityKind, str, str | None]:
+    if (
+        result.resolution_status
+        is not NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED
+        or result.intent is not None
+        or result.payload
+        or result.entity_kind is None
+        or result.entity_query is None
+        or not result.entity_query.strip()
+    ):
+        raise InvalidEntityResolutionRequestError(
+            "NLU result does not satisfy the entity-resolution request contract."
+        )
+    expected_state = {
+        NLUEntityKind.SHOP: BookingState.SELECTING_SHOP,
+        NLUEntityKind.COURSE: BookingState.SELECTING_SERVICE,
+        NLUEntityKind.THERAPIST: BookingState.SELECTING_THERAPIST,
+    }[result.entity_kind]
+    if result.change_target is None and state is not expected_state:
+        raise InvalidEntityResolutionRequestError(
+            "Entity kind is not valid for the current dialog state."
+        )
+    expected_change_kind = {
+        "shop": NLUEntityKind.SHOP,
+        "service": NLUEntityKind.COURSE,
+    }
+    if (
+        result.change_target is not None
+        and expected_change_kind.get(result.change_target) is not result.entity_kind
+    ):
+        raise InvalidEntityResolutionRequestError(
+            "Change target does not match the requested entity kind."
+        )
+    return result.entity_kind, result.entity_query, result.change_target
+
+
+def _build_course_selection(
+    service: Course,
+    context: BookingContext,
+    *,
+    replace_existing: bool = False,
+) -> CourseSelection | None:
+    try:
+        if service.course_type is CourseType.MAIN:
+            return CourseSelection(
+                service,
+                () if replace_existing else context.addons,
+            )
+        if replace_existing:
+            return None
+        if context.main_course is None:
+            return None
+        return CourseSelection(
+            context.main_course,
+            context.addons + (service,),
+        )
+    except InvalidCourseSelectionError:
+        return None
+
+
+def _resolved_result(
+    kind: NLUEntityKind,
+    dispatch: _CandidateDispatch,
+) -> EntityResolutionResult:
+    return EntityResolutionResult(
+        status=EntityResolutionStatus.RESOLVED,
+        entity_kind=kind,
+        dispatch_intent=dispatch.dispatch_intent,
+        dispatch_payload=dispatch.dispatch_payload,
+        matched_count=1,
+    )
+
+
+def _not_found(kind: NLUEntityKind, code: str) -> EntityResolutionResult:
+    return EntityResolutionResult(
+        status=EntityResolutionStatus.NOT_FOUND,
+        entity_kind=kind,
+        dispatch_intent=None,
+        dispatch_payload={},
+        failure_code=code,
+    )
+
+
+def _unsupported(kind: NLUEntityKind, code: str) -> EntityResolutionResult:
+    return EntityResolutionResult(
+        status=EntityResolutionStatus.UNSUPPORTED,
+        entity_kind=kind,
+        dispatch_intent=None,
+        dispatch_payload={},
+        failure_code=code,
+    )
+
+
+def _failure(kind: NLUEntityKind, code: str) -> EntityResolutionResult:
+    return EntityResolutionResult(
+        status=EntityResolutionStatus.FAILED,
+        entity_kind=kind,
+        dispatch_intent=None,
+        dispatch_payload={},
+        failure_code=code,
+    )
+
+
+def _ambiguous_result(
+    kind: NLUEntityKind,
+    candidates: tuple[EntityCandidate, ...],
+    dispatches: tuple[_CandidateDispatch, ...],
+) -> EntityResolutionResult:
+    return EntityResolutionResult(
+        status=EntityResolutionStatus.AMBIGUOUS,
+        entity_kind=kind,
+        dispatch_intent=None,
+        dispatch_payload={},
+        candidates=candidates,
+        matched_count=len(candidates),
+        _candidate_dispatches=MappingProxyType(
+            {
+                candidate.selection_key: dispatch
+                for candidate, dispatch in zip(candidates, dispatches, strict=True)
+            }
+        ),
+    )
+
+
+def _safe_candidate_metadata(values: Mapping[str, object]) -> Mapping[str, object]:
+    safe: dict[str, object] = {}
+    for key, value in values.items():
+        if key not in _SAFE_METADATA_KEYS:
+            continue
+        if key in {"address", "course_type"} and isinstance(value, str):
+            safe[key] = value
+        elif key == "duration_minutes" and type(value) is int and value > 0:
+            safe[key] = value
+        elif key == "price" and isinstance(value, Decimal):
+            safe[key] = value
+    return MappingProxyType(safe)
+
+
+def _validate_resolution_payload(
+    intent: str,
+    payload: Mapping[str, object],
+) -> None:
+    expected: tuple[str, type[object]]
+    if intent == "change_info":
+        target = payload.get("change_target")
+        expected_change: tuple[str, type[object]]
+        if target == "shop":
+            expected_change = ("shop", Shop)
+        elif target == "service":
+            expected_change = ("course_selection", CourseSelection)
+        else:
+            raise EntityResolutionNotDispatchableError(
+                "Resolved change entity has an invalid target."
+            )
+        change_key, change_type = expected_change
+        if frozenset(payload) != {"change_target", change_key} or not isinstance(
+            payload[change_key], change_type
+        ):
+            raise EntityResolutionNotDispatchableError(
+                "Resolved change entity payload is invalid."
+            )
+        return
+    if intent == "select_store":
+        expected = ("shop", Shop)
+    elif intent == "select_course":
+        expected = ("course_selection", CourseSelection)
+    elif intent == "select_therapist":
+        expected = ("therapist_preference", TherapistPreference)
+    else:
+        raise EntityResolutionNotDispatchableError(
+            "Resolved entity intent has no dispatch contract."
+        )
+    key, expected_type = expected
+    if frozenset(payload) != {key} or not isinstance(payload[key], expected_type):
+        raise EntityResolutionNotDispatchableError(
+            "Resolved entity payload does not match its dispatch contract."
+        )

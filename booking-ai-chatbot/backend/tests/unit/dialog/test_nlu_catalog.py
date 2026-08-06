@@ -1,4 +1,4 @@
-"""Tests for the data-driven Vietnamese deterministic-NLU catalog."""
+"""Tests for the data-driven Vietnamese NLU recognition catalog."""
 
 import json
 from pathlib import Path
@@ -7,15 +7,13 @@ from typing import cast
 import pytest
 
 from app.dialog.nlu import (
-    DeterministicNLU,
-    NLUEntityKind,
-    NLUResolutionStatus,
-    StateIntentPolicy,
-)
-from app.dialog.nlu_catalog import (
     Intent,
     IntentCatalogLoader,
     InvalidIntentCatalogError,
+    NLUEntityKind,
+    NLUProcessor,
+    NLUResolutionStatus,
+    StateIntentPolicy,
     default_intent_catalog_path,
     load_default_intent_catalog,
     normalize_vietnamese,
@@ -24,10 +22,11 @@ from app.domain.booking_state import BookingState
 
 
 def _raw_catalog() -> dict[str, object]:
-    return cast(
+    document = cast(
         dict[str, object],
         json.loads(default_intent_catalog_path().read_text(encoding="utf-8")),
     )
+    return cast(dict[str, object], document["intent_catalog"])
 
 
 def _write_catalog(tmp_path: Path, raw: dict[str, object]) -> Path:
@@ -97,7 +96,7 @@ def test_numeric_duration_is_state_constrained() -> None:
 
 
 def test_greeting_is_resolved_deterministically_when_unknowns_use_llm() -> None:
-    parser = DeterministicNLU(
+    parser = NLUProcessor(
         intent_policy=StateIntentPolicy(
             {BookingState.IDLE: frozenset({"greeting", "unknown"})},
             frozenset({BookingState.IDLE}),
@@ -150,7 +149,7 @@ def test_discovery_phrases_dispatch_without_entity_selection(
     intent: str,
     payload: dict[str, object],
 ) -> None:
-    parser = DeterministicNLU(
+    parser = NLUProcessor(
         intent_policy=StateIntentPolicy(
             {state: frozenset({intent, "unknown"})},
             frozenset(),
@@ -167,7 +166,7 @@ def test_discovery_phrases_dispatch_without_entity_selection(
 
 
 def test_specific_shop_name_remains_entity_selection() -> None:
-    parser = DeterministicNLU(
+    parser = NLUProcessor(
         intent_policy=StateIntentPolicy(
             {BookingState.SELECTING_SHOP: frozenset({"select_store", "list_shops"})},
             frozenset(),
@@ -202,7 +201,7 @@ def test_normalization_is_unicode_safe_and_typo_is_service_scoped() -> None:
 
     assert normalize_vietnamese(decomposed) == "xin chào"
     assert normalize_vietnamese("ADD-ON, add_on addon") == "add on add_on add on"
-    assert normalize_vietnamese("lộ trình", service_context=True) == "liệu trình"
+    assert normalize_vietnamese("lộ trình", course_context=True) == "liệu trình"
     assert normalize_vietnamese("lộ trình") == "lộ trình"
     matched = load_default_intent_catalog().match(
         "liệt kê lộ trình chính và add on",

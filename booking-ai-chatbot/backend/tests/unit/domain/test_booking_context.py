@@ -6,39 +6,37 @@ from uuid import UUID
 
 import pytest
 
-from app.domain.booking import (
+from app.domain.booking_context import BookingContext
+from app.domain.booking_models import (
     BookingOption,
+    Course,
     CourseSelection,
     CourseType,
     Customer,
-    Service,
-    Shop,
-    TherapistPreference,
-    TherapistPreferenceType,
-)
-from app.domain.booking_context import BookingContext
-from app.domain.booking_state import BookingState
-from app.domain.exceptions import (
     InvalidBookingDataError,
     InvalidCustomerCountError,
     InvalidDurationError,
+    Shop,
     TherapistNotAllowedForGroupError,
+    TherapistPreference,
+    TherapistPreferenceType,
 )
+from app.domain.booking_state import BookingState
 
 SHOP = Shop(
     shop_id=UUID("11111111-1111-1111-1111-111111111111"),
     name="Central Spa",
 )
-SERVICE = Service(
-    service_id=UUID("22222222-2222-2222-2222-222222222222"),
+COURSE = Course(
+    course_id=UUID("22222222-2222-2222-2222-222222222222"),
     name="Aromatherapy",
     duration_minutes=60,
     price=Decimal("500000.00"),
 )
 CUSTOMER = Customer(phone="0901234567", name="Nguyen An")
 BOOKING_ID = UUID("33333333-3333-3333-3333-333333333333")
-ADDON = Service(
-    service_id=UUID("44444444-4444-4444-4444-444444444444"),
+ADDON = Course(
+    course_id=UUID("44444444-4444-4444-4444-444444444444"),
     name="Essential oil",
     duration_minutes=15,
     price=Decimal("100000.00"),
@@ -56,7 +54,7 @@ def make_ready_context() -> BookingContext:
         conversation_id="conversation-1",
         state=BookingState.AWAITING_CONFIRMATION,
         shop=SHOP,
-        service=SERVICE,
+        main_course=COURSE,
         customer=CUSTOMER,
         booking_date=date(2026, 8, 1),
         start_time=time(10, 30),
@@ -84,7 +82,7 @@ def test_change_shop_clears_shop_dependencies_only() -> None:
     context.change_shop(OTHER_SHOP)
 
     assert context.shop is OTHER_SHOP
-    assert context.service is None
+    assert context.main_course is None
     assert context.addons == ()
     assert context.available_slots is None
     assert context.start_time is None
@@ -101,7 +99,7 @@ def test_change_date_preserves_shop_service_and_other_independent_values() -> No
 
     assert context.booking_date == date(2026, 8, 2)
     assert context.shop is SHOP
-    assert context.service is SERVICE
+    assert context.main_course is COURSE
     assert context.num_customer == 1
     assert context.start_time is None
     assert context.therapist_preference is None
@@ -114,7 +112,7 @@ def test_change_people_clears_slot_and_therapist_but_preserves_course() -> None:
 
     assert context.num_customer == 2
     assert context.shop is SHOP
-    assert context.service is SERVICE
+    assert context.main_course is COURSE
     assert context.booking_date == date(2026, 8, 1)
     assert context.start_time is None
     assert context.therapist_preference is None
@@ -138,17 +136,17 @@ def test_change_duration_clears_course_but_preserves_shop() -> None:
 
     assert context.duration_minutes == 90
     assert context.shop is SHOP
-    assert context.service is None
+    assert context.main_course is None
     assert context.start_time is None
 
 
-def test_change_service_preserves_shop_and_invalidates_availability() -> None:
+def test_change_course_preserves_shop_and_invalidates_availability() -> None:
     context = make_change_context()
 
     context.change_course_selection(None)
 
     assert context.shop is SHOP
-    assert context.service is None
+    assert context.main_course is None
     assert context.available_slots is None
     assert context.start_time is None
 
@@ -184,7 +182,7 @@ def test_change_phone_preserves_booking_selection() -> None:
     assert context.customer is None
     assert context.phone_confirmed is False
     assert context.shop is SHOP
-    assert context.service is SERVICE
+    assert context.main_course is COURSE
     assert context.booking_date == date(2026, 8, 1)
     assert context.start_time == time(10, 30)
 
@@ -199,7 +197,7 @@ def test_booking_fields_default_to_none() -> None:
     context = BookingContext(conversation_id="conversation-1")
 
     assert context.shop is None
-    assert context.service is None
+    assert context.main_course is None
     assert context.customer is None
     assert context.booking_date is None
     assert context.start_time is None
@@ -242,14 +240,14 @@ def test_reset_clears_temporary_booking_data() -> None:
     context.reservation_codes = ("RSV-1",)
     context.child_reservation_ids = (BOOKING_ID,)
     context.pending_action = "create_booking"
-    context.requested_booking_date = BOOKING_DATE
+    context.requested_booking_date = date(2099, 8, 1)
     context.requested_start_time = time(7, 0)
 
     context.reset()
 
     assert context.state is BookingState.IDLE
     assert context.shop is None
-    assert context.service is None
+    assert context.main_course is None
     assert context.customer is None
     assert context.booking_date is None
     assert context.requested_booking_date is None
@@ -527,9 +525,9 @@ def test_changing_course_clears_slots_time_and_therapist() -> None:
         TherapistPreferenceType.FEMALE
     )
 
-    context.set_course_selection(CourseSelection(SERVICE, (ADDON,)))
+    context.set_course_selection(CourseSelection(COURSE, (ADDON,)))
 
-    assert context.service is SERVICE
+    assert context.main_course is COURSE
     assert context.addons == (ADDON,)
     assert context.available_slots is None
     assert context.start_time is None
@@ -557,7 +555,7 @@ def test_changing_time_requires_therapist_revalidation() -> None:
         "booking_date",
         "num_customer",
         "duration_minutes",
-        "service",
+        "main_course",
         "start_time",
         "phone",
     ],
@@ -609,7 +607,7 @@ def test_group_with_therapist_is_not_ready() -> None:
 
 
 def assert_course_and_availability_cleared(context: BookingContext) -> None:
-    assert context.service is None
+    assert context.main_course is None
     assert context.addons == ()
     assert context.options == ()
     assert context.available_slots is None

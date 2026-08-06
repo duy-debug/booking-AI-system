@@ -7,8 +7,8 @@ import pytest
 
 from app.dialog.flow_loader import FlowDefinition, FlowOnEnter, FlowState, FlowTransition
 from app.dialog.nlu import (
-    DeterministicNLU,
     NLUEntityKind,
+    NLUProcessor,
     NLUResolutionStatus,
     NLUResult,
     NLUResultNotDispatchableError,
@@ -24,8 +24,8 @@ FIXED_TODAY = date(2026, 8, 1)
 
 
 @pytest.fixture
-def nlu() -> DeterministicNLU:
-    return DeterministicNLU(
+def nlu() -> NLUProcessor:
+    return NLUProcessor(
         intent_policy=intent_policy(),
         today_provider=lambda: FIXED_TODAY,
     )
@@ -137,7 +137,7 @@ def test_build_policy_extracts_only_intent_availability_from_flow() -> None:
 
 
 def test_normalization_handles_case_whitespace_and_safe_punctuation(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
 ) -> None:
     result = nlu.parse(text="  HỦY   ĐẶT   LỊCH!!! ", state=BookingState.SELECTING_DATE)
 
@@ -147,7 +147,7 @@ def test_normalization_handles_case_whitespace_and_safe_punctuation(
 
 
 def test_cancel_and_start_booking_require_named_transition(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
 ) -> None:
     allowed_cancel = nlu.parse(text="hủy", state=BookingState.SELECTING_DATE)
     disallowed_cancel = nlu.parse(text="hủy", state=BookingState.IDLE)
@@ -169,7 +169,7 @@ def test_question_requires_named_state_transition() -> None:
         {BookingState.IDLE: frozenset({"unknown"})},
         frozenset({BookingState.IDLE}),
     )
-    parser = DeterministicNLU(
+    parser = NLUProcessor(
         intent_policy=policy,
         today_provider=lambda: FIXED_TODAY,
     )
@@ -181,7 +181,7 @@ def test_question_requires_named_state_transition() -> None:
     assert result.matched_rule == "faq_explicit"
 
 
-def test_empty_text_uses_unknown_fallback(nlu: DeterministicNLU) -> None:
+def test_empty_text_uses_unknown_fallback(nlu: NLUProcessor) -> None:
     result = nlu.parse(text=" \t\n ", state=BookingState.IDLE)
 
     assert result.intent == "unknown"
@@ -193,7 +193,7 @@ def test_empty_text_uses_unknown_fallback(nlu: DeterministicNLU) -> None:
 
 
 def test_unknown_can_be_returned_as_unresolved_for_llm_fallback() -> None:
-    parser = DeterministicNLU(
+    parser = NLUProcessor(
         intent_policy=intent_policy(),
         today_provider=lambda: FIXED_TODAY,
         unknown_as_unresolved=True,
@@ -229,7 +229,7 @@ def test_unknown_can_be_returned_as_unresolved_for_llm_fallback() -> None:
     ],
 )
 def test_change_requests_use_one_general_intent(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
     text: str,
     target: str,
     value_key: str | None,
@@ -247,7 +247,7 @@ def test_change_requests_use_one_general_intent(
 
 
 def test_change_shop_query_requires_atomic_entity_resolution(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
 ) -> None:
     result = nlu.parse(
         text="đổi sang chi nhánh Quận 1",
@@ -260,7 +260,7 @@ def test_change_shop_query_requires_atomic_entity_resolution(
     assert result.change_target == "shop"
 
 
-def test_non_booking_change_is_not_a_change_intent(nlu: DeterministicNLU) -> None:
+def test_non_booking_change_is_not_a_change_intent(nlu: NLUProcessor) -> None:
     result = nlu.parse(
         text="đổi tiền giúp tôi",
         state=BookingState.AWAITING_CONFIRMATION,
@@ -271,7 +271,7 @@ def test_non_booking_change_is_not_a_change_intent(nlu: DeterministicNLU) -> Non
 
 @pytest.mark.parametrize("phrase", ["đúng", "ĐÚNG RỒI!", "ok", "xác nhận"])
 def test_confirm_is_state_aware(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
     phrase: str,
 ) -> None:
     supported = nlu.parse(text=phrase, state=BookingState.VERIFYING_PHONE)
@@ -284,7 +284,7 @@ def test_confirm_is_state_aware(
 
 
 @pytest.mark.parametrize("phrase", ["không", "sai", "nhập lại", "no"])
-def test_deny_is_state_aware(nlu: DeterministicNLU, phrase: str) -> None:
+def test_deny_is_state_aware(nlu: NLUProcessor, phrase: str) -> None:
     supported = nlu.parse(text=phrase, state=BookingState.VERIFYING_PHONE)
     unsupported = nlu.parse(text=phrase, state=BookingState.SELECTING_SHOP)
 
@@ -294,7 +294,7 @@ def test_deny_is_state_aware(nlu: DeterministicNLU, phrase: str) -> None:
 
 
 def test_people_entity_phrase_is_not_mistaken_for_confirmation(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
 ) -> None:
     result = nlu.parse(text="đúng 2 người", state=BookingState.SELECTING_PEOPLE)
 
@@ -302,7 +302,7 @@ def test_people_entity_phrase_is_not_mistaken_for_confirmation(
     assert result.payload == {"num_customer": 2}
 
 
-def test_negative_people_phrase_is_deny_not_entity(nlu: DeterministicNLU) -> None:
+def test_negative_people_phrase_is_deny_not_entity(nlu: NLUProcessor) -> None:
     result = nlu.parse(
         text="không phải 2 người",
         state=BookingState.SELECTING_PEOPLE,
@@ -311,7 +311,7 @@ def test_negative_people_phrase_is_deny_not_entity(nlu: DeterministicNLU) -> Non
     assert result.intent == "deny"
 
 
-def test_people_correction_uses_last_explicit_value(nlu: DeterministicNLU) -> None:
+def test_people_correction_uses_last_explicit_value(nlu: NLUProcessor) -> None:
     result = nlu.parse(
         text="không phải 2 người mà 3 người",
         state=BookingState.SELECTING_PEOPLE,
@@ -333,7 +333,7 @@ def test_people_correction_uses_last_explicit_value(nlu: DeterministicNLU) -> No
     ],
 )
 def test_people_extraction_preserves_value_for_domain_validation(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
     phrase: str,
     expected: int,
 ) -> None:
@@ -344,7 +344,7 @@ def test_people_extraction_preserves_value_for_domain_validation(
     assert result.confidence == 0.95
 
 
-def test_number_outside_people_state_is_not_people(nlu: DeterministicNLU) -> None:
+def test_number_outside_people_state_is_not_people(nlu: NLUProcessor) -> None:
     assert nlu.parse(text="2", state=BookingState.SELECTING_DATE).intent == "unknown"
 
 
@@ -360,7 +360,7 @@ def test_number_outside_people_state_is_not_people(nlu: DeterministicNLU) -> Non
     ],
 )
 def test_duration_extraction(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
     phrase: str,
     expected: int,
 ) -> None:
@@ -370,7 +370,7 @@ def test_duration_extraction(
     assert result.payload == {"duration_minutes": expected}
 
 
-def test_invalid_or_out_of_state_duration_is_unknown(nlu: DeterministicNLU) -> None:
+def test_invalid_or_out_of_state_duration_is_unknown(nlu: NLUProcessor) -> None:
     assert (
         nlu.parse(text="khoảng một lúc", state=BookingState.SELECTING_DURATION).intent
         == "unknown"
@@ -391,7 +391,7 @@ def test_invalid_or_out_of_state_duration_is_unknown(nlu: DeterministicNLU) -> N
     ],
 )
 def test_date_extraction_with_injected_today(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
     phrase: str,
     expected: date,
 ) -> None:
@@ -402,7 +402,7 @@ def test_date_extraction_with_injected_today(
     assert isinstance(result.payload["booking_date"], date)
 
 
-def test_invalid_or_ambiguous_date_is_unknown(nlu: DeterministicNLU) -> None:
+def test_invalid_or_ambiguous_date_is_unknown(nlu: NLUProcessor) -> None:
     assert nlu.parse(text="31/02/2026", state=BookingState.SELECTING_DATE).intent == "unknown"
     assert (
         nlu.parse(text="thứ bảy tuần sau", state=BookingState.SELECTING_DATE).intent
@@ -422,7 +422,7 @@ def test_invalid_or_ambiguous_date_is_unknown(nlu: DeterministicNLU) -> None:
     ],
 )
 def test_time_extraction(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
     phrase: str,
     expected: time,
 ) -> None:
@@ -433,13 +433,13 @@ def test_time_extraction(
     assert isinstance(result.payload["start_time"], time)
 
 
-def test_ambiguous_or_out_of_state_time_is_unknown(nlu: DeterministicNLU) -> None:
+def test_ambiguous_or_out_of_state_time_is_unknown(nlu: NLUProcessor) -> None:
     assert nlu.parse(text="7 giờ", state=BookingState.SELECTING_TIME).intent == "unknown"
     assert nlu.parse(text="19h", state=BookingState.SELECTING_DATE).intent == "unknown"
 
 
 def test_time_extraction_recovers_from_booking_failed(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
 ) -> None:
     result = nlu.parse(text="10:00", state=BookingState.BOOKING_FAILED)
 
@@ -456,7 +456,7 @@ def test_time_extraction_recovers_from_booking_failed(
     ],
 )
 def test_phone_candidate_normalization_without_rule_leak(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
     phrase: str,
     expected: str,
 ) -> None:
@@ -468,14 +468,14 @@ def test_phone_candidate_normalization_without_rule_leak(
     assert expected not in result.matched_rule
 
 
-def test_invalid_phone_candidate_is_unknown(nlu: DeterministicNLU) -> None:
+def test_invalid_phone_candidate_is_unknown(nlu: NLUProcessor) -> None:
     result = nlu.parse(text="12345", state=BookingState.COLLECTING_PHONE)
 
     assert result.intent == "unknown"
     assert result.matched_rule is None
 
 
-def test_shop_parser_returns_query_without_domain_identity(nlu: DeterministicNLU) -> None:
+def test_shop_parser_returns_query_without_domain_identity(nlu: NLUProcessor) -> None:
     result = nlu.parse(
         text="Chi nhánh Quận 1",
         state=BookingState.SELECTING_SHOP,
@@ -498,7 +498,7 @@ def test_shop_parser_returns_query_without_domain_identity(nlu: DeterministicNLU
     ],
 )
 def test_shop_parser_extracts_candidate_from_natural_selection_phrase(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
     phrase: str,
     expected_query: str,
 ) -> None:
@@ -511,7 +511,7 @@ def test_shop_parser_extracts_candidate_from_natural_selection_phrase(
 
 
 def test_start_booking_phrase_does_not_override_selecting_shop_state(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
 ) -> None:
     result = nlu.parse(
         text="tôi muốn đặt Komorebi Ba Đình4",
@@ -524,7 +524,7 @@ def test_start_booking_phrase_does_not_override_selecting_shop_state(
 
 
 def test_course_parser_returns_query_and_optional_duration(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
 ) -> None:
     result = nlu.parse(
         text="Massage Thái 60 phút",
@@ -553,7 +553,7 @@ def test_course_parser_returns_query_and_optional_duration(
     ],
 )
 def test_therapist_extraction_does_not_create_domain_identity(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
     phrase: str,
     status: NLUResolutionStatus,
     entity_query: str | None,
@@ -571,7 +571,7 @@ def test_therapist_extraction_does_not_create_domain_identity(
 
 
 def test_multi_entity_sentence_marks_but_does_not_dispatch_secondary_entities(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
 ) -> None:
     result = nlu.parse(
         text="ngày mai lúc 7 giờ tối cho 2 người",
@@ -586,7 +586,7 @@ def test_multi_entity_sentence_marks_but_does_not_dispatch_secondary_entities(
 
 
 def test_booking_request_and_question_use_real_flow_intents(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
 ) -> None:
     start = nlu.parse(text="Tôi muốn đặt lịch", state=BookingState.IDLE)
     question = nlu.parse(text="Giá bao nhiêu?", state=BookingState.IDLE)
@@ -597,7 +597,7 @@ def test_booking_request_and_question_use_real_flow_intents(
 
 
 def test_start_booking_preserves_date_and_time_for_later_workflow_steps(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
 ) -> None:
     result = nlu.parse(
         text="Tôi muốn đặt booking ngày mai vào lúc 7:00 nhé",
@@ -629,7 +629,7 @@ def test_start_booking_preserves_date_and_time_for_later_workflow_steps(
     ],
 )
 def test_explicit_faq_patterns_preserve_original_query(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
     text: str,
 ) -> None:
     result = nlu.parse(text=text, state=BookingState.IDLE)
@@ -650,7 +650,7 @@ def test_explicit_faq_patterns_preserve_original_query(
     ],
 )
 def test_booking_and_change_phrases_are_not_misclassified_as_faq(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
     text: str,
     state: BookingState,
 ) -> None:
@@ -660,7 +660,7 @@ def test_booking_and_change_phrases_are_not_misclassified_as_faq(
 
 
 def test_unknown_question_is_unresolved_in_production_fallback_mode() -> None:
-    parser = DeterministicNLU(
+    parser = NLUProcessor(
         intent_policy=intent_policy(),
         today_provider=lambda: FIXED_TODAY,
         unknown_as_unresolved=True,
@@ -673,7 +673,7 @@ def test_unknown_question_is_unresolved_in_production_fallback_mode() -> None:
 
 
 def test_ambiguous_sentence_uses_unknown(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
 ) -> None:
     result = nlu.parse(text="cuối tuần sau", state=BookingState.IDLE)
 
@@ -691,7 +691,7 @@ def test_ambiguous_sentence_uses_unknown(
     [("xin chào", "greeting"), ("cảm ơn", "thanks")],
 )
 def test_social_intents_are_catalog_resolved(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
     phrase: str,
     intent: str,
 ) -> None:
@@ -719,7 +719,7 @@ def test_social_intents_are_catalog_resolved(
     ],
 )
 def test_documented_idle_acceptance_phrases_are_deterministic(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
     text: str,
     expected_intent: str,
 ) -> None:
@@ -734,7 +734,7 @@ def test_wildcard_without_named_unknown_stays_unresolved() -> None:
         {BookingState.IDLE: frozenset()},
         frozenset({BookingState.IDLE}),
     )
-    parser = DeterministicNLU(
+    parser = NLUProcessor(
         intent_policy=policy,
         today_provider=lambda: FIXED_TODAY,
     )
@@ -748,7 +748,7 @@ def test_wildcard_without_named_unknown_stays_unresolved() -> None:
 
 
 def test_mapper_preserves_typed_payload_and_request_metadata(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
 ) -> None:
     parsed = nlu.parse(text="ngày mai", state=BookingState.SELECTING_DATE)
 
@@ -879,7 +879,7 @@ def test_result_payload_is_deeply_immutable() -> None:
         result.payload["new"] = 1  # type: ignore[index]
 
 
-def test_parser_does_not_mutate_context_or_input(nlu: DeterministicNLU) -> None:
+def test_parser_does_not_mutate_context_or_input(nlu: NLUProcessor) -> None:
     context = BookingContext("conversation-1", state=BookingState.SELECTING_PEOPLE)
     text = " 2 người "
 
@@ -902,7 +902,7 @@ def test_parser_does_not_mutate_context_or_input(nlu: DeterministicNLU) -> None:
     ],
 )
 def test_global_intents_precede_service_entity_fallback(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
     text: str,
     intent: str,
 ) -> None:
@@ -914,7 +914,7 @@ def test_global_intents_precede_service_entity_fallback(
 
 @pytest.mark.parametrize("text", ["60", "60 phút", "đổi sang 90 phút"])
 def test_duration_correction_is_not_a_service_query(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
     text: str,
 ) -> None:
     result = nlu.parse(text=text, state=BookingState.SELECTING_SERVICE)
@@ -924,7 +924,7 @@ def test_duration_correction_is_not_a_service_query(
 
 
 def test_change_shop_without_new_name_is_not_an_entity_search(
-    nlu: DeterministicNLU,
+    nlu: NLUProcessor,
 ) -> None:
     result = nlu.parse(
         text="tôi muốn đổi cửa hàng",

@@ -6,8 +6,8 @@ from collections.abc import Sequence
 
 import pytest
 
-from app.core.config import Settings
-from app.rag.semantic_embedding import SentenceTransformerEmbedding
+from app.infrastructure.context_store import Settings
+from app.infrastructure.qdrant_client import SentenceTransformerEmbedding
 
 
 class FakeEncoder:

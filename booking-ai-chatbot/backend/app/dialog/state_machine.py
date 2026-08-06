@@ -1,5 +1,6 @@
 """Resolve conditional declarative booking conversation transitions."""
 
+import logging
 import operator
 from enum import Enum
 from typing import Any, Protocol, cast
@@ -16,8 +17,9 @@ from app.dialog.flow_loader import (
     PhoneSplitConfig,
 )
 from app.domain.booking_context import BookingContext
+from app.domain.booking_models import InvalidBookingStateError
 from app.domain.booking_state import BookingState
-from app.domain.exceptions import InvalidBookingStateError
+from app.infrastructure.context_store import trace_log
 
 
 class FailureSource(Protocol):
@@ -184,13 +186,24 @@ class StateMachine:
         exact = tuple(item for item in state.transitions if item.intent == intent)
         resolved = self._resolve_candidates(exact, context)
         if resolved is not None:
+            self._log_resolved(context, intent, resolved)
             return resolved
 
         wildcard = tuple(item for item in state.transitions if item.intent == "*")
         resolved = self._resolve_candidates(wildcard, context)
         if resolved is not None:
+            self._log_resolved(context, intent, resolved)
             return resolved
 
+        trace_log(
+            logging.getLogger(__name__),
+            logging.WARNING,
+            "StateMachine",
+            "transition_rejected",
+            current_state=context.state.value,
+            intent=intent,
+            reason="intent_not_allowed",
+        )
         raise InvalidBookingStateError(
             f"Cannot transition from '{context.state.value}' using intent '{intent}'."
         )
@@ -234,7 +247,33 @@ class StateMachine:
         transition: FlowTransition | FlowAutoTransition,
     ) -> None:
         """Commit only the resolved target state."""
+        previous_state = context.state
         context.state = transition.target
+        trace_log(
+            logging.getLogger(__name__),
+            logging.INFO,
+            "StateMachine",
+            "state_transition_completed",
+            previous_state=previous_state.value,
+            next_state=transition.target.value,
+        )
+
+    @staticmethod
+    def _log_resolved(
+        context: BookingContext,
+        intent: str,
+        transition: FlowTransition,
+    ) -> None:
+        trace_log(
+            logging.getLogger(__name__),
+            logging.INFO,
+            "StateMachine",
+            "transition_resolved",
+            current_state=context.state.value,
+            intent=intent,
+            actions=list(transition.actions),
+            success_target=transition.target.value,
+        )
 
     def resolve_failure(
         self,

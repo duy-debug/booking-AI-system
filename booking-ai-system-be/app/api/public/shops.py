@@ -1,9 +1,17 @@
+import logging
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, parse_uuid
+from app.infrastructure.logging_config import log_event
+from app.schemas.common import (
+    CollectionResponse,
+    DataResponse,
+    PaginatedResponse,
+    PaginationMeta,
+)
 from app.schemas.course import PublicCourseResponse
-from app.schemas.common import CollectionResponse, DataResponse, PaginatedResponse, PaginationMeta
 from app.schemas.shop import PublicShopListResponse, PublicShopResponse
 from app.services.course_service import CourseService
 from app.services.shop_service import ShopService
@@ -20,6 +28,14 @@ def list_shops(
     effective_active = is_active if is_active is not None else True
     service = ShopService(db)
     shops = service.list_public(is_active=effective_active)
+    log_event(
+        logging.INFO,
+        "ShopAPI",
+        "pos_request_validated",
+        operation="search_shops",
+        validated_fields=["is_active"],
+        result_count=len(shops),
+    )
     return PaginatedResponse(data=shops, meta=PaginationMeta(total=len(shops)))
 
 
@@ -45,10 +61,17 @@ def list_courses(
     uid = parse_uuid(shop_id, "shop")
     effective_active = is_active if is_active is not None else True
     service = CourseService(db)
-    return CollectionResponse(
-        data=service.list_public(
-            uid,
-            course_type=course_type,
-            is_active=effective_active,
-        )
+    courses = service.list_public(
+        uid,
+        course_type=course_type,
+        is_active=effective_active,
     )
+    log_event(
+        logging.INFO,
+        "CourseAPI",
+        "pos_request_validated",
+        operation="search_services",
+        validated_fields=["shop_id", "course_type", "is_active"],
+        result_count=len(courses),
+    )
+    return CollectionResponse(data=courses)

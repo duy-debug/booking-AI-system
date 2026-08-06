@@ -17,18 +17,18 @@ from app.dialog.flow_loader import (
     PhoneSplitConfig,
 )
 from app.dialog.state_machine import InvalidFlowConditionError, StateMachine
-from app.domain.booking import (
-    Service,
+from app.domain.booking_context import BookingContext
+from app.domain.booking_models import (
+    Course,
+    InvalidBookingStateError,
     Shop,
     TherapistPreference,
     TherapistPreferenceType,
 )
-from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
-from app.domain.exceptions import InvalidBookingStateError
 
 SHOP = Shop(UUID("11111111-1111-1111-1111-111111111111"), "Central Spa")
-SERVICE = Service(
+COURSE = Course(
     UUID("22222222-2222-2222-2222-222222222222"),
     "Aromatherapy",
     60,
@@ -86,12 +86,12 @@ def evaluate(condition: FlowCondition, context: BookingContext) -> bool:
 
 
 def test_resolve_field_supports_direct_and_nested_paths() -> None:
-    context = make_context(shop=SHOP, service=SERVICE)
+    context = make_context(shop=SHOP, main_course=COURSE)
     machine = StateMachine(make_flow())
 
     assert machine._resolve_field(context, "shop") is SHOP
     assert machine._resolve_field(context, "shop.shop_id") == SHOP.shop_id
-    assert machine._resolve_field(context, "service.service_id") == SERVICE.service_id
+    assert machine._resolve_field(context, "main_course.course_id") == COURSE.course_id
 
 
 def test_resolve_field_returns_none_for_missing_or_none_intermediate() -> None:
@@ -571,7 +571,7 @@ def test_resolve_failure_prefers_exact_code_before_fallback() -> None:
     fallback = FlowFailure(
         "*",
         BookingState.SELECTING_SERVICE,
-        instruction_template="ask_service",
+        instruction_template="ask_course",
     )
     transition = FlowTransition(
         "select_time",
@@ -630,7 +630,7 @@ def test_resolve_failure_returns_none_without_match_or_fallback() -> None:
 def test_resolve_failure_does_not_mutate_until_apply_failure() -> None:
     context = make_context(state=BookingState.SELECTING_SERVICE)
     failure = FlowFailure(
-        "service_duration_mismatch",
+        "course_duration_mismatch",
         BookingState.SELECTING_DURATION,
     )
     transition = FlowTransition(
@@ -642,7 +642,7 @@ def test_resolve_failure_does_not_mutate_until_apply_failure() -> None:
 
     resolved = machine.resolve_failure(
         transition,
-        "service_duration_mismatch",
+        "course_duration_mismatch",
     )
 
     assert resolved is failure

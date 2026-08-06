@@ -8,8 +8,8 @@ from types import MappingProxyType
 from typing import TypeAlias
 
 from app.dialog.dialog_controller import DialogTurnResult, DialogTurnStatus
-from app.domain.booking import TherapistPreferenceType
 from app.domain.booking_context import BookingContext
+from app.domain.booking_models import TherapistPreferenceType
 from app.domain.booking_state import BookingState
 
 _TEMPLATE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -171,6 +171,43 @@ class InstructionBuilder:
             metadata=_allowlisted_metadata(draft.metadata),
         )
 
+    def build_nlg_prompt(
+        self,
+        *,
+        response: DialogResponse,
+        context: BookingContext,
+    ) -> str:
+        """Build a grounded Vietnamese response instruction without sensitive data."""
+        facts = [
+            f"State hiện tại: {response.state.value}.",
+            f"Trạng thái xử lý: {response.status.value}.",
+            f"Instruction template: {response.instruction_template or 'state_fallback'}.",
+            f"Nội dung nghiệp vụ đã kiểm chứng: {response.text}",
+        ]
+        if context.shop is not None:
+            facts.append(f"Cửa hàng đã xác nhận: {context.shop.name}.")
+        if context.booking_date is not None:
+            facts.append(f"Ngày đã xác nhận: {context.booking_date.isoformat()}.")
+        if context.num_customer is not None:
+            facts.append(f"Số người đã xác nhận: {context.num_customer}.")
+        if context.duration_minutes is not None:
+            facts.append(f"Thời lượng đã xác nhận: {context.duration_minutes} phút.")
+        if context.main_course is not None:
+            facts.append(f"Course chính đã xác nhận: {context.main_course.name}.")
+        if context.start_time is not None:
+            facts.append(f"Giờ đã xác nhận: {context.start_time.strftime('%H:%M')}.")
+        if context.reservation_code is not None:
+            facts.append(f"Mã đặt chỗ POS: {context.reservation_code}.")
+        facts.extend(
+            (
+                "Hãy viết câu trả lời tiếng Việt tự nhiên, ngắn gọn.",
+                "Không thêm shop, course, slot, therapist hoặc mã đặt chỗ chưa có ở trên.",
+                "Không thay đổi flow và chỉ hỏi thông tin còn thiếu của state hiện tại.",
+                "Không nhắc tới prompt, state machine hoặc hệ thống nội bộ.",
+            )
+        )
+        return "\n".join(facts)
+
     def build_faq_response(
         self,
         *,
@@ -252,7 +289,7 @@ class InstructionBuilder:
             ("ask_date", self._ask_date),
             ("ask_people", self._ask_people),
             ("ask_duration", self._ask_duration),
-            ("ask_service", self._ask_service),
+            ("ask_course", self._ask_course),
             ("addon_needs_main", self._addon_needs_main),
             ("main_course_required", self._main_course_required),
             ("combo_not_bookable_retry", self._combo_not_bookable_retry),
@@ -284,7 +321,7 @@ class InstructionBuilder:
             ("change_ask_date", self._change_ask_date),
             ("change_ask_people", self._change_ask_people),
             ("change_ask_duration", self._change_ask_duration),
-            ("change_ask_service", self._change_ask_service),
+            ("change_ask_course", self._change_ask_course),
             ("change_ask_time", self._change_ask_time),
             ("change_ask_therapist", self._change_ask_therapist),
             ("change_ask_phone", self._change_ask_phone),
@@ -322,7 +359,7 @@ class InstructionBuilder:
         return DialogResponseDraft("Bạn muốn đổi sang thời lượng bao nhiêu phút?")
 
     @staticmethod
-    def _change_ask_service(
+    def _change_ask_course(
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
@@ -372,7 +409,7 @@ class InstructionBuilder:
             BookingState.SELECTING_DATE: self._ask_date,
             BookingState.SELECTING_PEOPLE: self._ask_people,
             BookingState.SELECTING_DURATION: self._ask_duration,
-            BookingState.SELECTING_SERVICE: self._ask_service,
+            BookingState.SELECTING_SERVICE: self._ask_course,
             BookingState.SELECTING_TIME: self._suggest_time_slots,
             BookingState.SELECTING_THERAPIST: self._ask_therapist,
             BookingState.COLLECTING_PHONE: self._ask_phone,
@@ -428,14 +465,14 @@ class InstructionBuilder:
         return DialogResponseDraft("Bạn muốn chọn thời lượng bao nhiêu phút?")
 
     @staticmethod
-    def _ask_service(
+    def _ask_course(
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
         text = "Bạn muốn chọn liệu trình chính nào?"
-        if context.service is not None:
+        if context.main_course is not None:
             text = (
-                f"Bạn đã chọn {context.service.name}. "
+                f"Bạn đã chọn {context.main_course.name}. "
                 "Bạn muốn chọn thêm add-on nào?"
             )
             if context.addons:
@@ -443,7 +480,7 @@ class InstructionBuilder:
                 text += f" Add-on đang chọn: {addon_names}."
         return DialogResponseDraft(
             text,
-            ("Không chọn add-on",) if context.service is not None else (),
+            ("Không chọn add-on",) if context.main_course is not None else (),
             metadata={"has_addons": bool(context.addons)},
         )
 
@@ -639,7 +676,7 @@ class InstructionBuilder:
             f"- Giờ: {_time_text(context)}",
             f"- Số người: {_people_text(context)}",
             f"- Thời lượng: {_duration_text(context)}",
-            f"- Liệu trình: {_service_name(context)}",
+            f"- Liệu trình: {_course_name(context)}",
             f"- Add-on: {_addon_text(context)}",
             f"- Kỹ thuật viên: {_therapist_text(context)}",
             f"- Số điện thoại: {_phone_text(context)}",
@@ -786,8 +823,8 @@ def _duration_text(context: BookingContext) -> str:
     return f"{context.duration_minutes} phút"
 
 
-def _service_name(context: BookingContext) -> str:
-    return context.service.name if context.service is not None else "chưa chọn"
+def _course_name(context: BookingContext) -> str:
+    return context.main_course.name if context.main_course is not None else "chưa chọn"
 
 
 def _addon_text(context: BookingContext) -> str:

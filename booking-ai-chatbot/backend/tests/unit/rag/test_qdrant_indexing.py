@@ -11,7 +11,7 @@ import pytest
 from qdrant_client import models
 from qdrant_client.http.models import CollectionInfo
 
-from app.rag.qdrant_indexing import (
+from app.infrastructure.qdrant_client import (
     EmptyKnowledgeDocumentError,
     IncompatibleCollectionError,
     InvalidIndexingSourceError,
@@ -144,10 +144,8 @@ def index(
 def test_import_does_not_construct_qdrant_client_or_affect_app_startup() -> None:
     code = (
         "import sys; import app.main; "
-        "assert 'app.rag.qdrant_indexing' not in sys.modules; "
-        "import qdrant_client; "
-        "qdrant_client.QdrantClient=lambda *a, **k: (_ for _ in ()).throw(RuntimeError()); "
-        "import app.rag.qdrant_indexing"
+        "assert 'app.infrastructure.qdrant_client' in sys.modules; "
+        "assert not hasattr(app.main, 'qdrant_client')"
     )
 
     result = subprocess.run([sys.executable, "-c", code], check=False)

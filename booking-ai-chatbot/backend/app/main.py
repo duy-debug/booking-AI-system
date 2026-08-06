@@ -6,9 +6,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.core.config import Settings, load_runtime_environment
-from app.core.logging import configure_logging
 from app.dependencies import application_container_lifespan
+from app.infrastructure.context_store import (
+    Settings,
+    TraceMiddleware,
+    configure_logging,
+    load_runtime_environment,
+)
 from app.transport.chat_api import router as chat_router
 
 
@@ -44,6 +48,10 @@ def create_app(settings: Settings) -> FastAPI:
             yield
 
     application = FastAPI(lifespan=lifespan)
+    application.add_middleware(
+        TraceMiddleware,
+        service="booking-chatbot",
+    )
     application.include_router(chat_router)
     return application
 
@@ -56,16 +64,13 @@ _log_format = os.getenv("LOG_FORMAT", "console")
 _log_json_path = os.getenv("LOG_JSON_PATH") or None
 _log_max_bytes = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))
 _log_backup_count = int(os.getenv("LOG_BACKUP_COUNT", "5"))
-_log_full_instructions = _environment_bool("LOG_FULL_INSTRUCTIONS")
-_log_raw_chat_messages = _environment_bool("LOG_RAW_CHAT_MESSAGES")
-_log_raw_chat_responses = _environment_bool("LOG_RAW_CHAT_RESPONSES")
-
 configure_logging(
     level=_log_level,
     log_format=_log_format,
     json_path=_log_json_path,
     max_bytes=_log_max_bytes,
     backup_count=_log_backup_count,
+    service="booking-chatbot",
 )
 
 app = create_app(
@@ -82,6 +87,8 @@ app = create_app(
         dialog_intent_tool_enabled=_environment_bool(
             "DIALOG_INTENT_TOOL_ENABLED", default=True
         ),
+        llm_nlu_required=_environment_bool("LLM_NLU_REQUIRED", default=True),
+        llm_nlg_required=_environment_bool("LLM_NLG_REQUIRED", default=True),
         embedding_model_name=os.getenv(
             "EMBED_MODEL_NAME",
             "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
@@ -94,13 +101,5 @@ app = create_app(
         rag_hybrid_score_threshold=float(
             os.getenv("RAG_HYBRID_SCORE_THRESHOLD", "0.45")
         ),
-        log_level=_log_level,
-        log_format=_log_format,
-        log_json_path=_log_json_path,
-        log_max_bytes=_log_max_bytes,
-        log_backup_count=_log_backup_count,
-        log_full_instructions=_log_full_instructions,
-        log_raw_chat_messages=_log_raw_chat_messages,
-        log_raw_chat_responses=_log_raw_chat_responses,
     )
 )

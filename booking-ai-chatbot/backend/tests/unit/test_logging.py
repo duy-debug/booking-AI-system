@@ -12,7 +12,7 @@ from types import TracebackType
 
 import pytest
 
-from app.core.logging import (
+from app.infrastructure.context_store import (
     JsonFormatter,
     bind_conversation,
     bind_turn,

@@ -9,29 +9,27 @@ import httpx
 import pytest
 
 from app.application.handlers.search_shop_handler import SearchShopHandler
-from app.application.ports.llm_gateway import (
-    LLMGatewayUnavailableError,
-    LLMMessage,
-    LLMResponse,
-)
-from app.core.config import Settings
 from app.dependencies import ApplicationContainer, create_application_container
 from app.dialog.dialog_controller import DialogController, DialogTurnInput, DialogTurnResult
-from app.dialog.entity_resolution import (
+from app.dialog.nlu import (
     EntityResolutionCoordinator,
     EntityResolutionResult,
     EntityResolutionStatus,
-)
-from app.dialog.nlu import (
-    DeterministicNLU,
     NLUEntityKind,
+    NLUProcessor,
     NLUResolutionStatus,
     NLUResult,
     NLUSource,
 )
-from app.domain.booking import Shop
 from app.domain.booking_context import BookingContext
+from app.domain.booking_models import Shop
 from app.domain.booking_state import BookingState
+from app.infrastructure.context_store import Settings
+from app.infrastructure.gemini_client import (
+    LLMGatewayUnavailableError,
+    LLMMessage,
+    LLMResponse,
+)
 from app.transport.chat_api import _process_chat_message
 from app.transport.schemas import ChatRequest
 
@@ -163,7 +161,7 @@ def request(message: str) -> ChatRequest:
 
 def force_unresolved(container: ApplicationContainer) -> AlwaysUnresolvedNLU:
     nlu = AlwaysUnresolvedNLU()
-    container.deterministic_nlu = cast(DeterministicNLU, nlu)
+    container.nlu_processor = cast(NLUProcessor, nlu)
     return nlu
 
 
@@ -180,7 +178,7 @@ async def test_deterministic_resolved_does_not_call_llm(
     container, gateway, external_requests = runtime
 
     search_shop = FakeSearchShopHandler()
-    container.tool_bridge._search_shop_handler = search_shop
+    container.action_registry._search_shop_handler = search_shop
 
     response = await _process_chat_message(
         request=request("Tôi muốn đặt lịch"),
@@ -268,7 +266,7 @@ async def test_unresolved_then_valid_people_output_runs_one_controller_turn(
 
 
 @pytest.mark.asyncio
-async def test_composed_deterministic_nlu_routes_unknown_text_to_llm_fallback(
+async def test_composed_nlu_processor_routes_unknown_text_to_llm_fallback(
     runtime: tuple[ApplicationContainer, FakeLLMGateway, list[httpx.Request]],
 ) -> None:
     container, gateway, external_requests = runtime

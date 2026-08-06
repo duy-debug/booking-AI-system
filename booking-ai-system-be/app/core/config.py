@@ -35,6 +35,18 @@ class Settings(BaseSettings):
     SHOP_TIMEZONE: str = "Asia/Ho_Chi_Minh"
     MINIMUM_BOOKING_ADVANCE_MINUTES: int = 15
 
+    # Structured logging
+    APP_ENV: str = "development"
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "console"
+    LOG_USER_MESSAGES: bool = False
+    LOG_AI_MESSAGES: bool = False
+    LOG_LLM_PROMPTS: bool = False
+    LOG_LLM_RAW_RESPONSE: bool = False
+    LOG_POS_PAYLOADS: bool = False
+    LOG_QDRANT_CONTENT: bool = False
+    LOG_DATABASE_QUERIES: bool = False
+
     # Khung giờ hoạt động mặc định dùng khi shop không có ca nào trong ngày.
     BUSINESS_HOURS_OPEN: str = "09:00"
     BUSINESS_HOURS_CLOSE: str = "22:00"

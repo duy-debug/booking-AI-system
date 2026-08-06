@@ -7,9 +7,14 @@ from uuid import UUID
 import pytest
 
 from app.application.handlers.search_shop_handler import SearchShopHandler
-from app.application.ports.booking_gateway import BookingGateway
-from app.domain.booking import Booking, Customer, Service, Shop
-from app.domain.exceptions import InvalidBookingDataError
+from app.domain.booking_models import (
+    Booking,
+    BookingGateway,
+    Course,
+    Customer,
+    InvalidBookingDataError,
+    Shop,
+)
 
 SHOP = Shop(
     shop_id=UUID("11111111-1111-1111-1111-111111111111"),
@@ -38,17 +43,17 @@ class FakeBookingGateway:
             raise self.error
         return self.shops
 
-    async def search_services(
+    async def search_courses(
         self,
         shop_id: UUID,
         query: str | None = None,
-    ) -> list[Service]:
-        raise AssertionError("Unexpected search_services call.")
+    ) -> list[Course]:
+        raise AssertionError("Unexpected search_courses call.")
 
     async def check_availability(
         self,
         shop_id: UUID,
-        service_id: UUID,
+        course_id: UUID,
         booking_date: date,
     ) -> list[time]:
         raise AssertionError("Unexpected check_availability call.")
@@ -56,7 +61,7 @@ class FakeBookingGateway:
     async def create_booking(
         self,
         shop_id: UUID,
-        service_id: UUID,
+        course_id: UUID,
         customer: Customer,
         booking_date: date,
         start_time: time,

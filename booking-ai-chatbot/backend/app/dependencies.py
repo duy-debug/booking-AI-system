@@ -10,44 +10,46 @@ from typing import cast
 import httpx
 from qdrant_client import QdrantClient
 
+from app.application.action_registry import ActionRegistry
+from app.application.handlers.cancel_booking_handler import CancelBookingHandler
 from app.application.handlers.check_availability_handler import (
     CheckAvailabilityHandler,
 )
-from app.application.handlers.collect_customer_handler import CollectCustomerHandler
-from app.application.handlers.confirm_phone_handler import ConfirmPhoneHandler
+from app.application.handlers.check_customer_handler import CheckCustomerHandler
 from app.application.handlers.create_booking_handler import CreateBookingHandler
-from app.application.handlers.search_service_handler import SearchServiceHandler
+from app.application.handlers.lookup_booking_handler import LookupBookingHandler
+from app.application.handlers.reschedule_booking_handler import RescheduleBookingHandler
+from app.application.handlers.search_course_handler import SearchCourseHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
-from app.application.ports.booking_gateway import BookingGateway, TherapistAvailabilityGateway
-from app.application.ports.knowledge_gateway import KnowledgeGateway
-from app.application.ports.llm_gateway import LLMGateway
-from app.core.config import Settings
+from app.application.handlers.select_booking_info_handler import SelectBookingInfoHandler
+from app.application.handlers.select_schedule_handler import SelectScheduleHandler
 from app.dialog.dialog_controller import DialogController
-from app.dialog.entity_resolution import EntityResolutionCoordinator
 from app.dialog.flow_loader import FlowDefinition, FlowLoader
 from app.dialog.instruction_builder import InstructionBuilder
 from app.dialog.nlu import (
-    DeterministicNLU,
+    EntityResolutionCoordinator,
     LLMNLUFallback,
+    NLUProcessor,
     StateIntentPolicy,
     build_state_intent_policy,
 )
+from app.dialog.response_generator import ResponseGenerator
 from app.dialog.state_machine import StateMachine
-from app.dialog.tool_bridge import ToolBridge
 from app.domain.booking_context import BookingContext
-from app.infrastructure.booking_api.http_booking_gateway import HTTPBookingGateway
-from app.infrastructure.cache.memory_cache import MemoryCache
-from app.infrastructure.llm.gemini_llm_gateway import GeminiLLMGateway
-from app.infrastructure.vector_db.qdrant_knowledge_gateway import (
-    QdrantKnowledgeGateway,
+from app.domain.booking_models import BookingGateway, TherapistAvailabilityGateway
+from app.infrastructure.context_store import ContextStore, Settings
+from app.infrastructure.gemini_client import GeminiClient, LLMGateway
+from app.infrastructure.pos_api_client import PosApiClient
+from app.infrastructure.qdrant_client import (
+    FAQManager,
+    KnowledgeGateway,
+    KnowledgeQdrantClient,
     QdrantQueryClient,
+    SentenceTransformerEmbedding,
 )
-from app.rag.semantic_embedding import SentenceTransformerEmbedding
-from app.sidecar.faq_manager import FAQManager
 
 _MAX_CONVERSATION_ID_LENGTH = 128
 _RAW_PHONE_PATTERN = re.compile(r"\+?\d{9,15}")
-
 
 class ConversationContextError(Exception):
     """Base error for conversation context lifecycle failures."""
@@ -68,7 +70,7 @@ class InvalidConversationContextError(ConversationContextError):
 class ConversationContextStore:
     """Coordinates booking-context persistence in the in-process cache."""
 
-    def __init__(self, *, cache: MemoryCache) -> None:
+    def __init__(self, *, cache: ContextStore) -> None:
         self._cache = cache
 
     async def get_or_create(self, conversation_id: str) -> BookingContext:
@@ -121,17 +123,23 @@ class ApplicationContainer:
     http_client: httpx.AsyncClient
     booking_gateway: BookingGateway
     dialog_controller: DialogController
-    tool_bridge: ToolBridge
+    action_registry: ActionRegistry
     state_machine: StateMachine
     flow_definition: FlowDefinition
-    memory_cache: MemoryCache
+    memory_cache: ContextStore
     conversation_context_store: ConversationContextStore
     instruction_builder: InstructionBuilder
-    deterministic_nlu: DeterministicNLU
+    response_generator: ResponseGenerator
+    check_customer_handler: CheckCustomerHandler
+    select_booking_info_handler: SelectBookingInfoHandler
+    select_schedule_handler: SelectScheduleHandler
+    nlu_processor: NLUProcessor | None
     state_intent_policy: StateIntentPolicy
     entity_resolution_coordinator: EntityResolutionCoordinator
     llm_gateway: LLMGateway
     llm_nlu_fallback: LLMNLUFallback
+    llm_nlu_required: bool
+    llm_nlg_required: bool
     faq_manager: FAQManager
     knowledge_gateway: KnowledgeGateway | None
     _handlers: tuple[object, ...] = field(repr=False)
@@ -181,23 +189,27 @@ async def create_application_container(
             enable_faq=True,
             enable_discovery=True,
         )
-        booking_gateway: BookingGateway = HTTPBookingGateway(
+        booking_gateway: BookingGateway = PosApiClient(
             client=client,
             base_url=settings.pos_base_url,
             timeout_seconds=settings.pos_timeout_seconds,
         )
         search_shop_handler = SearchShopHandler(booking_gateway)
-        search_service_handler = SearchServiceHandler(booking_gateway)
+        search_course_handler = SearchCourseHandler(booking_gateway)
         check_availability_handler = CheckAvailabilityHandler(booking_gateway)
-        collect_customer_handler = CollectCustomerHandler(booking_gateway)
-        confirm_phone_handler = ConfirmPhoneHandler()
+        check_customer_handler = CheckCustomerHandler(booking_gateway)
+        select_booking_info_handler = SelectBookingInfoHandler()
+        select_schedule_handler = SelectScheduleHandler()
         create_booking_handler = CreateBookingHandler(booking_gateway)
+        lookup_booking_handler = LookupBookingHandler(booking_gateway)
+        reschedule_booking_handler = RescheduleBookingHandler(booking_gateway)
+        cancel_booking_handler = CancelBookingHandler(booking_gateway)
         entity_resolution_coordinator = EntityResolutionCoordinator(
             search_shop_handler=search_shop_handler,
-            search_service_handler=search_service_handler,
+            search_course_handler=search_course_handler,
             booking_gateway=cast(TherapistAvailabilityGateway, booking_gateway),
         )
-        configured_llm_gateway = llm_gateway or GeminiLLMGateway(
+        configured_llm_gateway = llm_gateway or GeminiClient(
             client=client,
             api_key=settings.gemini_api_key,
             base_url=settings.gemini_base_url,
@@ -205,29 +217,38 @@ async def create_application_container(
         )
         handlers: tuple[object, ...] = (
             search_shop_handler,
-            search_service_handler,
+            search_course_handler,
             check_availability_handler,
-            collect_customer_handler,
-            confirm_phone_handler,
+            check_customer_handler,
+            select_booking_info_handler,
+            select_schedule_handler,
             create_booking_handler,
+            lookup_booking_handler,
+            reschedule_booking_handler,
+            cancel_booking_handler,
         )
-        tool_bridge = ToolBridge(
+        action_registry = ActionRegistry(
             search_shop_handler=search_shop_handler,
             check_availability_handler=check_availability_handler,
-            collect_customer_handler=collect_customer_handler,
-            confirm_phone_handler=confirm_phone_handler,
             create_booking_handler=create_booking_handler,
+            select_booking_info_handler=select_booking_info_handler,
+            select_schedule_handler=select_schedule_handler,
+            check_customer_handler=check_customer_handler,
         )
         state_machine = StateMachine(flow_definition)
         dialog_controller = DialogController(
             flow=flow_definition,
             state_machine=state_machine,
-            tool_bridge=tool_bridge,
+            action_registry=action_registry,
             change_rules=change_rules,
             max_auto_transitions=settings.max_auto_transitions,
         )
-        memory_cache = MemoryCache()
+        memory_cache = ContextStore()
         instruction_builder = InstructionBuilder()
+        response_generator = ResponseGenerator(
+            configured_llm_gateway,
+            instruction_builder,
+        )
         configured_knowledge_gateway = knowledge_gateway
         if configured_knowledge_gateway is None and settings.knowledge_qdrant_enabled:
             qdrant_client = QdrantClient(
@@ -235,7 +256,7 @@ async def create_application_container(
                 port=settings.qdrant_port,
                 api_key=settings.qdrant_api_key,
             )
-            configured_knowledge_gateway = QdrantKnowledgeGateway(
+            configured_knowledge_gateway = KnowledgeQdrantClient(
                 client=cast(QdrantQueryClient, qdrant_client),
                 embedding=SentenceTransformerEmbedding(
                     settings.embedding_model_name
@@ -246,15 +267,23 @@ async def create_application_container(
             http_client=client,
             booking_gateway=booking_gateway,
             dialog_controller=dialog_controller,
-            tool_bridge=tool_bridge,
+            action_registry=action_registry,
             state_machine=state_machine,
             flow_definition=flow_definition,
             memory_cache=memory_cache,
             conversation_context_store=ConversationContextStore(cache=memory_cache),
             instruction_builder=instruction_builder,
-            deterministic_nlu=DeterministicNLU(
-                intent_policy=state_intent_policy,
-                unknown_as_unresolved=True,
+            response_generator=response_generator,
+            check_customer_handler=check_customer_handler,
+            select_booking_info_handler=select_booking_info_handler,
+            select_schedule_handler=select_schedule_handler,
+            nlu_processor=(
+                None
+                if settings.llm_nlu_required
+                else NLUProcessor(
+                    intent_policy=state_intent_policy,
+                    unknown_as_unresolved=True,
+                )
             ),
             state_intent_policy=state_intent_policy,
             entity_resolution_coordinator=entity_resolution_coordinator,
@@ -268,6 +297,8 @@ async def create_application_container(
                     and settings.dialog_intent_tool_enabled
                 ),
             ),
+            llm_nlu_required=settings.llm_nlu_required,
+            llm_nlg_required=settings.llm_nlg_required,
             faq_manager=FAQManager(
                 knowledge_gateway=configured_knowledge_gateway,
                 instruction_builder=instruction_builder,
@@ -329,6 +360,10 @@ def _validate_settings(settings: Settings) -> None:
         raise ValueError("Maximum auto transitions must be at least one.")
     if type(settings.enable_llm_nlu_fallback) is not bool:
         raise ValueError("LLM NLU fallback enabled flag must be boolean.")
+    if type(settings.llm_nlu_required) is not bool:
+        raise ValueError("LLM NLU required flag must be boolean.")
+    if type(settings.llm_nlg_required) is not bool:
+        raise ValueError("LLM NLG required flag must be boolean.")
     if (
         isinstance(settings.llm_nlu_min_confidence, bool)
         or not isinstance(settings.llm_nlu_min_confidence, int | float)

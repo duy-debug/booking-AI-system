@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from app.rag.markdown_ingestion import (
+from app.infrastructure.qdrant_client import (
     MarkdownKnowledgeLoader,
     SectionAwareMarkdownChunker,
 )

@@ -8,31 +8,27 @@ from uuid import UUID
 
 import pytest
 
-from app.application.ports.booking_gateway import (
+from app.domain.booking_models import (
     AvailabilityRequest,
+    Booking,
     BookingGateway,
     ChildReservationReference,
+    Course,
     CourseSearchRequest,
     CreateBookingRequest,
     CreateBookingResult,
+    Customer,
     CustomerVerificationRequest,
     CustomerVerificationResult,
     FinalAvailabilityRequest,
     FinalAvailabilityResult,
-)
-from app.domain.booking import (
-    Booking,
-    Customer,
-    Service,
-    Shop,
-    TherapistPreference,
-    TherapistPreferenceType,
-)
-from app.domain.exceptions import (
     InvalidBookingDataError,
     InvalidCourseSelectionError,
     InvalidCustomerCountError,
     InvalidDurationError,
+    Shop,
+    TherapistPreference,
+    TherapistPreferenceType,
 )
 
 SHOP_ID = UUID("11111111-1111-1111-1111-111111111111")
@@ -43,8 +39,8 @@ RESERVATION_ID = UUID("55555555-5555-5555-5555-555555555555")
 BOOKING_DATE = date(2026, 8, 1)
 START_TIME = time(10, 30)
 SHOP = Shop(shop_id=SHOP_ID, name="Central Spa")
-SERVICE = Service(
-    service_id=SERVICE_ID,
+COURSE = Course(
+    course_id=SERVICE_ID,
     name="Aromatherapy",
     duration_minutes=60,
     price=Decimal("500000.00"),
@@ -54,7 +50,7 @@ BOOKING = Booking(
     booking_id=BOOKING_ID,
     status="confirmed",
     shop=SHOP,
-    service=SERVICE,
+    main_course=COURSE,
     customer=CUSTOMER,
     booking_date=BOOKING_DATE,
     start_time=START_TIME,
@@ -108,11 +104,11 @@ class FakeBookingGateway:
     async def search_shops(self, query: str | None = None) -> list[Shop]:
         return [SHOP]
 
-    async def search_services(
+    async def search_courses(
         self,
         request: CourseSearchRequest,
-    ) -> list[Service]:
-        return [SERVICE]
+    ) -> list[Course]:
+        return [COURSE]
 
     async def get_available_slots(
         self,
@@ -218,7 +214,7 @@ def test_availability_request_rejects_invalid_duration(
         )
 
 
-def test_availability_request_rejects_duplicate_service_ids() -> None:
+def test_availability_request_rejects_duplicate_course_ids() -> None:
     with pytest.raises(InvalidCourseSelectionError):
         AvailabilityRequest(
             SHOP_ID,
@@ -274,7 +270,7 @@ def test_create_result_rejects_duplicate_child_reservation_ids() -> None:
 async def test_fake_gateway_supports_complete_contract_and_records_dtos() -> None:
     gateway: BookingGateway = FakeBookingGateway()
 
-    services = await gateway.search_services(COURSE_REQUEST)
+    courses = await gateway.search_courses(COURSE_REQUEST)
     slots = await gateway.get_available_slots(AVAILABILITY_REQUEST)
     verification = await gateway.verify_customer(CUSTOMER_REQUEST)
     final = await gateway.check_final_availability(FINAL_REQUEST)
@@ -287,7 +283,7 @@ async def test_fake_gateway_supports_complete_contract_and_records_dtos() -> Non
     )
     cancelled = await gateway.cancel_booking(BOOKING_ID)
 
-    assert services == [SERVICE]
+    assert courses == [COURSE]
     assert slots == (START_TIME,)
     assert verification.member_rank == "gold"
     assert final.available is True

@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.domain.exceptions import (
+from app.domain.booking_models import (
     BookingConflictError,
     BookingContextNotReadyError,
     BookingNotFoundError,

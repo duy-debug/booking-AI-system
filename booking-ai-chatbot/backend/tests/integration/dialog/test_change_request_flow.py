@@ -9,43 +9,41 @@ from uuid import UUID
 
 import pytest
 
-from app.application.handlers.search_service_handler import SearchServiceHandler
+from app.application.action_registry import ActionRegistry
+from app.application.handlers.search_course_handler import SearchCourseHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.dialog.dialog_controller import (
     DialogController,
     DialogTurnResult,
     DialogTurnStatus,
 )
-from app.dialog.entity_resolution import (
-    EntityResolutionCoordinator,
-    EntityResolutionStatus,
-    entity_resolution_to_dialog_turn_input,
-)
 from app.dialog.flow_loader import FlowLoader
 from app.dialog.instruction_builder import DialogResponse, InstructionBuilder
 from app.dialog.nlu import (
-    DeterministicNLU,
+    EntityResolutionCoordinator,
+    EntityResolutionStatus,
+    NLUProcessor,
     NLUResolutionStatus,
     StateIntentPolicy,
     build_state_intent_policy,
+    entity_resolution_to_dialog_turn_input,
     to_dialog_turn_input,
 )
 from app.dialog.state_machine import StateMachine
-from app.dialog.tool_bridge import ToolBridge
-from app.domain.booking import (
+from app.domain.booking_context import BookingContext
+from app.domain.booking_models import (
+    Course,
     Customer,
-    Service,
     Shop,
     TherapistPreference,
     TherapistPreferenceType,
 )
-from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 
-FLOW_DIR = Path(__file__).resolve().parents[3] / "app" / "dialog" / "flows"
+FLOW_DIR = Path(__file__).resolve().parents[3] / "app" / "dialog"
 OLD_SHOP = Shop(UUID("11111111-1111-1111-1111-111111111111"), "Old Shop")
 NEW_SHOP = Shop(UUID("22222222-2222-2222-2222-222222222222"), "District 1")
-SERVICE = Service(
+COURSE = Course(
     UUID("33333333-3333-3333-3333-333333333333"),
     "Massage",
     60,
@@ -54,23 +52,23 @@ SERVICE = Service(
 
 
 def runtime() -> tuple[
-    DeterministicNLU,
+    NLUProcessor,
     DialogController,
     InstructionBuilder,
     StateIntentPolicy,
 ]:
-    flow = FlowLoader.load(FLOW_DIR / "booking-flow.json")
+    flow = FlowLoader.load(FLOW_DIR / "booking_flow.json")
     policy = build_state_intent_policy(flow)
     controller = DialogController(
         flow=flow,
         state_machine=StateMachine(flow),
-        tool_bridge=ToolBridge(),
+        action_registry=ActionRegistry(),
         change_rules=FlowLoader.load_change_handlers(
-            FLOW_DIR / "change-handlers.json"
+            FLOW_DIR / "booking_flow.json"
         ),
     )
     return (
-        DeterministicNLU(
+        NLUProcessor(
             intent_policy=policy,
             today_provider=lambda: date(2026, 8, 1),
         ),
@@ -85,7 +83,7 @@ def context(state: BookingState = BookingState.AWAITING_CONFIRMATION) -> Booking
         conversation_id="conversation-change",
         state=state,
         shop=OLD_SHOP,
-        service=SERVICE,
+        main_course=COURSE,
         customer=Customer("0901234567", "An"),
         booking_date=date(2026, 8, 5),
         start_time=time(10, 0),
@@ -127,7 +125,7 @@ async def test_change_date_without_value_resets_dependencies_and_asks_again() ->
     assert booking_context.start_time is None
     assert booking_context.therapist_preference is None
     assert booking_context.shop is OLD_SHOP
-    assert booking_context.service is SERVICE
+    assert booking_context.main_course is COURSE
     assert response.text == "Bạn muốn đổi sang ngày nào?"
 
 
@@ -163,7 +161,7 @@ async def test_reselect_shop_clears_only_shop_dependencies() -> None:
 
     assert result.final_state is BookingState.SELECTING_SHOP
     assert booking_context.shop is None
-    assert booking_context.service is None
+    assert booking_context.main_course is None
     assert booking_context.booking_date == date(2026, 8, 5)
     assert response.text == "Bạn muốn đổi sang cửa hàng nào?"
 
@@ -183,7 +181,7 @@ class ServiceSearch:
         self,
         shop_id: UUID,
         query: str | None = None,
-    ) -> list[Service]:
+    ) -> list[Course]:
         return []
 
 
@@ -198,7 +196,7 @@ async def test_change_shop_resolves_before_committing_new_shop() -> None:
     search = ShopSearch([NEW_SHOP])
     resolver = EntityResolutionCoordinator(
         search_shop_handler=cast(SearchShopHandler, search),
-        search_service_handler=cast(SearchServiceHandler, ServiceSearch()),
+        search_course_handler=cast(SearchCourseHandler, ServiceSearch()),
     )
 
     resolution = await resolver.resolve(
@@ -216,7 +214,7 @@ async def test_change_shop_resolves_before_committing_new_shop() -> None:
     assert search.calls == 1
     assert result.final_state is BookingState.SELECTING_DATE
     assert booking_context.shop is NEW_SHOP
-    assert booking_context.service is None
+    assert booking_context.main_course is None
 
 
 @pytest.mark.asyncio
@@ -230,7 +228,7 @@ async def test_ambiguous_shop_change_does_not_mutate_context() -> None:
     )
     resolver = EntityResolutionCoordinator(
         search_shop_handler=cast(SearchShopHandler, ShopSearch([NEW_SHOP, OLD_SHOP])),
-        search_service_handler=cast(SearchServiceHandler, ServiceSearch()),
+        search_course_handler=cast(SearchCourseHandler, ServiceSearch()),
     )
 
     resolution = await resolver.resolve(
@@ -254,7 +252,7 @@ async def test_not_found_shop_change_does_not_mutate_context() -> None:
     )
     resolver = EntityResolutionCoordinator(
         search_shop_handler=cast(SearchShopHandler, ShopSearch([])),
-        search_service_handler=cast(SearchServiceHandler, ServiceSearch()),
+        search_course_handler=cast(SearchCourseHandler, ServiceSearch()),
     )
 
     resolution = await resolver.resolve(

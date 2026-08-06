@@ -1,8 +1,14 @@
+import logging
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
-from app.schemas.booking import BookingEligibilityCheckInput, BookingEligibilityCheckResponse
+from app.infrastructure.logging_config import log_event
+from app.schemas.booking import (
+    BookingEligibilityCheckInput,
+    BookingEligibilityCheckResponse,
+)
 from app.schemas.common import DataResponse
 from app.services import EligibilityService
 
@@ -18,4 +24,12 @@ router = APIRouter(prefix="/api/booking-eligibility-checks", tags=["public-booki
 def check_eligibility(body: BookingEligibilityCheckInput, db: Session = Depends(get_db)):
     service = EligibilityService(db)
     result = service.check_eligibility(phone=body.phone, shop_id=body.shop_id)
+    log_event(
+        logging.INFO,
+        "EligibilityService",
+        "pos_business_rules_checked",
+        operation="verify_customer",
+        rules=["shop_is_active", "customer_not_in_ng_list", "customer_lookup"],
+        status="passed",
+    )
     return DataResponse(data=BookingEligibilityCheckResponse.model_validate(result))

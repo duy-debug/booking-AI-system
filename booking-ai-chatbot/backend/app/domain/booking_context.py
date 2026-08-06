@@ -5,31 +5,29 @@ from datetime import date, time
 from enum import StrEnum
 from uuid import UUID
 
-from app.domain.booking import (
+from app.domain.booking_models import (
     Booking,
     BookingOption,
+    Course,
     CourseSelection,
     Customer,
-    Service,
-    Shop,
-    TherapistPreference,
-    TherapistPreferenceType,
-)
-from app.domain.booking_state import BookingState
-from app.domain.exceptions import (
     InvalidBookingDataError,
     InvalidCourseSelectionError,
     InvalidCustomerCountError,
     InvalidDurationError,
+    Shop,
     TherapistNotAllowedForGroupError,
+    TherapistPreference,
+    TherapistPreferenceType,
 )
+from app.domain.booking_state import BookingState
 
 
-class ServiceSelectionMode(StrEnum):
-    """Authoritative sub-step while the public dialog state selects services."""
+class CourseSelectionMode(StrEnum):
+    """Authoritative sub-step while the public dialog state selects courses."""
 
     NONE = "none"
-    MAIN = "main_service"
+    MAIN = "main_course"
     ADDON = "addon"
 
 
@@ -43,8 +41,8 @@ class BookingContext:
     shop: Shop | None = None
     suggested_shops: tuple[Shop, ...] = ()
     suggested_shops_loaded: bool = False
-    service: Service | None = None
-    service_selection_mode: ServiceSelectionMode = ServiceSelectionMode.NONE
+    main_course: Course | None = None
+    course_selection_mode: CourseSelectionMode = CourseSelectionMode.NONE
     customer: Customer | None = None
     customer_id: str | None = None
     booking_date: date | None = None
@@ -56,7 +54,7 @@ class BookingContext:
     therapist_preference: TherapistPreference | None = None
     therapist_verified: bool = False
     options: tuple[BookingOption, ...] = ()
-    addons: tuple[Service, ...] = ()
+    addons: tuple[Course, ...] = ()
     available_slots: tuple[time, ...] | None = None
     booking_id: UUID | None = None
     phone: str | None = None
@@ -73,11 +71,71 @@ class BookingContext:
     last_failure_code: str | None = None
 
     @property
+    def shop_id(self) -> UUID | None:
+        return self.shop.shop_id if self.shop is not None else None
+
+    @property
+    def shop_name(self) -> str | None:
+        return self.shop.name if self.shop is not None else None
+
+    @property
+    def people_count(self) -> int | None:
+        return self.num_customer
+
+    @property
+    def main_course_id(self) -> UUID | None:
+        return self.main_course.course_id if self.main_course is not None else None
+
+    @property
+    def main_course_name(self) -> str | None:
+        return self.main_course.name if self.main_course is not None else None
+
+    @property
+    def addon_ids(self) -> tuple[UUID, ...]:
+        return tuple(addon.course_id for addon in self.addons)
+
+    @property
+    def therapist_id(self) -> str | None:
+        return (
+            self.therapist_preference.therapist_id
+            if self.therapist_preference is not None
+            else None
+        )
+
+    @property
+    def therapist_name(self) -> str | None:
+        return (
+            self.therapist_preference.therapist_name
+            if self.therapist_preference is not None
+            else None
+        )
+
+    @property
+    def skip_therapist(self) -> bool:
+        return self.therapist_preference is None and self.therapist_verified
+
+    @property
+    def customer_name(self) -> str | None:
+        return self.customer.name if self.customer is not None else None
+
+    @property
+    def ng_list_status(self) -> str:
+        if not self.ng_list_checked:
+            return "unchecked"
+        return "blocked" if self.is_ng_customer else "allowed"
+
+    @property
+    def confirmation_status(self) -> str:
+        if self.state is BookingState.COMPLETED:
+            return "completed"
+        return "confirmed" if self.phone_confirmed else "pending"
+
+    @property
     def total_duration_minutes(self) -> int | None:
         """Return the POS-authoritative total duration of selected courses."""
-        if self.service is None:
+        if self.main_course is None:
             return self.duration_minutes
-        return self.service.duration_minutes + sum(
+        return self.main_course.duration_minutes + sum(
             addon.duration_minutes for addon in self.addons
         )
 
@@ -85,7 +143,7 @@ class BookingContext:
         """Return whether all data required to create a booking is present."""
         if (
             self.shop is None
-            or self.service is None
+            or self.main_course is None
             or self.customer is None
             or self.booking_date is None
             or self.start_time is None
@@ -102,7 +160,7 @@ class BookingContext:
             return False
 
         try:
-            CourseSelection(main_course=self.service, addons=self.addons)
+            CourseSelection(main_course=self.main_course, addons=self.addons)
         except InvalidCourseSelectionError:
             return False
 
@@ -121,9 +179,9 @@ class BookingContext:
     @property
     def course_selection(self) -> CourseSelection | None:
         """Return the selected main course and add-ons when present."""
-        if self.service is None:
+        if self.main_course is None:
             return None
-        return CourseSelection(main_course=self.service, addons=self.addons)
+        return CourseSelection(main_course=self.main_course, addons=self.addons)
 
     def set_shop(self, shop: Shop | None) -> None:
         """Set a shop and invalidate shop-dependent selections."""
@@ -170,27 +228,27 @@ class BookingContext:
             return
         self.duration_minutes = value
         self._clear_course_and_availability()
-        self.service_selection_mode = ServiceSelectionMode.MAIN
+        self.course_selection_mode = CourseSelectionMode.MAIN
 
     def set_course_selection(self, selection: CourseSelection) -> None:
         """Set the main course and add-ons and invalidate availability."""
-        self.service = selection.main_course
+        self.main_course = selection.main_course
         self.addons = selection.addons
         self.options = ()
         self._clear_availability_and_therapist()
-        self.service_selection_mode = (
-            ServiceSelectionMode.ADDON
+        self.course_selection_mode = (
+            CourseSelectionMode.ADDON
             if not selection.addons
-            else ServiceSelectionMode.NONE
+            else CourseSelectionMode.NONE
         )
 
     def skip_addon(self) -> None:
         """Finish the optional add-on sub-step without changing the main course."""
-        self.service_selection_mode = ServiceSelectionMode.NONE
+        self.course_selection_mode = CourseSelectionMode.NONE
 
-    def set_service(self, service: Service) -> None:
-        """Set a compatible main service without add-ons."""
-        self.set_course_selection(CourseSelection(main_course=service))
+    def set_course(self, course: Course) -> None:
+        """Set a compatible main course without add-ons."""
+        self.set_course_selection(CourseSelection(main_course=course))
 
     def set_available_slots(self, slots: tuple[time, ...]) -> None:
         """Store the latest availability result."""
@@ -278,7 +336,7 @@ class BookingContext:
     def change_shop(self, shop: Shop | None) -> None:
         """Replace the shop and clear only shop-dependent booking data."""
         self.shop = shop
-        self.service = None
+        self.main_course = None
         self.addons = ()
         self.options = ()
         self._clear_availability_and_therapist()
@@ -311,13 +369,13 @@ class BookingContext:
                 "Booking duration must be positive and divisible by 15."
             )
         self.duration_minutes = value
-        self.service = None
+        self.main_course = None
         self.addons = ()
         self.options = ()
         self._clear_availability_and_therapist()
         self._clear_booking_result()
-        self.service_selection_mode = (
-            ServiceSelectionMode.MAIN if value is not None else ServiceSelectionMode.NONE
+        self.course_selection_mode = (
+            CourseSelectionMode.MAIN if value is not None else CourseSelectionMode.NONE
         )
 
     def change_course_selection(
@@ -326,18 +384,18 @@ class BookingContext:
     ) -> None:
         """Replace the course selection while preserving its selected shop."""
         if selection is None:
-            self.service = None
+            self.main_course = None
             self.addons = ()
         else:
-            self.service = selection.main_course
+            self.main_course = selection.main_course
             self.addons = selection.addons
         self.options = ()
         self._clear_availability_and_therapist()
         self._clear_booking_result()
-        self.service_selection_mode = (
-            ServiceSelectionMode.MAIN
+        self.course_selection_mode = (
+            CourseSelectionMode.MAIN
             if selection is None
-            else ServiceSelectionMode.ADDON
+            else CourseSelectionMode.ADDON
         )
 
     def change_start_time(self, start_time: time | None) -> None:
@@ -375,11 +433,11 @@ class BookingContext:
         self._clear_booking_result()
 
     def _clear_course_and_availability(self) -> None:
-        self.service = None
+        self.main_course = None
         self.addons = ()
         self.options = ()
         self._clear_availability_and_therapist()
-        self.service_selection_mode = ServiceSelectionMode.MAIN
+        self.course_selection_mode = CourseSelectionMode.MAIN
 
     def _clear_availability_and_therapist(self) -> None:
         self.available_slots = None
@@ -401,7 +459,7 @@ class BookingContext:
         turn_sequence = self.turn_sequence
         self.state = BookingState.IDLE
         self.shop = None
-        self.service = None
+        self.main_course = None
         self.customer = None
         self.booking_date = None
         self.requested_booking_date = None
@@ -426,6 +484,6 @@ class BookingContext:
         self.reservation_codes = ()
         self.child_reservation_ids = ()
         self.pending_action = None
-        self.service_selection_mode = ServiceSelectionMode.NONE
+        self.course_selection_mode = CourseSelectionMode.NONE
         self.last_failure_code = None
         self.turn_sequence = turn_sequence

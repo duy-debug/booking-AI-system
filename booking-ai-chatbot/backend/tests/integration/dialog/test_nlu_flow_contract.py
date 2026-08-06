@@ -1,14 +1,15 @@
-"""Integration tests for deterministic NLU against the real dialog flow."""
+"""Integration tests for rule-based NLU against the real dialog flow."""
 
 from datetime import date, time
 from pathlib import Path
 
 import pytest
 
+from app.application.action_registry import ActionExecutionContext, ActionRegistry
 from app.dialog.flow_loader import FlowLoader
 from app.dialog.nlu import (
-    DeterministicNLU,
     NLUEntityKind,
+    NLUProcessor,
     NLUResolutionStatus,
     NLUResultNotDispatchableError,
     StateIntentPolicy,
@@ -16,7 +17,6 @@ from app.dialog.nlu import (
     to_dialog_turn_input,
 )
 from app.dialog.state_machine import StateMachine
-from app.dialog.tool_bridge import ActionExecutionContext, ToolBridge
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 
@@ -24,8 +24,7 @@ FLOW_PATH = (
     Path(__file__).resolve().parents[3]
     / "app"
     / "dialog"
-    / "flows"
-    / "booking-flow.json"
+    / "booking_flow.json"
 )
 PARSER_OUTPUT_INTENTS = {
     "ask_question",
@@ -48,8 +47,8 @@ OUT_OF_FLOW_INTENTS = {"ask_question"}
 SYSTEM_EVENTS = {"booking_failed", "booking_succeeded", "cancel_flow"}
 
 
-def nlu(policy: StateIntentPolicy) -> DeterministicNLU:
-    return DeterministicNLU(
+def nlu(policy: StateIntentPolicy) -> NLUProcessor:
+    return NLUProcessor(
         intent_policy=policy,
         today_provider=lambda: date(2026, 8, 1),
     )
@@ -113,7 +112,7 @@ async def test_people_result_runs_through_real_flow_and_domain_action() -> None:
     )
     transition = StateMachine(flow).resolve_transition(context, turn.intent)
 
-    report = await ToolBridge().execute_actions(
+    report = await ActionRegistry().execute_actions(
         transition.actions,
         ActionExecutionContext(context, turn.intent, turn.payload),
     )

@@ -1,13 +1,18 @@
+import logging
 from datetime import date, time
 
 from fastapi import APIRouter, Depends, Query
-from app.core.exceptions import AppError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, parse_uuid
-from app.services import SlotService
-from app.schemas.available_slot import AvailableSlotListResponse, AvailableTherapistResponse
+from app.core.exceptions import AppError
+from app.infrastructure.logging_config import log_event
+from app.schemas.available_slot import (
+    AvailableSlotListResponse,
+    AvailableTherapistResponse,
+)
 from app.schemas.common import CollectionResponse
+from app.services import SlotService
 
 router = APIRouter(prefix="/api/shops/{shop_id}", tags=["public-slots"])
 
@@ -43,7 +48,7 @@ def list_available_slots(
     mcid = parse_uuid(main_course_id, "course")
 
     service = SlotService(db)
-    return service.list_available_slots(
+    result = service.list_available_slots(
         shop_id=suid,
         booking_date=bdate,
         requested_start_time=requested_start_time,
@@ -54,6 +59,21 @@ def list_available_slots(
         therapist_id=therapist_id,
         therapist_gender=therapist_gender,
     )
+    log_event(
+        logging.INFO,
+        "SlotService",
+        "pos_business_rules_checked",
+        operation="get_available_slots",
+        rules=[
+            "shop_is_active",
+            "course_is_available",
+            "group_booking_supported",
+            "therapist_rule_valid",
+        ],
+        status="passed",
+        slot_count=len(result.data),
+    )
+    return result
 
 
 # Tra cứu therapist còn trống trong khung giờ — lọc theo giới tính
@@ -83,10 +103,20 @@ def list_available_therapists(
     suid = parse_uuid(shop_id, "shop")
 
     service = SlotService(db)
-    return service.list_available_therapists(
+    result = service.list_available_therapists(
         shop_id=suid,
         booking_date=bdate,
         start_time=st,
         end_time=et,
         gender=gender,
     )
+    log_event(
+        logging.INFO,
+        "SlotService",
+        "pos_business_rules_checked",
+        operation="search_available_therapists",
+        rules=["shop_is_active", "shift_available", "no_reservation_overlap"],
+        status="passed",
+        result_count=len(result.data),
+    )
+    return result

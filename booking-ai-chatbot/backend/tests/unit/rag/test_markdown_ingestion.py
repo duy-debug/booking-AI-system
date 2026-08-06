@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app.rag.markdown_ingestion import (
+from app.infrastructure.qdrant_client import (
     InvalidKnowledgeContentError,
     InvalidKnowledgeEncodingError,
     InvalidKnowledgePathError,

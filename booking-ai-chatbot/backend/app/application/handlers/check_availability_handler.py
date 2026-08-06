@@ -2,10 +2,13 @@
 
 from datetime import time
 
-from app.application.exceptions import SlotConflictError
-from app.application.ports.booking_gateway import AvailabilityRequest, BookingGateway
 from app.domain.booking_context import BookingContext
-from app.domain.exceptions import BookingContextNotReadyError
+from app.domain.booking_models import (
+    AvailabilityRequest,
+    BookingContextNotReadyError,
+    BookingGateway,
+    SlotConflictError,
+)
 
 
 class CheckAvailabilityHandler:
@@ -21,7 +24,7 @@ class CheckAvailabilityHandler:
             or context.booking_date is None
             or context.num_customer is None
             or context.duration_minutes is None
-            or context.service is None
+            or context.main_course is None
         ):
             raise BookingContextNotReadyError(
                 "Shop, date, people, duration and main course are required."
@@ -35,8 +38,8 @@ class CheckAvailabilityHandler:
             booking_date=context.booking_date,
             num_customer=context.num_customer,
             duration_minutes=context.total_duration_minutes or context.duration_minutes,
-            main_course_id=course_selection.main_course.service_id,
-            addon_ids=tuple(addon.service_id for addon in course_selection.addons),
+            main_course_id=course_selection.main_course.course_id,
+            addon_ids=tuple(addon.course_id for addon in course_selection.addons),
             therapist_preference=context.therapist_preference,
         )
         slots = await self._booking_gateway.get_available_slots(request)

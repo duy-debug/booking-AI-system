@@ -6,15 +6,15 @@ from typing import cast
 
 import pytest
 
-from app.application.ports.knowledge_gateway import (
-    KnowledgeDocument,
-    KnowledgeGatewayUnavailableError,
-)
 from app.dialog.dialog_controller import DialogTurnStatus
 from app.dialog.instruction_builder import DialogResponse, InstructionBuilder
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
-from app.sidecar.faq_manager import FAQManager
+from app.infrastructure.qdrant_client import (
+    FAQManager,
+    KnowledgeDocument,
+    KnowledgeGatewayUnavailableError,
+)
 
 
 class FakeKnowledgeGateway:

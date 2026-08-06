@@ -2,8 +2,7 @@
 
 import unicodedata
 
-from app.application.ports.booking_gateway import BookingGateway
-from app.domain.booking import Shop
+from app.domain.booking_models import BookingGateway, Shop
 
 
 class SearchShopHandler:

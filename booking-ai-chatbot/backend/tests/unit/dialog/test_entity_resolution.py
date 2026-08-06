@@ -8,9 +8,9 @@ from uuid import UUID
 
 import pytest
 
-from app.application.handlers.search_service_handler import SearchServiceHandler
+from app.application.handlers.search_course_handler import SearchCourseHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
-from app.dialog.entity_resolution import (
+from app.dialog.nlu import (
     EntityCandidate,
     EntityResolutionCoordinator,
     EntityResolutionNotDispatchableError,
@@ -18,24 +18,22 @@ from app.dialog.entity_resolution import (
     EntityResolutionStatus,
     InvalidCandidateSelectionError,
     InvalidEntityResolutionRequestError,
-    entity_resolution_to_dialog_turn_input,
-)
-from app.dialog.nlu import (
     NLUEntityKind,
     NLUResolutionStatus,
     NLUResult,
     NLUSource,
     StateIntentPolicy,
+    entity_resolution_to_dialog_turn_input,
 )
-from app.domain.booking import (
+from app.domain.booking_context import BookingContext, CourseSelectionMode
+from app.domain.booking_models import (
+    Course,
     CourseSelection,
     CourseType,
-    Service,
     Shop,
     TherapistPreference,
     TherapistPreferenceType,
 )
-from app.domain.booking_context import BookingContext, ServiceSelectionMode
 from app.domain.booking_state import BookingState
 
 SHOP = Shop(
@@ -48,19 +46,19 @@ OTHER_SHOP = Shop(
     "Sen Riverside",
     "Quận 2",
 )
-MAIN = Service(
+MAIN = Course(
     UUID("33333333-3333-3333-3333-333333333333"),
     "Massage thư giãn",
     60,
     Decimal("500000"),
 )
-OTHER_MAIN = Service(
+OTHER_MAIN = Course(
     UUID("44444444-4444-4444-4444-444444444444"),
     "Massage Thái",
     90,
     Decimal("700000"),
 )
-ADDON = Service(
+ADDON = Course(
     UUID("55555555-5555-5555-5555-555555555555"),
     "Đá nóng",
     15,
@@ -88,10 +86,10 @@ class FakeSearchShopHandler:
         return self.results
 
 
-class FakeSearchServiceHandler:
+class FakeSearchCourseHandler:
     def __init__(
         self,
-        results: list[Service] | None = None,
+        results: list[Course] | None = None,
         error: Exception | None = None,
     ) -> None:
         self.results = results or []
@@ -106,7 +104,7 @@ class FakeSearchServiceHandler:
         shop_id: UUID,
         query: str | None = None,
         **kwargs: object,
-    ) -> list[Service]:
+    ) -> list[Course]:
         self.calls += 1
         self.received_shop_id = shop_id
         self.received_query = query
@@ -121,13 +119,13 @@ class FakeSearchServiceHandler:
 
 def coordinator(
     shops: FakeSearchShopHandler | None = None,
-    services: FakeSearchServiceHandler | None = None,
+    courses: FakeSearchCourseHandler | None = None,
 ) -> EntityResolutionCoordinator:
     return EntityResolutionCoordinator(
         search_shop_handler=cast(SearchShopHandler, shops or FakeSearchShopHandler()),
-        search_service_handler=cast(
-            SearchServiceHandler,
-            services or FakeSearchServiceHandler(),
+        search_course_handler=cast(
+            SearchCourseHandler,
+            courses or FakeSearchCourseHandler(),
         ),
     )
 
@@ -164,7 +162,7 @@ def test_candidate_is_immutable_and_filters_unsafe_metadata() -> None:
         {
             "duration_minutes": 60,
             "price": Decimal("500000"),
-            "service_id": str(MAIN.service_id),
+            "course_id": str(MAIN.course_id),
             "token": "secret",
         },
     )
@@ -173,7 +171,7 @@ def test_candidate_is_immutable_and_filters_unsafe_metadata() -> None:
         "duration_minutes": 60,
         "price": Decimal("500000"),
     }
-    assert str(MAIN.service_id) not in repr(candidate.metadata)
+    assert str(MAIN.course_id) not in repr(candidate.metadata)
     assert isinstance(candidate.metadata, MappingProxyType)
 
 
@@ -219,7 +217,7 @@ async def test_shop_not_found_calls_handler_once() -> None:
 
 
 @pytest.mark.asyncio
-async def test_one_shop_resolves_exact_tool_bridge_payload_without_mutation() -> None:
+async def test_one_shop_resolves_exact_action_registry_payload_without_mutation() -> None:
     handler = FakeSearchShopHandler([SHOP])
     context = BookingContext("conversation-1", state=BookingState.SELECTING_SHOP)
     snapshot = deepcopy(context)
@@ -278,9 +276,9 @@ async def test_shop_handler_exception_becomes_safe_failed_result() -> None:
 
 @pytest.mark.asyncio
 async def test_course_requires_shop_before_handler_call() -> None:
-    handler = FakeSearchServiceHandler([MAIN])
+    handler = FakeSearchCourseHandler([MAIN])
 
-    result = await coordinator(services=handler).resolve(
+    result = await coordinator(courses=handler).resolve(
         nlu_result=entity_request(NLUEntityKind.COURSE, "massage"),
         state=BookingState.SELECTING_SERVICE,
         context=BookingContext("conversation-1"),
@@ -293,10 +291,10 @@ async def test_course_requires_shop_before_handler_call() -> None:
 
 @pytest.mark.asyncio
 async def test_course_not_found_uses_shop_and_query_once() -> None:
-    handler = FakeSearchServiceHandler()
+    handler = FakeSearchCourseHandler()
     context = BookingContext("conversation-1", shop=SHOP)
 
-    result = await coordinator(services=handler).resolve(
+    result = await coordinator(courses=handler).resolve(
         nlu_result=entity_request(NLUEntityKind.COURSE, "không có"),
         state=BookingState.SELECTING_SERVICE,
         context=context,
@@ -311,7 +309,7 @@ async def test_course_not_found_uses_shop_and_query_once() -> None:
 
 @pytest.mark.asyncio
 async def test_one_main_course_resolves_course_selection_without_context_mutation() -> None:
-    handler = FakeSearchServiceHandler([MAIN])
+    handler = FakeSearchCourseHandler([MAIN])
     context = BookingContext(
         "conversation-1",
         state=BookingState.SELECTING_SERVICE,
@@ -320,7 +318,7 @@ async def test_one_main_course_resolves_course_selection_without_context_mutatio
     )
     snapshot = deepcopy(context)
 
-    result = await coordinator(services=handler).resolve(
+    result = await coordinator(courses=handler).resolve(
         nlu_result=entity_request(NLUEntityKind.COURSE, "massage"),
         state=context.state,
         context=context,
@@ -343,7 +341,7 @@ async def test_course_resolution_uses_selected_duration_to_disambiguate_main_cou
     )
 
     result = await coordinator(
-        services=FakeSearchServiceHandler([MAIN, OTHER_MAIN])
+        courses=FakeSearchCourseHandler([MAIN, OTHER_MAIN])
     ).resolve(
         nlu_result=entity_request(NLUEntityKind.COURSE, "massage"),
         state=context.state,
@@ -357,22 +355,22 @@ async def test_course_resolution_uses_selected_duration_to_disambiguate_main_cou
 @pytest.mark.asyncio
 async def test_addon_preserves_type_and_requires_existing_main_course() -> None:
     without_main = await coordinator(
-        services=FakeSearchServiceHandler([ADDON])
+        courses=FakeSearchCourseHandler([ADDON])
     ).resolve(
         nlu_result=entity_request(NLUEntityKind.COURSE, "đá nóng"),
         state=BookingState.SELECTING_SERVICE,
         context=BookingContext("conversation-1", shop=SHOP),
     )
     with_main = await coordinator(
-        services=FakeSearchServiceHandler([ADDON])
+        courses=FakeSearchCourseHandler([ADDON])
     ).resolve(
         nlu_result=entity_request(NLUEntityKind.COURSE, "đá nóng"),
         state=BookingState.SELECTING_SERVICE,
         context=BookingContext(
             "conversation-1",
             shop=SHOP,
-            service=MAIN,
-            service_selection_mode=ServiceSelectionMode.ADDON,
+            main_course=MAIN,
+            course_selection_mode=CourseSelectionMode.ADDON,
         ),
     )
 
@@ -386,16 +384,16 @@ async def test_addon_preserves_type_and_requires_existing_main_course() -> None:
 
 @pytest.mark.asyncio
 async def test_addon_mode_queries_only_addons() -> None:
-    handler = FakeSearchServiceHandler([ADDON])
+    handler = FakeSearchCourseHandler([ADDON])
     context = BookingContext(
         "conversation-addon-mode",
         state=BookingState.SELECTING_SERVICE,
         shop=SHOP,
-        service=MAIN,
-        service_selection_mode=ServiceSelectionMode.ADDON,
+        main_course=MAIN,
+        course_selection_mode=CourseSelectionMode.ADDON,
     )
 
-    await coordinator(services=handler).resolve(
+    await coordinator(courses=handler).resolve(
         nlu_result=entity_request(NLUEntityKind.COURSE, "đá nóng"),
         state=context.state,
         context=context,
@@ -407,7 +405,7 @@ async def test_addon_mode_queries_only_addons() -> None:
 @pytest.mark.asyncio
 async def test_multiple_courses_are_ambiguous_with_decimal_metadata() -> None:
     result = await coordinator(
-        services=FakeSearchServiceHandler([MAIN, OTHER_MAIN])
+        courses=FakeSearchCourseHandler([MAIN, OTHER_MAIN])
     ).resolve(
         nlu_result=entity_request(NLUEntityKind.COURSE, "massage"),
         state=BookingState.SELECTING_SERVICE,
@@ -421,14 +419,14 @@ async def test_multiple_courses_are_ambiguous_with_decimal_metadata() -> None:
     )
     assert result.candidates[0].metadata["price"] == Decimal("500000")
     assert isinstance(result.candidates[0].metadata["price"], Decimal)
-    assert str(MAIN.service_id) not in repr(result.candidates)
+    assert str(MAIN.course_id) not in repr(result.candidates)
 
 
 @pytest.mark.asyncio
 async def test_course_handler_exception_becomes_safe_failure() -> None:
     secret = "malformed-response-secret"
     result = await coordinator(
-        services=FakeSearchServiceHandler(error=RuntimeError(secret))
+        courses=FakeSearchCourseHandler(error=RuntimeError(secret))
     ).resolve(
         nlu_result=entity_request(NLUEntityKind.COURSE, "massage"),
         state=BookingState.SELECTING_SERVICE,

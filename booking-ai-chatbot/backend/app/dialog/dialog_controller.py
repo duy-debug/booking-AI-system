@@ -5,6 +5,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
 
+from app.application.action_registry import (
+    ActionExecutionContext,
+    ActionExecutionError,
+    ActionExecutionReport,
+    ActionRegistry,
+    ActionRegistryError,
+)
 from app.dialog.flow_loader import (
     ChangeRule,
     FlowAutoTransition,
@@ -14,13 +21,6 @@ from app.dialog.flow_loader import (
     FlowTransition,
 )
 from app.dialog.state_machine import StateMachine
-from app.dialog.tool_bridge import (
-    ActionExecutionContext,
-    ActionExecutionError,
-    ActionExecutionReport,
-    ToolBridge,
-    ToolBridgeError,
-)
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 
@@ -90,7 +90,7 @@ class DialogController:
         *,
         flow: FlowDefinition,
         state_machine: StateMachine,
-        tool_bridge: ToolBridge,
+        action_registry: ActionRegistry,
         change_rules: Mapping[str, ChangeRule] | None = None,
         max_auto_transitions: int = 8,
     ) -> None:
@@ -98,7 +98,7 @@ class DialogController:
             raise ValueError("max_auto_transitions must be at least one.")
         self._flow = flow
         self._state_machine = state_machine
-        self._tool_bridge = tool_bridge
+        self._action_registry = action_registry
         self._change_rules = dict(change_rules or {})
         self._max_auto_transitions = max_auto_transitions
 
@@ -328,7 +328,7 @@ class DialogController:
         committed_actions: tuple[str, ...],
         auto_transition_count: int,
     ) -> DialogTurnResult:
-        failure_code = self._tool_bridge.get_failure_code(error)
+        failure_code = self._action_registry.get_failure_code(error)
         failure = self._state_machine.resolve_failure(source, failure_code)
         if failure is None:
             return self._unhandled_failure_result(
@@ -393,13 +393,13 @@ class DialogController:
         action_context: ActionExecutionContext,
     ) -> ActionExecutionReport:
         try:
-            return await self._tool_bridge.execute_actions(
+            return await self._action_registry.execute_actions(
                 action_names,
                 action_context,
             )
         except ActionExecutionError:
             raise
-        except ToolBridgeError as error:
+        except ActionRegistryError as error:
             action_name = self._error_action_name(action_names)
             raise ActionExecutionError(action_name, (), error) from error
 
@@ -409,13 +409,13 @@ class DialogController:
         action_context: ActionExecutionContext,
     ) -> ActionExecutionReport:
         try:
-            return await self._tool_bridge.execute_failure_actions(
+            return await self._action_registry.execute_failure_actions(
                 failure,
                 action_context,
             )
         except ActionExecutionError:
             raise
-        except ToolBridgeError as error:
+        except ActionRegistryError as error:
             action_name = self._error_action_name(failure.actions)
             raise ActionExecutionError(action_name, (), error) from error
 

@@ -1,14 +1,15 @@
 """Application handler for safely creating an official booking."""
 
-from app.application.exceptions import InvalidIdempotencyKeyError, SlotConflictError
-from app.application.ports.booking_gateway import (
+from app.domain.booking_context import BookingContext
+from app.domain.booking_models import (
     BookingGateway,
+    BookingRules,
     CreateBookingRequest,
     CreateBookingResult,
     FinalAvailabilityRequest,
+    InvalidIdempotencyKeyError,
+    SlotConflictError,
 )
-from app.domain.booking_context import BookingContext
-from app.domain.booking_rules import BookingRules
 
 
 class CreateBookingHandler:
@@ -29,7 +30,7 @@ class CreateBookingHandler:
         BookingRules.validate_create_context(context)
 
         assert context.shop is not None
-        assert context.service is not None
+        assert context.main_course is not None
         assert context.customer is not None
         assert context.booking_date is not None
         assert context.start_time is not None
@@ -37,7 +38,7 @@ class CreateBookingHandler:
         assert context.duration_minutes is not None
         assert context.phone is not None
 
-        addon_ids = tuple(addon.service_id for addon in context.addons)
+        addon_ids = tuple(addon.course_id for addon in context.addons)
         total_duration = context.total_duration_minutes or context.duration_minutes
         final_request = FinalAvailabilityRequest(
             shop_id=context.shop.shop_id,
@@ -45,7 +46,7 @@ class CreateBookingHandler:
             start_time=context.start_time,
             num_customer=context.num_customer,
             duration_minutes=total_duration,
-            main_course_id=context.service.service_id,
+            main_course_id=context.main_course.course_id,
             addon_ids=addon_ids,
             therapist_preference=context.therapist_preference,
         )
@@ -64,7 +65,7 @@ class CreateBookingHandler:
             start_time=context.start_time,
             num_customer=context.num_customer,
             duration_minutes=total_duration,
-            main_course_id=context.service.service_id,
+            main_course_id=context.main_course.course_id,
             addon_ids=addon_ids,
             therapist_preference=context.therapist_preference,
             phone=context.phone,
