@@ -35,7 +35,7 @@ export class AppErrorBoundary extends Component<Props, State> {
       <main className="fatal-error-card" role="alert">
         <span>Không thể hiển thị bước hội thoại</span>
         <h1>Giao diện vừa gặp lỗi.</h1>
-        <p>{this.state.error.message || "Lỗi render không xác định."}</p>
+        <p>Vui lòng tạo cuộc trò chuyện mới hoặc tải lại trang.</p>
         <button onClick={this.recover}>Tạo cuộc trò chuyện mới</button>
       </main>
     );

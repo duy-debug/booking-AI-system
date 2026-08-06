@@ -110,7 +110,9 @@ export function MessageItem({ message, latest, loading, streaming, onQuickReply 
         <div className="message-meta">
           <time>{timeLabel(message.createdAt)}</time>
           {message.role === "user" ? (
-            <span className="delivery-status"><CheckIcon /> Đã gửi</span>
+            <span className="delivery-status">
+              <CheckIcon /> {message.status === "failed" ? "Gửi thất bại" : "Đã gửi"}
+            </span>
           ) : message.text ? (
             <>
               {message.response?.state && (
@@ -119,9 +121,9 @@ export function MessageItem({ message, latest, loading, streaming, onQuickReply 
                 </span>
               )}
               <span className="message-tools">
-                <button onClick={() => void copyMessage()} title="Sao chép"><CopyIcon />{copied && <em>Đã chép</em>}</button>
-                <button className={reaction === "up" ? "selected" : ""} onClick={() => setReaction(reaction === "up" ? null : "up")} title="Hữu ích"><ThumbsUpIcon /></button>
-                <button className={reaction === "down" ? "selected" : ""} onClick={() => setReaction(reaction === "down" ? null : "down")} title="Không hữu ích"><ThumbsDownIcon /></button>
+                <button aria-label="Sao chép" onClick={() => void copyMessage()} title="Sao chép"><CopyIcon />{copied && <em>Đã chép</em>}</button>
+                <button aria-label="Hữu ích" className={reaction === "up" ? "selected" : ""} onClick={() => setReaction(reaction === "up" ? null : "up")} title="Hữu ích"><ThumbsUpIcon /></button>
+                <button aria-label="Không hữu ích" className={reaction === "down" ? "selected" : ""} onClick={() => setReaction(reaction === "down" ? null : "down")} title="Không hữu ích"><ThumbsDownIcon /></button>
               </span>
             </>
           ) : null}

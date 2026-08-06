@@ -6,6 +6,8 @@ interface StoredChatSession {
   updatedAt: number;
 }
 
+type SessionStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
 export function loadConversationId(
   storage: Pick<Storage, "getItem" | "removeItem">,
   now = Date.now(),
@@ -35,4 +37,17 @@ export function saveConversationSession(
   now = Date.now(),
 ) {
   storage.setItem(CHAT_SESSION_KEY, JSON.stringify({ conversationId, updatedAt: now }));
+}
+
+export function getOrCreateConversationId(storage: SessionStorage): string {
+  const existing = loadConversationId(storage);
+  if (existing) return existing;
+  const conversationId = crypto.randomUUID();
+  saveConversationSession(storage, conversationId);
+  return conversationId;
+}
+
+export function resetConversationId(storage: SessionStorage): string {
+  storage.removeItem(CHAT_SESSION_KEY);
+  return getOrCreateConversationId(storage);
 }

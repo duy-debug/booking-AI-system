@@ -24,7 +24,6 @@ describe("chat stream proxy", () => {
       body: JSON.stringify({
         conversation_id: "conversation-1",
         message: "Xin chào",
-        idempotency_key: "attempt-1",
         query: "legacy",
         selection: { value: "legacy" },
       }),
@@ -37,7 +36,6 @@ describe("chat stream proxy", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
       conversation_id: "conversation-1",
       message: "Xin chào",
-      idempotency_key: "attempt-1",
     });
     expect(response.headers.get("content-type")).toContain("text/event-stream");
     expect(response.headers.get("x-accel-buffering")).toBe("no");

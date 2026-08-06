@@ -12,7 +12,6 @@ export async function POST(request: NextRequest) {
     const body = JSON.stringify({
       conversation_id: source.conversation_id,
       message: source.message,
-      idempotency_key: source.idempotency_key ?? null,
     });
     const response = await fetch(`${backendUrl}/api/v1/chat/stream`, {
       method: "POST",

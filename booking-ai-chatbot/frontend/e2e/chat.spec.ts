@@ -3,7 +3,6 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 interface CapturedRequest {
   conversation_id: string;
   message: string;
-  idempotency_key: string;
 }
 
 function chatResponse(
@@ -96,13 +95,11 @@ test("sends the new body, renders text and quick replies without duplicate bubbl
   expect(requests[0]).toEqual({
     conversation_id: expect.any(String),
     message: "Xin chào",
-    idempotency_key: expect.any(String),
   });
-  expect(Object.keys(requests[0]).sort()).toEqual(["conversation_id", "idempotency_key", "message"]);
   await expect(page.getByRole("button", { name: "Ghi âm" })).toHaveCount(0);
 });
 
-test("quick reply creates a new turn and a new idempotency key", async ({ page }) => {
+test("quick reply creates a new backend-owned turn", async ({ page }) => {
   const requests: CapturedRequest[] = [];
   await mockChat(page, requests);
   await page.goto("/");
@@ -111,29 +108,25 @@ test("quick reply creates a new turn and a new idempotency key", async ({ page }
   await expect.poll(() => requests.length).toBe(2);
   expect(requests[1].message).toBe("Shibuya");
   expect(requests[1].conversation_id).toBe(requests[0].conversation_id);
-  expect(requests[1].idempotency_key).not.toBe(requests[0].idempotency_key);
 });
 
-test("manual retry after an ambiguous truncation reuses the same idempotency key", async ({ page }) => {
+test("interrupted stream is not blindly retried", async ({ page }) => {
   const requests: CapturedRequest[] = [];
-  let attempt = 0;
   await page.route("**/api/chat/stream", async (route: Route) => {
     const request = route.request().postDataJSON() as CapturedRequest;
     requests.push(request);
-    attempt += 1;
     const response = chatResponse(request, { text: "Yêu cầu đang được xử lý" });
-    const body = attempt === 1
-      ? `event: message\ndata: ${JSON.stringify(response)}\n\n`
-      : sse(request, response);
-    await route.fulfill({ status: 200, contentType: "text/event-stream", body });
+    await route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body: `event: message\\ndata: ${JSON.stringify(response)}\\n\\n`,
+    });
   });
   await page.goto("/");
   await send(page, "Xác nhận cuối");
-  await expect(page.getByText(/yêu cầu có thể đã được xử lý/i)).toBeVisible();
-  await page.getByRole("button", { name: "Thử lại" }).click();
-  await expect.poll(() => requests.length).toBe(2);
-  expect(requests[1]).toEqual(requests[0]);
-  await expect(page.getByText("Yêu cầu đang được xử lý")).toHaveCount(1);
+  await expect(page.getByText(/trạng thái booking có thể chưa chắc chắn/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Thử lại" })).toHaveCount(0);
+  expect(requests).toHaveLength(1);
 });
 
 test("successful stateful turns cannot be replayed from the UI", async ({ page }) => {
@@ -208,7 +201,7 @@ test("SSE error displays its safe message", async ({ page }) => {
   await expect(page.getByText("Không thể xử lý lúc này.")).toBeVisible();
 });
 
-test("New Chat creates a new conversation and attempt key", async ({ page }) => {
+test("New Chat creates a new conversation", async ({ page }) => {
   const requests: CapturedRequest[] = [];
   await mockChat(page, requests);
   await page.goto("/");
@@ -218,7 +211,6 @@ test("New Chat creates a new conversation and attempt key", async ({ page }) => 
   await send(page, "Turn two");
   await expect.poll(() => requests.length).toBe(2);
   expect(requests[1].conversation_id).not.toBe(requests[0].conversation_id);
-  expect(requests[1].idempotency_key).not.toBe(requests[0].idempotency_key);
 });
 
 test("Shift+Enter creates a newline without sending", async ({ page }) => {

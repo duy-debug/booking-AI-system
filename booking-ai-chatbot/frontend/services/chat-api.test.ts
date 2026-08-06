@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatResponse } from "@/types/chat";
-import { ChatApiError, streamChat } from "./chat-api";
+import { ChatApiError, sendChat, streamChat } from "./chat-api";
 
 const chatResponse: ChatResponse = {
   conversation_id: "conversation-1",
@@ -54,14 +54,12 @@ describe("streamChat", () => {
     await expect(streamChat({
       conversation_id: "conversation-1",
       message: "  xin chào  ",
-      idempotency_key: "attempt-1",
     }, { onStarted, onMessage, onCompleted })).resolves.toEqual(chatResponse);
 
     const init = fetchMock.mock.calls[0][1];
     expect(JSON.parse(String(init?.body))).toEqual({
       conversation_id: "conversation-1",
       message: "xin chào",
-      idempotency_key: "attempt-1",
     });
     expect(String(init?.body)).not.toContain("query");
     expect(String(init?.body)).not.toContain("selection");
@@ -80,7 +78,6 @@ describe("streamChat", () => {
     await expect(streamChat({
       conversation_id: "conversation-1",
       message: "hello",
-      idempotency_key: "attempt-1",
     })).resolves.toEqual(chatResponse);
   });
 
@@ -89,7 +86,6 @@ describe("streamChat", () => {
     await expect(streamChat({
       conversation_id: "conversation-1",
       message: "hello",
-      idempotency_key: "attempt-1",
     })).resolves.toEqual(chatResponse);
   });
 
@@ -108,7 +104,6 @@ describe("streamChat", () => {
     await expect(streamChat({
       conversation_id: "conversation-1",
       message: "hello",
-      idempotency_key: "attempt-1",
     })).resolves.toEqual(chatResponse);
   });
 
@@ -118,7 +113,6 @@ describe("streamChat", () => {
     await streamChat({
       conversation_id: "conversation-1",
       message: "hello",
-      idempotency_key: "attempt-1",
     }, { onMessage });
     expect(onMessage).toHaveBeenCalledWith(chatResponse);
   });
@@ -130,9 +124,8 @@ describe("streamChat", () => {
     await expect(streamChat({
       conversation_id: "conversation-1",
       message: "hello",
-      idempotency_key: "attempt-1",
     })).rejects.toMatchObject({
-      problem: { code: "chat_processing_failed", detail: "Thử lại sau" },
+      problem: { code: "backend_internal_error", detail: "Thử lại sau" },
     });
   });
 
@@ -143,14 +136,13 @@ describe("streamChat", () => {
     await expect(streamChat({
       conversation_id: "conversation-1",
       message: "hello",
-      idempotency_key: "attempt-1",
-    })).rejects.toThrow("ended unexpectedly before completed");
+    })).rejects.toMatchObject({ problem: { code: "stream_interrupted" } });
   });
 
   it("rejects an empty message before fetch", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     await expect(streamChat({ conversation_id: "c", message: "   " }))
-      .rejects.toThrow("must not be empty");
+      .rejects.toThrow("Tin nhắn không được để trống");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -159,7 +151,13 @@ describe("streamChat", () => {
       detail: [{ msg: "Field required" }, { msg: "Extra inputs are not permitted" }],
     }), { status: 422, headers: { "Content-Type": "application/json" } }));
     await expect(streamChat({ conversation_id: "c", message: "hello" }))
-      .rejects.toMatchObject({ problem: { status: 422, detail: "Field required; Extra inputs are not permitted" } });
+      .rejects.toMatchObject({
+        problem: {
+          status: 422,
+          code: "backend_validation_error",
+          detail: "Tin nhắn không hợp lệ. Vui lòng kiểm tra và thử lại.",
+        },
+      });
   });
 
   it("uses a safe fallback for non-JSON HTTP errors", async () => {
@@ -177,6 +175,30 @@ describe("streamChat", () => {
     const controller = new AbortController();
     const request = streamChat({ conversation_id: "c", message: "hello", signal: controller.signal });
     controller.abort();
-    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+    await expect(request).rejects.toMatchObject({ problem: { code: "cancelled" } });
+  });
+});
+
+describe("sendChat", () => {
+  it("posts the exact JSON contract and parses the response", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(chatResponse),
+    );
+    await expect(sendChat({ conversation_id: "conversation-1", message: " xin chào " }))
+      .resolves.toEqual(chatResponse);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      conversation_id: "conversation-1",
+      message: "xin chào",
+    });
+  });
+
+  it("does not expose an HTTP 500 response body", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("private traceback", { status: 500 }),
+    );
+    await expect(sendChat({ conversation_id: "c", message: "hello" }))
+      .rejects.toMatchObject({
+        problem: { code: "backend_internal_error", detail: expect.not.stringContaining("private") },
+      });
   });
 });

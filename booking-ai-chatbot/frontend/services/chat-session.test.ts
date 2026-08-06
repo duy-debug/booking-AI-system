@@ -3,6 +3,8 @@ import {
   CHAT_SESSION_KEY,
   CHAT_SESSION_TTL_MS,
   loadConversationId,
+  getOrCreateConversationId,
+  resetConversationId,
   saveConversationSession,
 } from "./chat-session";
 
@@ -31,5 +33,27 @@ describe("chat session", () => {
       CHAT_SESSION_KEY,
       JSON.stringify({ conversationId: "c-2", updatedAt: 2_000 }),
     );
+  });
+
+  it("keeps one conversation id across calls", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    };
+    const first = getOrCreateConversationId(storage);
+    expect(getOrCreateConversationId(storage)).toBe(first);
+  });
+
+  it("reset creates a different conversation id", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    };
+    const first = getOrCreateConversationId(storage);
+    expect(resetConversationId(storage)).not.toBe(first);
   });
 });

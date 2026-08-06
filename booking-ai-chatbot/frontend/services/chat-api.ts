@@ -1,10 +1,14 @@
+import { SseParser, type ParsedSseEvent } from "./sse-parser";
 import type {
+  BookingState,
   ChatCompletedEvent,
-  ChatErrorEvent,
+  ChatErrorCode,
   ChatProblem,
   ChatRequest,
   ChatResponse,
   ChatStartedEvent,
+  DialogStatus,
+  SafeMetadataValue,
 } from "@/types/chat";
 
 export class ChatApiError extends Error {
@@ -19,116 +23,163 @@ interface ChatStreamCallbacks {
   onCompleted?: (data: ChatCompletedEvent) => void;
 }
 
-interface StreamState {
-  response?: ChatResponse;
-  completed: boolean;
-  errored: boolean;
-}
+const BOOKING_STATES = new Set<BookingState>([
+  "idle", "selecting_shop", "selecting_date", "selecting_people",
+  "selecting_duration", "selecting_service", "selecting_time",
+  "selecting_therapist", "collecting_phone", "collecting_name",
+  "verifying_phone", "awaiting_confirmation", "booking_executing",
+  "completed", "booking_failed", "cancelled",
+]);
+const DIALOG_STATUSES = new Set<DialogStatus>([
+  "success", "failure_handled", "failure_unhandled",
+]);
+const REQUEST_TIMEOUT_MS = 30_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function stringField(value: Record<string, unknown>, field: string): string {
-  if (typeof value[field] !== "string") throw new Error(`Invalid SSE ${field}`);
+  if (typeof value[field] !== "string") throw invalidResponse();
   return value[field];
 }
 
-function parseStarted(value: unknown): ChatStartedEvent {
-  if (!isRecord(value)) throw new Error("Invalid started event");
-  return { conversation_id: stringField(value, "conversation_id") };
+function invalidResponse(): ChatApiError {
+  return new ChatApiError({ code: "invalid_response", detail: "Phản hồi chatbot không hợp lệ." });
 }
 
 function parseResponse(value: unknown): ChatResponse {
-  if (!isRecord(value)) throw new Error("Invalid message event");
+  if (!isRecord(value)) throw invalidResponse();
   const quickReplies = value.quick_replies;
   const metadata = value.metadata;
+  const state = stringField(value, "state");
+  const status = stringField(value, "status");
+  if (!BOOKING_STATES.has(state as BookingState) || !DIALOG_STATUSES.has(status as DialogStatus)) {
+    throw invalidResponse();
+  }
   if (!Array.isArray(quickReplies) || !quickReplies.every((item) => typeof item === "string")) {
-    throw new Error("Invalid SSE quick_replies");
+    throw invalidResponse();
   }
-  if (!isRecord(metadata)) throw new Error("Invalid SSE metadata");
+  if (!isRecord(metadata)) throw invalidResponse();
+  const safeMetadata: Record<string, SafeMetadataValue> = {};
+  for (const [key, item] of Object.entries(metadata)) {
+    if (item === null || ["boolean", "number", "string"].includes(typeof item)) {
+      safeMetadata[key] = item as SafeMetadataValue;
+    } else {
+      throw invalidResponse();
+    }
+  }
   const instruction = value.instruction_template;
-  if (instruction !== null && typeof instruction !== "string") {
-    throw new Error("Invalid SSE instruction_template");
-  }
+  if (instruction !== null && typeof instruction !== "string") throw invalidResponse();
   return {
     conversation_id: stringField(value, "conversation_id"),
     text: stringField(value, "text"),
-    state: stringField(value, "state"),
-    status: stringField(value, "status"),
+    state: state as BookingState,
+    status: status as DialogStatus,
     instruction_template: instruction,
     quick_replies: quickReplies,
-    metadata,
+    metadata: safeMetadata,
   };
 }
 
-function parseCompleted(value: unknown): ChatCompletedEvent {
-  if (!isRecord(value) || value.stream_status !== "completed") {
-    throw new Error("Invalid completed event");
+function parseProblem(status: number): ChatProblem {
+  if (status === 422) {
+    return {
+      status,
+      code: "backend_validation_error",
+      detail: "Tin nhắn không hợp lệ. Vui lòng kiểm tra và thử lại.",
+    };
   }
-  return {
-    conversation_id: stringField(value, "conversation_id"),
-    stream_status: "completed",
-    dialog_status: stringField(value, "dialog_status"),
-  };
-}
-
-function parseStreamError(value: unknown): ChatErrorEvent {
-  if (!isRecord(value)) throw new Error("Invalid error event");
-  return {
-    conversation_id: stringField(value, "conversation_id"),
-    code: stringField(value, "code"),
-    message: stringField(value, "message"),
-  };
-}
-
-function parseHttpProblem(value: unknown, status: number): ChatProblem {
-  if (!isRecord(value)) {
-    return { status, code: "CHAT_REQUEST_FAILED", detail: "Yêu cầu chatbot không thành công." };
-  }
-  const detailValue = value.detail;
-  const detail = typeof detailValue === "string"
-    ? detailValue
-    : Array.isArray(detailValue)
-      ? detailValue
-        .map((item) => isRecord(item) && typeof item.msg === "string" ? item.msg : null)
-        .filter((item): item is string => item !== null)
-        .join("; ")
-      : "Yêu cầu chatbot không thành công.";
   return {
     status,
-    code: typeof value.code === "string" ? value.code : "CHAT_REQUEST_FAILED",
-    detail: detail || "Yêu cầu chatbot không thành công.",
+    code: "backend_internal_error",
+    detail: "Hệ thống đang bận. Vui lòng thử lại sau.",
   };
 }
 
-function dispatchSseEvent(
-  block: string,
-  callbacks: ChatStreamCallbacks,
-  state: StreamState,
-) {
-  let event = "message";
-  const dataLines: string[] = [];
-  for (const line of block.split("\n")) {
-    if (line.startsWith("event:")) event = line.slice(6).trim();
-    if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+function requestBody(input: ChatRequest): ChatRequest {
+  const message = input.message.trim();
+  if (!message) {
+    throw new ChatApiError({ code: "invalid_response", detail: "Tin nhắn không được để trống." });
   }
-  if (!dataLines.length || state.completed || state.errored) return;
+  return { conversation_id: input.conversation_id, message };
+}
 
-  const data: unknown = JSON.parse(dataLines.join("\n"));
-  if (event === "started") {
-    callbacks.onStarted?.(parseStarted(data));
-  } else if (event === "message") {
-    state.response = parseResponse(data);
+async function fetchWithTimeout(
+  url: string,
+  input: ChatRequest,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const body = requestBody(input);
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort("timeout"), REQUEST_TIMEOUT_MS);
+  const cancel = () => controller.abort("cancelled");
+  signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    return await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: url.endsWith("/stream") ? "text/event-stream" : "application/json",
+        "X-Correlation-ID": crypto.randomUUID(),
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch {
+    if (controller.signal.aborted) {
+      const code: ChatErrorCode = signal?.aborted ? "cancelled" : "timeout";
+      throw new ChatApiError({
+        code,
+        detail: code === "cancelled" ? "Yêu cầu đã được hủy." : "Yêu cầu đã hết thời gian chờ.",
+      });
+    }
+    throw new ChatApiError({ code: "network_error", detail: "Không thể kết nối đến trợ lý." });
+  } finally {
+    globalThis.clearTimeout(timeout);
+    signal?.removeEventListener("abort", cancel);
+  }
+}
+
+export async function sendChat(input: ChatRequest & { signal?: AbortSignal }): Promise<ChatResponse> {
+  const response = await fetchWithTimeout("/api/chat", input, input.signal);
+  if (!response.ok) throw new ChatApiError(parseProblem(response.status));
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw invalidResponse();
+  }
+  return parseResponse(body);
+}
+
+function dispatchEvent(
+  parsed: ParsedSseEvent,
+  callbacks: ChatStreamCallbacks,
+  state: { response?: ChatResponse; completed: boolean },
+): void {
+  if (state.completed) return;
+  if (parsed.event === "started") {
+    if (!isRecord(parsed.data)) throw invalidResponse();
+    callbacks.onStarted?.({ conversation_id: stringField(parsed.data, "conversation_id") });
+  } else if (parsed.event === "message") {
+    state.response = parseResponse(parsed.data);
     callbacks.onMessage?.(state.response);
-  } else if (event === "completed") {
-    const completed = parseCompleted(data);
+  } else if (parsed.event === "completed") {
+    if (!isRecord(parsed.data) || parsed.data.stream_status !== "completed") throw invalidResponse();
+    const dialogStatus = stringField(parsed.data, "dialog_status");
+    if (!DIALOG_STATUSES.has(dialogStatus as DialogStatus)) throw invalidResponse();
     state.completed = true;
-    callbacks.onCompleted?.(completed);
-  } else if (event === "error") {
-    const error = parseStreamError(data);
-    state.errored = true;
-    throw new ChatApiError({ code: error.code, detail: error.message });
+    callbacks.onCompleted?.({
+      conversation_id: stringField(parsed.data, "conversation_id"),
+      stream_status: "completed",
+      dialog_status: dialogStatus as DialogStatus,
+    });
+  } else if (parsed.event === "error") {
+    const message = isRecord(parsed.data) && typeof parsed.data.message === "string"
+      ? parsed.data.message
+      : "Hệ thống chưa thể xử lý yêu cầu.";
+    throw new ChatApiError({ code: "backend_internal_error", detail: message });
   }
 }
 
@@ -136,54 +187,26 @@ export async function streamChat(
   input: ChatRequest & { signal?: AbortSignal },
   callbacks: ChatStreamCallbacks = {},
 ): Promise<ChatResponse> {
-  const message = input.message.trim();
-  if (!message) throw new Error("Chat message must not be empty");
-  const request: ChatRequest = {
-    conversation_id: input.conversation_id,
-    message,
-    idempotency_key: input.idempotency_key ?? null,
-  };
-  const response = await fetch("/api/chat/stream", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "text/event-stream",
-      "X-Correlation-ID": crypto.randomUUID(),
-    },
-    body: JSON.stringify(request),
-    signal: input.signal,
-  });
-
-  if (!response.ok) {
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch {
-      body = null;
-    }
-    throw new ChatApiError(parseHttpProblem(body, response.status));
-  }
-  if (!response.body) throw new Error("SSE response body is unavailable");
+  const response = await fetchWithTimeout("/api/chat/stream", input, input.signal);
+  if (!response.ok) throw new ChatApiError(parseProblem(response.status));
+  if (!response.body) throw invalidResponse();
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
-  const state: StreamState = { completed: false, errored: false };
-  let buffer = "";
-
+  const parser = new SseParser();
+  const state: { response?: ChatResponse; completed: boolean } = { completed: false };
   while (true) {
     const { value, done } = await reader.read();
-    buffer += decoder.decode(value, { stream: !done }).replace(/\r\n/g, "\n");
-    let boundary = buffer.indexOf("\n\n");
-    while (boundary >= 0) {
-      const block = buffer.slice(0, boundary);
-      buffer = buffer.slice(boundary + 2);
-      if (block.trim()) dispatchSseEvent(block, callbacks, state);
-      boundary = buffer.indexOf("\n\n");
+    for (const event of parser.feed(decoder.decode(value, { stream: !done }))) {
+      dispatchEvent(event, callbacks, state);
     }
     if (done) break;
   }
-
-  if (!state.completed) throw new Error("SSE stream ended unexpectedly before completed event");
-  if (!state.response) throw new Error("SSE stream completed without a message event");
+  if (parser.hasPendingData() || !state.completed || !state.response) {
+    throw new ChatApiError({
+      code: "stream_interrupted",
+      detail: "Kết nối bị gián đoạn; trạng thái booking có thể chưa chắc chắn. Không tự động gửi lại.",
+    });
+  }
   return state.response;
 }
