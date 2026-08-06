@@ -22,6 +22,8 @@ def gateway(
     *,
     api_key: str | None = "secret-key",
     model: str = "gemini-2.5-flash",
+    fallback_model: str | None = None,
+    max_retries: int = 0,
 ) -> tuple[httpx.AsyncClient, GeminiClient]:
     client = httpx.AsyncClient(transport=handler)
     return client, GeminiClient(
@@ -29,6 +31,8 @@ def gateway(
         api_key=api_key,
         base_url=BASE_URL,
         model=model,
+        fallback_model=fallback_model,
+        max_retries=max_retries,
     )
 
 
@@ -122,6 +126,122 @@ async def test_provider_status_is_typed_and_safely_logged(
 
     assert error_code in caplog.text
     assert secret not in caplog.text
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [408, 429, 500, 503])
+async def test_transient_primary_failure_uses_fallback_once(
+    status_code: int,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    requested_models: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        model = json.loads(request.content)["model"]
+        requested_models.append(model)
+        if model == "primary-model":
+            return httpx.Response(status_code, request=request)
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": "fallback result"}}]},
+        )
+
+    client, adapter = gateway(
+        httpx.MockTransport(handler),
+        model="primary-model",
+        fallback_model="fallback-model",
+        max_retries=1,
+    )
+    with caplog.at_level(logging.INFO):
+        result = await adapter.generate([LLMMessage("user", "message")])
+
+    assert result.content == "fallback result"
+    assert requested_models == ["primary-model", "fallback-model"]
+    assert "fallback_activated" in caplog.text
+    assert "fallback-model" in caplog.text
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_timeout_uses_fallback_and_preserves_tools() -> None:
+    requests: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        requests.append(payload)
+        if payload["model"] == "primary-model":
+            raise httpx.ReadTimeout("timeout", request=request)
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": "ok"}}]},
+        )
+
+    tools: list[dict[str, object]] = [
+        {"type": "function", "function": {"name": "extract_intent"}}
+    ]
+    client, adapter = gateway(
+        httpx.MockTransport(handler),
+        model="primary-model",
+        fallback_model="fallback-model",
+        max_retries=1,
+    )
+    result = await adapter.generate([LLMMessage("user", "message")], tools=tools)
+
+    assert result.content == "ok"
+    assert [request["model"] for request in requests] == [
+        "primary-model",
+        "fallback-model",
+    ]
+    assert requests[0]["messages"] == requests[1]["messages"]
+    assert requests[0]["tools"] == requests[1]["tools"] == tools
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [400, 401, 403, 404, 422])
+async def test_non_transient_client_failure_does_not_use_fallback(
+    status_code: int,
+) -> None:
+    requested_models: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_models.append(json.loads(request.content)["model"])
+        return httpx.Response(status_code, request=request)
+
+    client, adapter = gateway(
+        httpx.MockTransport(handler),
+        model="primary-model",
+        fallback_model="fallback-model",
+        max_retries=1,
+    )
+    with pytest.raises(LLMGatewayUnavailableError):
+        await adapter.generate([LLMMessage("user", "message")])
+
+    assert requested_models == ["primary-model"]
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_fallback_failure_stops_after_two_total_attempts() -> None:
+    requested_models: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_models.append(json.loads(request.content)["model"])
+        return httpx.Response(429, request=request)
+
+    client, adapter = gateway(
+        httpx.MockTransport(handler),
+        model="primary-model",
+        fallback_model="fallback-model",
+        max_retries=1,
+    )
+    with pytest.raises(LLMGatewayUnavailableError):
+        await adapter.generate([LLMMessage("user", "message")])
+
+    assert requested_models == ["primary-model", "fallback-model"]
     await client.aclose()
 
 

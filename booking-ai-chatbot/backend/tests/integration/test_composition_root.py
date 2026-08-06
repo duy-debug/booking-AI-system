@@ -1,5 +1,6 @@
 """Integration tests for the complete in-process application object graph."""
 
+import json
 from datetime import date, time
 from decimal import Decimal
 from uuid import UUID
@@ -35,7 +36,7 @@ from app.domain.booking_models import (
 )
 from app.domain.booking_state import BookingState
 from app.infrastructure.context_store import ContextStore, Settings
-from app.infrastructure.gemini_client import GeminiClient
+from app.infrastructure.gemini_client import GeminiClient, LLMMessage
 from app.infrastructure.pos_api_client import PosApiClient
 
 REQUIRED_ACTIONS = {
@@ -239,8 +240,17 @@ def settings() -> Settings:
     [
         ({"llm_provider": "openrouter"}, "LLM_PROVIDER"),
         ({"gemini_model": "   "}, "GEMINI_MODEL"),
+        ({"gemini_fallback_model": "   "}, "GEMINI_FALLBACK_MODEL"),
+        (
+            {
+                "gemini_model": "same-model",
+                "gemini_fallback_model": "same-model",
+            },
+            "GEMINI_FALLBACK_MODEL",
+        ),
         ({"gemini_base_url": "https://example.test/openai/"}, "GEMINI_BASE_URL"),
         ({"llm_max_retries": 1}, "LLM_MAX_RETRIES"),
+        ({"llm_max_retries": 2}, "LLM_MAX_RETRIES"),
     ],
 )
 async def test_invalid_gemini_configuration_fails_fast(
@@ -251,6 +261,38 @@ async def test_invalid_gemini_configuration_fails_fast(
 
     with pytest.raises(ValueError, match=message):
         await create_application_container(configured)
+
+
+@pytest.mark.asyncio
+async def test_container_wires_configured_gemini_fallback() -> None:
+    requested_models: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        model = json.loads(request.content)["model"]
+        requested_models.append(model)
+        if model == "primary-model":
+            return httpx.Response(429, request=request)
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": "ok"}}]},
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    configured = Settings(
+        pos_base_url="http://pos.test",
+        gemini_api_key="test-key",
+        gemini_model="primary-model",
+        gemini_fallback_model="fallback-model",
+        llm_max_retries=1,
+    )
+    container = await create_application_container(configured, http_client=client)
+
+    result = await container.llm_gateway.generate([LLMMessage("user", "message")])
+
+    assert result.content == "ok"
+    assert requested_models == ["primary-model", "fallback-model"]
+    await container.close()
 
 
 @pytest.mark.asyncio

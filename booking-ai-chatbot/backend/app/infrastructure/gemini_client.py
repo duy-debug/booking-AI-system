@@ -80,12 +80,17 @@ class GeminiClient:
         api_key: str | None,
         base_url: str,
         model: str,
+        fallback_model: str | None = None,
+        max_retries: int = 0,
     ) -> None:
         normalized_api_key = api_key.strip() if api_key else ""
         self._client = client
         self._api_key = normalized_api_key or None
         self._base_url = base_url.strip().rstrip("/")
         self._model = model.strip()
+        normalized_fallback = fallback_model.strip() if fallback_model else ""
+        self._fallback_model = normalized_fallback or None
+        self._max_retries = max_retries
 
     async def generate(
         self,
@@ -93,82 +98,135 @@ class GeminiClient:
         *,
         tools: list[dict[str, object]] | None = None,
     ) -> LLMResponse:
-        """Return one provider response without retry or failover."""
+        """Return a provider response, with one configured transient failover."""
         started_at = perf_counter()
-        trace_log(
-            _LOGGER,
-            logging.DEBUG,
-            "LLMUsage",
-            "request",
-            provider="gemini",
-            model=self._model,
-            operation="chat_completion",
-            function="complete",
-            input_summary={
-                "message_count": len(messages),
-                "character_count": sum(len(message.content) for message in messages),
-                "tools_enabled": tools is not None,
-            },
-            status="started",
-        )
         if self._api_key is None:
-            self._log_failure("gemini_not_configured", started_at)
+            self._log_failure("gemini_not_configured", started_at, self._model, 1)
             raise LLMGatewayUnavailableError("Gemini is not configured.")
-        payload: dict[str, object] = {
-            "model": self._model,
-            "messages": [
-                {"role": message.role, "content": message.content} for message in messages
-            ],
-        }
-        if tools is not None:
-            payload["tools"] = tools
-        try:
-            response = await self._client.post(
-                f"{self._base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self._api_key}"},
-                json=payload,
-            )
-            response.raise_for_status()
-        except httpx.TimeoutException as error:
-            self._log_failure("gemini_timeout", started_at)
-            raise LLMGatewayTimeoutError("Gemini timed out.") from error
-        except httpx.HTTPStatusError as error:
-            error_code = _http_error_code(error.response.status_code)
-            self._log_failure(error_code, started_at)
-            raise LLMGatewayUnavailableError("Gemini is unavailable.") from error
-        except httpx.HTTPError as error:
-            self._log_failure("gemini_unavailable", started_at)
-            raise LLMGatewayUnavailableError("Gemini is unavailable.") from error
-        try:
-            parsed = _parse_response(response)
-        except InvalidLLMResponseError:
-            self._log_failure("gemini_invalid_response", started_at)
-            raise
-        prompt_tokens, completion_tokens = _usage_tokens(response)
-        fields: dict[str, object] = {
-            "provider": "gemini",
-            "model": self._model,
-            "operation": "chat_completion",
-            "duration_ms": elapsed_ms(started_at),
-        }
-        if prompt_tokens is not None:
-            fields["input_tokens"] = prompt_tokens
-        if completion_tokens is not None:
-            fields["output_tokens"] = completion_tokens
-        trace_log(_LOGGER, logging.INFO, "LLMUsage", "completed", **fields)
-        return parsed
+        models = [self._model]
+        if (
+            self._max_retries == 1
+            and self._fallback_model is not None
+            and self._fallback_model != self._model
+        ):
+            models.append(self._fallback_model)
 
-    def _log_failure(self, error_code: str, started_at: float) -> None:
+        for attempt, model in enumerate(models, start=1):
+            attempt_started_at = perf_counter()
+            trace_log(
+                _LOGGER,
+                logging.DEBUG,
+                "LLMUsage",
+                "request",
+                provider="gemini",
+                model=model,
+                operation="chat_completion",
+                function="complete",
+                attempt=attempt,
+                input_summary={
+                    "message_count": len(messages),
+                    "character_count": sum(len(message.content) for message in messages),
+                    "tools_enabled": tools is not None,
+                },
+                status="started",
+            )
+            payload: dict[str, object] = {
+                "model": model,
+                "messages": [
+                    {"role": message.role, "content": message.content}
+                    for message in messages
+                ],
+            }
+            if tools is not None:
+                payload["tools"] = tools
+            try:
+                response = await self._client.post(
+                    f"{self._base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self._api_key}"},
+                    json=payload,
+                )
+                response.raise_for_status()
+            except httpx.TimeoutException as error:
+                error_code = "gemini_timeout"
+                self._log_failure(error_code, attempt_started_at, model, attempt)
+                if attempt < len(models):
+                    self._log_fallback(model, models[attempt], error_code)
+                    continue
+                raise LLMGatewayTimeoutError("Gemini timed out.") from error
+            except httpx.HTTPStatusError as error:
+                status_code = error.response.status_code
+                error_code = _http_error_code(status_code)
+                self._log_failure(error_code, attempt_started_at, model, attempt)
+                if attempt < len(models) and _is_fallback_status(status_code):
+                    self._log_fallback(model, models[attempt], error_code)
+                    continue
+                raise LLMGatewayUnavailableError("Gemini is unavailable.") from error
+            except httpx.HTTPError as error:
+                error_code = "gemini_unavailable"
+                self._log_failure(error_code, attempt_started_at, model, attempt)
+                if attempt < len(models):
+                    self._log_fallback(model, models[attempt], error_code)
+                    continue
+                raise LLMGatewayUnavailableError("Gemini is unavailable.") from error
+            try:
+                parsed = _parse_response(response)
+            except InvalidLLMResponseError:
+                self._log_failure(
+                    "gemini_invalid_response", attempt_started_at, model, attempt
+                )
+                raise
+            prompt_tokens, completion_tokens = _usage_tokens(response)
+            fields: dict[str, object] = {
+                "provider": "gemini",
+                "model": model,
+                "operation": "chat_completion",
+                "attempt": attempt,
+                "duration_ms": elapsed_ms(started_at),
+            }
+            if prompt_tokens is not None:
+                fields["input_tokens"] = prompt_tokens
+            if completion_tokens is not None:
+                fields["output_tokens"] = completion_tokens
+            trace_log(_LOGGER, logging.INFO, "LLMUsage", "completed", **fields)
+            return parsed
+        raise LLMGatewayUnavailableError("Gemini is unavailable.")
+
+    def _log_failure(
+        self,
+        error_code: str,
+        started_at: float,
+        model: str,
+        attempt: int,
+    ) -> None:
         trace_log(
             _LOGGER,
             logging.WARNING,
             "LLMUsage",
             "failed",
             provider="gemini",
-            model=self._model,
+            model=model,
             operation="chat_completion",
+            attempt=attempt,
             error_code=error_code,
             duration_ms=elapsed_ms(started_at),
+        )
+
+    def _log_fallback(
+        self,
+        primary_model: str,
+        fallback_model: str,
+        reason: str,
+    ) -> None:
+        trace_log(
+            _LOGGER,
+            logging.WARNING,
+            "LLMUsage",
+            "fallback_activated",
+            provider="gemini",
+            operation="chat_completion",
+            primary_model=primary_model,
+            fallback_model=fallback_model,
+            reason=reason,
         )
 
 
@@ -178,6 +236,10 @@ def _http_error_code(status_code: int) -> str:
     if status_code == 429:
         return "gemini_rate_limited"
     return "gemini_unavailable"
+
+
+def _is_fallback_status(status_code: int) -> bool:
+    return status_code in {408, 429} or status_code >= 500
 
 
 def _usage_tokens(response: httpx.Response) -> tuple[int | None, int | None]:

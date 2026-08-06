@@ -42,7 +42,8 @@ class Settings:
     llm_provider: str = "gemini"
     gemini_api_key: str | None = None
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.5-flash-lite"
+    gemini_fallback_model: str | None = None
     llm_max_retries: int = 0
     dialog_intent_tool_enabled: bool = True
     embedding_model_name: str = (

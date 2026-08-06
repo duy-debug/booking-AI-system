@@ -214,6 +214,8 @@ async def create_application_container(
             api_key=settings.gemini_api_key,
             base_url=settings.gemini_base_url,
             model=settings.gemini_model,
+            fallback_model=settings.gemini_fallback_model,
+            max_retries=settings.llm_max_retries,
         )
         handlers: tuple[object, ...] = (
             search_shop_handler,
@@ -375,12 +377,26 @@ def _validate_settings(settings: Settings) -> None:
         raise ValueError("LLM_PROVIDER must be 'gemini'.")
     if not settings.gemini_model.strip():
         raise ValueError("GEMINI_MODEL must not be empty.")
+    if (
+        settings.gemini_fallback_model is not None
+        and not settings.gemini_fallback_model.strip()
+    ):
+        raise ValueError("GEMINI_FALLBACK_MODEL must not be empty when configured.")
+    if (
+        settings.gemini_fallback_model is not None
+        and settings.gemini_fallback_model.strip() == settings.gemini_model.strip()
+    ):
+        raise ValueError("GEMINI_FALLBACK_MODEL must differ from GEMINI_MODEL.")
     if settings.gemini_base_url.strip().rstrip("/") != (
         "https://generativelanguage.googleapis.com/v1beta/openai"
     ):
         raise ValueError("GEMINI_BASE_URL must be the official Gemini OpenAI endpoint.")
-    if type(settings.llm_max_retries) is not int or settings.llm_max_retries != 0:
-        raise ValueError("LLM_MAX_RETRIES must be 0; this gateway does not retry.")
+    if type(settings.llm_max_retries) is not int or not 0 <= settings.llm_max_retries <= 1:
+        raise ValueError("LLM_MAX_RETRIES must be 0 or 1.")
+    if settings.llm_max_retries == 1 and settings.gemini_fallback_model is None:
+        raise ValueError(
+            "GEMINI_FALLBACK_MODEL is required when LLM_MAX_RETRIES is 1."
+        )
     if type(settings.dialog_intent_tool_enabled) is not bool:
         raise ValueError("DIALOG_INTENT_TOOL_ENABLED must be boolean.")
     if not settings.embedding_model_name.strip():

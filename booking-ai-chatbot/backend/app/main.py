@@ -82,7 +82,8 @@ app = create_app(
             "GEMINI_BASE_URL",
             "https://generativelanguage.googleapis.com/v1beta/openai/",
         ),
-        gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+        gemini_fallback_model=os.getenv("GEMINI_FALLBACK_MODEL") or None,
         llm_max_retries=int(os.getenv("LLM_MAX_RETRIES", "0")),
         dialog_intent_tool_enabled=_environment_bool(
             "DIALOG_INTENT_TOOL_ENABLED", default=True
