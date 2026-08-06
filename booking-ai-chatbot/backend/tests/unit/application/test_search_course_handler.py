@@ -23,6 +23,7 @@ from app.domain.booking_models import (
     InvalidBookingDataError,
     Shop,
 )
+from app.domain.outcomes import HandlerOutcome
 
 SHOP_ID = UUID("11111111-1111-1111-1111-111111111111")
 BOOKING_DATE = date(2026, 8, 1)
@@ -128,8 +129,8 @@ async def test_execute_maps_pos_request_and_filters_query_locally() -> None:
         course_type=CourseType.MAIN,
         is_active=True,
     )
-    assert result == [COURSE]
-    assert result[0] is COURSE
+    assert result.outcome is HandlerOutcome.SUCCESS
+    assert result.data["courses"] == (COURSE,)
 
 
 @pytest.mark.asyncio
@@ -144,7 +145,7 @@ async def test_execute_prefers_exact_name_over_broader_substring_matches() -> No
 
     result = await make_handler(fake).execute(SHOP_ID, COURSE.name)
 
-    assert result == [COURSE]
+    assert result.data["courses"] == (COURSE,)
 
 
 @pytest.mark.asyncio
@@ -156,7 +157,7 @@ async def test_execute_without_query_returns_original_gateway_list() -> None:
 
     assert fake.search_courses_call_count == 1
     assert fake.received_request == CourseSearchRequest(shop_id=SHOP_ID)
-    assert result is courses
+    assert result.data["courses"] == tuple(courses)
 
 
 @pytest.mark.asyncio
@@ -166,8 +167,8 @@ async def test_execute_returns_same_empty_list_from_gateway() -> None:
 
     result = await make_handler(fake).execute(SHOP_ID)
 
-    assert result is courses
-    assert result == []
+    assert result.outcome is HandlerOutcome.SUCCESS
+    assert result.data["courses"] == ()
 
 
 @pytest.mark.asyncio

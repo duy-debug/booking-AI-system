@@ -15,6 +15,7 @@ from app.domain.booking_models import (
     InvalidBookingDataError,
     Shop,
 )
+from app.domain.outcomes import HandlerOutcome
 
 SHOP = Shop(
     shop_id=UUID("11111111-1111-1111-1111-111111111111"),
@@ -96,8 +97,8 @@ async def test_execute_fetches_catalog_once_and_filters_by_name() -> None:
 
     assert fake.search_shops_call_count == 1
     assert fake.received_query is None
-    assert result == shops
-    assert result[0] is SHOP
+    assert result.outcome is HandlerOutcome.SUCCESS
+    assert result.data["shops"] == tuple(shops)
 
 
 @pytest.mark.asyncio
@@ -106,7 +107,7 @@ async def test_execute_filters_by_address_case_insensitively() -> None:
 
     result = await make_handler(fake).execute("DISTRICT")
 
-    assert result == [SHOP]
+    assert result.data["shops"] == (SHOP,)
     assert fake.received_query is None
 
 
@@ -121,7 +122,7 @@ async def test_execute_filters_vietnamese_name_without_requiring_diacritics() ->
 
     result = await make_handler(fake).execute("komorebi ba dinh")
 
-    assert result == [shop]
+    assert result.data["shops"] == (shop,)
     assert fake.received_query is None
 
 
@@ -131,7 +132,8 @@ async def test_execute_returns_empty_when_local_query_does_not_match() -> None:
 
     result = await make_handler(fake).execute("missing")
 
-    assert result == []
+    assert result.outcome is HandlerOutcome.NOT_FOUND
+    assert result.error_code == "shop_not_found"
 
 
 @pytest.mark.asyncio
@@ -151,8 +153,8 @@ async def test_execute_returns_same_empty_list_from_gateway() -> None:
 
     result = await make_handler(fake).execute()
 
-    assert result is shops
-    assert result == []
+    assert result.outcome is HandlerOutcome.SUCCESS
+    assert result.data["shops"] == ()
 
 
 @pytest.mark.asyncio
@@ -162,7 +164,7 @@ async def test_execute_removes_exact_duplicate_shop_names_only() -> None:
 
     result = await make_handler(fake).execute()
 
-    assert result == [SHOP]
+    assert result.data["shops"] == (SHOP,)
 
 
 @pytest.mark.asyncio

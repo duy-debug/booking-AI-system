@@ -202,9 +202,7 @@ def _create_payload(
             "total_duration_minutes": 75,
             "status": "confirmed",
             "therapist_request_type": therapist_type,
-            "requested_therapist_id": (
-                str(therapist_id) if therapist_id is not None else None
-            ),
+            "requested_therapist_id": (str(therapist_id) if therapist_id is not None else None),
             "requested_gender": therapist_gender,
             "cancel_reason": None,
             "cancelled_at": None,
@@ -796,9 +794,7 @@ async def test_verify_customer_timeout_makes_exactly_one_request() -> None:
     client, gateway = _gateway(handler)
     try:
         with pytest.raises(POSTimeoutError):
-            await gateway.verify_customer(
-                CustomerVerificationRequest(SHOP_ID, "0901234567")
-            )
+            await gateway.verify_customer(CustomerVerificationRequest(SHOP_ID, "0901234567"))
     finally:
         await client.aclose()
 
@@ -866,9 +862,7 @@ async def test_group_create_preserves_every_child_reservation_id() -> None:
         await client.aclose()
 
     assert result.booking.num_customer == 2
-    assert tuple(item.reservation_id for item in result.child_reservations) == (
-        RESERVATION_IDS
-    )
+    assert tuple(item.reservation_id for item in result.child_reservations) == (RESERVATION_IDS)
     assert tuple(item.participant_index for item in result.child_reservations) == (1, 2)
 
 

@@ -171,13 +171,9 @@ async def test_empty_transition_actions_apply_target_normally() -> None:
     flow = flow_for(
         {
             BookingState.IDLE: state(
-                transitions=(
-                    FlowTransition("go", BookingState.SELECTING_SHOP),
-                )
+                transitions=(FlowTransition("go", BookingState.SELECTING_SHOP),)
             ),
-            BookingState.SELECTING_SHOP: state(
-                on_enter=FlowOnEnter("ask_shop")
-            ),
+            BookingState.SELECTING_SHOP: state(on_enter=FlowOnEnter("ask_shop")),
         }
     )
     context = BookingContext(conversation_id="c-1")
@@ -396,9 +392,7 @@ async def test_on_enter_create_failure_uses_declarative_route(
     flow = flow_for(
         {
             BookingState.AWAITING_CONFIRMATION: state(
-                transitions=(
-                    FlowTransition("confirm", BookingState.BOOKING_EXECUTING),
-                )
+                transitions=(FlowTransition("confirm", BookingState.BOOKING_EXECUTING),)
             ),
             BookingState.BOOKING_EXECUTING: state(
                 on_enter=FlowOnEnter(
@@ -439,9 +433,7 @@ async def test_unknown_on_enter_failure_keeps_applied_target() -> None:
     flow = flow_for(
         {
             BookingState.IDLE: state(
-                transitions=(
-                    FlowTransition("go", BookingState.SELECTING_SHOP),
-                )
+                transitions=(FlowTransition("go", BookingState.SELECTING_SHOP),)
             ),
             BookingState.SELECTING_SHOP: state(
                 on_enter=FlowOnEnter("ask_shop", ("enter_failure",))
@@ -461,7 +453,7 @@ async def test_unknown_on_enter_failure_keeps_applied_target() -> None:
 
 
 @pytest.mark.asyncio
-async def test_on_enter_missing_idempotency_uses_incomplete_data_route() -> None:
+async def test_final_confirmation_generates_server_idempotency_before_create() -> None:
     bridge = ActionRegistry()
     calls = 0
 
@@ -474,9 +466,7 @@ async def test_on_enter_missing_idempotency_uses_incomplete_data_route() -> None
     flow = flow_for(
         {
             BookingState.AWAITING_CONFIRMATION: state(
-                transitions=(
-                    FlowTransition("confirm", BookingState.BOOKING_EXECUTING),
-                )
+                transitions=(FlowTransition("confirm", BookingState.BOOKING_EXECUTING),)
             ),
             BookingState.BOOKING_EXECUTING: state(
                 on_enter=FlowOnEnter(
@@ -503,11 +493,11 @@ async def test_on_enter_missing_idempotency_uses_incomplete_data_route() -> None
         DialogTurnInput("confirm", {}),
     )
 
-    assert result.status is DialogTurnStatus.FAILURE_HANDLED
-    assert result.failure_code == "booking_data_incomplete"
-    assert result.instruction_template == "booking_data_incomplete"
-    assert context.state is BookingState.AWAITING_CONFIRMATION
-    assert calls == 0
+    assert result.status is DialogTurnStatus.SUCCESS
+    assert result.failure_code is None
+    assert context.state is BookingState.BOOKING_EXECUTING
+    assert context.booking_attempt_id is not None
+    assert calls == 1
 
 
 @pytest.mark.asyncio
@@ -525,9 +515,7 @@ async def test_booking_success_auto_completes_without_double_create() -> None:
     flow = flow_for(
         {
             BookingState.AWAITING_CONFIRMATION: state(
-                transitions=(
-                    FlowTransition("confirm", BookingState.BOOKING_EXECUTING),
-                )
+                transitions=(FlowTransition("confirm", BookingState.BOOKING_EXECUTING),)
             ),
             BookingState.BOOKING_EXECUTING: state(
                 on_enter=FlowOnEnter(
@@ -576,9 +564,7 @@ async def test_auto_action_failure_does_not_apply_auto_target() -> None:
     flow = flow_for(
         {
             BookingState.IDLE: state(
-                transitions=(
-                    FlowTransition("go", BookingState.SELECTING_THERAPIST),
-                )
+                transitions=(FlowTransition("go", BookingState.SELECTING_THERAPIST),)
             ),
             BookingState.SELECTING_THERAPIST: state(
                 auto_transitions=(
@@ -615,9 +601,7 @@ async def test_auto_action_failure_uses_its_own_failure_routes() -> None:
     flow = flow_for(
         {
             BookingState.IDLE: state(
-                transitions=(
-                    FlowTransition("go", BookingState.SELECTING_THERAPIST),
-                )
+                transitions=(FlowTransition("go", BookingState.SELECTING_THERAPIST),)
             ),
             BookingState.SELECTING_THERAPIST: state(
                 auto_transitions=(
@@ -677,9 +661,7 @@ async def test_group_booking_auto_skips_therapist_and_enters_phone_state() -> No
                     ),
                 ),
             ),
-            BookingState.COLLECTING_PHONE: state(
-                on_enter=FlowOnEnter("ask_phone")
-            ),
+            BookingState.COLLECTING_PHONE: state(on_enter=FlowOnEnter("ask_phone")),
         }
     )
     context = BookingContext(
@@ -706,34 +688,26 @@ async def test_group_booking_auto_skips_therapist_and_enters_phone_state() -> No
 
 @pytest.mark.asyncio
 async def test_multi_step_auto_transitions_finish_in_order() -> None:
-    condition = FlowCondition("pending_action", "eq", "continue")
+    condition = FlowCondition("last_failure_code", "eq", "continue")
     flow = flow_for(
         {
             BookingState.IDLE: state(
-                transitions=(
-                    FlowTransition("go", BookingState.SELECTING_SHOP),
-                )
+                transitions=(FlowTransition("go", BookingState.SELECTING_SHOP),)
             ),
             BookingState.SELECTING_SHOP: state(
                 on_enter=FlowOnEnter("ask_shop"),
-                auto_transitions=(
-                    FlowAutoTransition(condition, BookingState.SELECTING_DATE),
-                ),
+                auto_transitions=(FlowAutoTransition(condition, BookingState.SELECTING_DATE),),
             ),
             BookingState.SELECTING_DATE: state(
                 on_enter=FlowOnEnter("ask_date"),
-                auto_transitions=(
-                    FlowAutoTransition(condition, BookingState.SELECTING_PEOPLE),
-                ),
+                auto_transitions=(FlowAutoTransition(condition, BookingState.SELECTING_PEOPLE),),
             ),
-            BookingState.SELECTING_PEOPLE: state(
-                on_enter=FlowOnEnter("ask_people")
-            ),
+            BookingState.SELECTING_PEOPLE: state(on_enter=FlowOnEnter("ask_people")),
         }
     )
     context = BookingContext(
         conversation_id="c-1",
-        pending_action="continue",
+        last_failure_code="continue",
     )
 
     result = await controller(flow, ActionRegistry()).handle_turn(
@@ -752,21 +726,19 @@ async def test_auto_transition_cycle_is_detected_after_valid_commit() -> None:
     flow = flow_for(
         {
             BookingState.IDLE: state(
-                transitions=(
-                    FlowTransition("go", BookingState.SELECTING_SHOP),
-                )
+                transitions=(FlowTransition("go", BookingState.SELECTING_SHOP),)
             ),
             BookingState.SELECTING_SHOP: state(
                 auto_transitions=(
                     FlowAutoTransition(
-                        FlowCondition("pending_action", "eq", "loop"),
+                        FlowCondition("last_failure_code", "eq", "loop"),
                         BookingState.SELECTING_SHOP,
                     ),
                 )
             ),
         }
     )
-    context = BookingContext(conversation_id="c-1", pending_action="loop")
+    context = BookingContext(conversation_id="c-1", last_failure_code="loop")
 
     result = await controller(flow, ActionRegistry()).handle_turn(
         context,
@@ -785,13 +757,11 @@ async def test_auto_transition_limit_stops_before_next_action() -> None:
     bridge = ActionRegistry()
     bridge.register_action("first_auto", recording_action("first_auto", calls))
     bridge.register_action("second_auto", recording_action("second_auto", calls))
-    condition = FlowCondition("pending_action", "eq", "continue")
+    condition = FlowCondition("last_failure_code", "eq", "continue")
     flow = flow_for(
         {
             BookingState.IDLE: state(
-                transitions=(
-                    FlowTransition("go", BookingState.SELECTING_SHOP),
-                )
+                transitions=(FlowTransition("go", BookingState.SELECTING_SHOP),)
             ),
             BookingState.SELECTING_SHOP: state(
                 auto_transitions=(
@@ -816,7 +786,7 @@ async def test_auto_transition_limit_stops_before_next_action() -> None:
     )
     context = BookingContext(
         conversation_id="c-1",
-        pending_action="continue",
+        last_failure_code="continue",
     )
 
     result = await controller(

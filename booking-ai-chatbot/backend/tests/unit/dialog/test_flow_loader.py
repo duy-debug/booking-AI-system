@@ -26,9 +26,7 @@ def _flow() -> dict[str, object]:
                     {
                         "intent": "start_booking",
                         "target": "selecting_therapist",
-                        "conditions": [
-                            {"field": "num_customer", "op": "eq", "value": 1}
-                        ],
+                        "conditions": [{"field": "num_customer", "op": "eq", "value": 1}],
                         "actions": ["start"],
                         "on_fail": {
                             "condition": "invalid",
@@ -80,9 +78,7 @@ def _flow() -> dict[str, object]:
                 ]
             },
             "collecting_phone": {
-                "transitions": [
-                    {"intent": "provide_phone", "target": "completed"}
-                ],
+                "transitions": [{"intent": "provide_phone", "target": "completed"}],
                 "phone_split_mode": {
                     "segment_count": 3,
                     "max_full_resets": 3,
@@ -288,10 +284,8 @@ def test_invalid_failure_metadata_is_rejected(
         FlowLoader.load(_write(tmp_path, payload))
 
 
-@pytest.mark.parametrize("action", ["create_booking", "retry_booking"])
 def test_booking_side_effect_is_forbidden_in_failure_actions(
     tmp_path: Path,
-    action: str,
 ) -> None:
     payload = _flow()
     idle = cast(dict[str, object], _states(payload)["idle"])
@@ -299,7 +293,7 @@ def test_booking_side_effect_is_forbidden_in_failure_actions(
     transitions[0]["on_fail"] = {
         "condition": "failure",
         "target": "idle",
-        "actions": [action],
+        "actions": ["create_booking"],
     }
 
     with pytest.raises(InvalidFlowDefinitionError, match="must not create"):
@@ -360,13 +354,6 @@ def test_on_enter_failures_parse_exact_and_wildcard_routes(tmp_path: Path) -> No
                 "actions": ["create_booking"],
             }
         ],
-        [
-            {
-                "condition": "invalid",
-                "target": "idle",
-                "actions": ["retry_booking"],
-            }
-        ],
     ],
 )
 def test_invalid_on_enter_failure_routes_are_rejected(
@@ -382,14 +369,12 @@ def test_invalid_on_enter_failure_routes_are_rejected(
         FlowLoader.load(_write(tmp_path, payload))
 
 
-@pytest.mark.parametrize("action", ["create_booking", "retry_booking"])
 def test_terminal_on_enter_rejects_booking_side_effect(
     tmp_path: Path,
-    action: str,
 ) -> None:
     payload = _flow()
     completed = cast(dict[str, object], _states(payload)["completed"])
-    completed["on_enter"] = {"actions": [action]}
+    completed["on_enter"] = {"actions": ["create_booking"]}
 
     with pytest.raises(InvalidFlowDefinitionError, match="Terminal state"):
         FlowLoader.load(_write(tmp_path, payload))

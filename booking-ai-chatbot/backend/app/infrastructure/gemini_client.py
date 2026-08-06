@@ -57,6 +57,7 @@ class LLMGateway(Protocol):
         """Generate a response from prepared messages and optional tools."""
         ...
 
+
 """Gemini adapter implementing the OpenAI-compatible language-model port."""
 
 import json
@@ -133,8 +134,7 @@ class GeminiClient:
             payload: dict[str, object] = {
                 "model": model,
                 "messages": [
-                    {"role": message.role, "content": message.content}
-                    for message in messages
+                    {"role": message.role, "content": message.content} for message in messages
                 ],
             }
             if tools is not None:
@@ -171,9 +171,7 @@ class GeminiClient:
             try:
                 parsed = _parse_response(response)
             except InvalidLLMResponseError:
-                self._log_failure(
-                    "gemini_invalid_response", attempt_started_at, model, attempt
-                )
+                self._log_failure("gemini_invalid_response", attempt_started_at, model, attempt)
                 raise
             prompt_tokens, completion_tokens = _usage_tokens(response)
             fields: dict[str, object] = {

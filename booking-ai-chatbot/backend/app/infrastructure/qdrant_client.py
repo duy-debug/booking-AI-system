@@ -34,6 +34,7 @@ class KnowledgeGateway(Protocol):
         """Return knowledge documents relevant to a search query."""
         ...
 
+
 """Lazy local sentence embeddings for knowledge documents and FAQ queries."""
 
 from collections.abc import Callable, Sequence
@@ -78,9 +79,7 @@ class SentenceTransformerEmbedding:
     def dimension(self) -> int:
         """Return vector dimension after the first embedding operation."""
         if self._dimension is None:
-            raise RuntimeError(
-                "Embedding dimension is available after the model has encoded text."
-            )
+            raise RuntimeError("Embedding dimension is available after the model has encoded text.")
         return self._dimension
 
     def embed_query(self, text: str) -> list[float]:
@@ -150,6 +149,7 @@ def _coerce_vectors(raw_vectors: object) -> list[list[float]]:
             raise ValueError("Embedding model returned a non-finite vector value.")
         vectors.append(vector)
     return vectors
+
 
 """Qdrant-backed semantic knowledge retrieval."""
 
@@ -320,6 +320,7 @@ def _is_safe_logical_source(source: str) -> bool:
         and all(part not in {"", ".", ".."} for part in path.parts)
     )
 
+
 """Load and section-aware chunk trusted Markdown knowledge documents."""
 
 import hashlib
@@ -400,9 +401,7 @@ class MarkdownKnowledgeLoader:
             raise ValueError("Knowledge file size limit must be a positive integer.")
         root = knowledge_root.resolve()
         if not root.is_dir():
-            raise InvalidKnowledgeRootError(
-                "Knowledge root must be an existing directory."
-            )
+            raise InvalidKnowledgeRootError("Knowledge root must be an existing directory.")
         self._root = root
         self._max_file_size = max_file_size
 
@@ -410,13 +409,9 @@ class MarkdownKnowledgeLoader:
         """Load one Markdown file without allowing access outside the root."""
         document_path = self._resolve_document_path(path)
         if document_path.suffix.lower() != ".md":
-            raise UnsupportedKnowledgeFileError(
-                "Knowledge loader accepts only Markdown files."
-            )
+            raise UnsupportedKnowledgeFileError("Knowledge loader accepts only Markdown files.")
         if not document_path.is_file():
-            raise InvalidKnowledgePathError(
-                "Knowledge document must be an existing regular file."
-            )
+            raise InvalidKnowledgePathError("Knowledge document must be an existing regular file.")
         if document_path.stat().st_size > self._max_file_size:
             raise KnowledgeFileTooLargeError(
                 "Knowledge document exceeds the configured size limit."
@@ -594,8 +589,7 @@ def _split_long_paragraph(paragraph: str, max_size: int) -> tuple[str, ...]:
                 current = word
             else:
                 chunks.extend(
-                    word[index : index + max_size]
-                    for index in range(0, len(word), max_size)
+                    word[index : index + max_size] for index in range(0, len(word), max_size)
                 )
                 current = ""
     if current:
@@ -623,9 +617,8 @@ def _validate_source(source: str) -> None:
         or "\\" in source
         or any(part in {"", ".", ".."} for part in path.parts)
     ):
-        raise InvalidKnowledgePathError(
-            "Knowledge source must be a safe relative POSIX path."
-        )
+        raise InvalidKnowledgePathError("Knowledge source must be a safe relative POSIX path.")
+
 
 """Manually index one Markdown knowledge document into Qdrant."""
 
@@ -725,16 +718,12 @@ def index_knowledge_document(
     normalized_collection = _validate_collection_name(collection_name)
     source_path = source.resolve()
     if not source_path.is_file():
-        raise InvalidIndexingSourceError(
-            "Knowledge source must be an existing regular file."
-        )
+        raise InvalidIndexingSourceError("Knowledge source must be an existing regular file.")
     loader = MarkdownKnowledgeLoader(source_path.parent)
     document = loader.load(Path(source_path.name))
     chunks = SectionAwareMarkdownChunker().chunk(document)
     if not chunks:
-        raise EmptyKnowledgeDocumentError(
-            "Knowledge source produced no indexable chunks."
-        )
+        raise EmptyKnowledgeDocumentError("Knowledge source produced no indexable chunks.")
 
     vectors = embedding.embed_documents([chunk.content for chunk in chunks])
     if len(vectors) != len(chunks):
@@ -743,9 +732,7 @@ def index_knowledge_document(
         )
     vector_dimension = embedding.dimension
     if any(len(vector) != vector_dimension for vector in vectors):
-        raise KnowledgeIndexingError(
-            "Embedding output contains an inconsistent vector dimension."
-        )
+        raise KnowledgeIndexingError("Embedding output contains an inconsistent vector dimension.")
 
     _ensure_collection(
         client=client,
@@ -805,17 +792,13 @@ def _ensure_collection(
     information = client.get_collection(collection_name)
     vectors_config = information.config.params.vectors
     if not isinstance(vectors_config, models.VectorParams):
-        raise IncompatibleCollectionError(
-            "Qdrant collection must use one unnamed dense vector."
-        )
+        raise IncompatibleCollectionError("Qdrant collection must use one unnamed dense vector.")
     if vectors_config.size != vector_dimension:
         raise IncompatibleCollectionError(
             "Qdrant collection vector size does not match the embedding model."
         )
     if vectors_config.distance is not models.Distance.COSINE:
-        raise IncompatibleCollectionError(
-            "Qdrant collection distance must be cosine."
-        )
+        raise IncompatibleCollectionError("Qdrant collection distance must be cosine.")
 
 
 def _source_filter(source: str) -> models.FilterSelector:
@@ -865,8 +848,11 @@ def _settings_from_environment() -> Settings:
     host = os.getenv("QDRANT_HOST", "localhost").strip()
     if not host:
         raise ValueError("Qdrant host must not be empty.")
-    if "://" in host or "/" in host or "@" in host or any(
-        character.isspace() for character in host
+    if (
+        "://" in host
+        or "/" in host
+        or "@" in host
+        or any(character.isspace() for character in host)
     ):
         raise ValueError("Qdrant host must be a hostname or IP address.")
     if not 1 <= port <= 65535:
@@ -941,8 +927,7 @@ from app.dialog.instruction_builder import DialogResponse, InstructionBuilder
 from app.domain.booking_context import BookingContext
 
 _FAQ_UNAVAILABLE_TEXT = (
-    "Hiện tại hệ thống chưa thể tra cứu thông tin này. "
-    "Vui lòng liên hệ cửa hàng để được hỗ trợ."
+    "Hiện tại hệ thống chưa thể tra cứu thông tin này. Vui lòng liên hệ cửa hàng để được hỗ trợ."
 )
 _FAQ_NO_RESULT_TEXT = (
     "Hiện tại tôi chưa có đủ thông tin để trả lời câu hỏi này. "
@@ -991,9 +976,7 @@ class FAQManager:
             self._log_failure("knowledge_gateway_unavailable", started_at)
             return self._render_unavailable(context)
         accepted = [
-            document
-            for document in documents
-            if document.score >= self._min_relevance_score
+            document for document in documents if document.score >= self._min_relevance_score
         ]
         top_score = max((document.score for document in documents), default=None)
         contents = _document_contents(accepted)
@@ -1061,9 +1044,7 @@ def _document_contents(
     seen: set[str] = set()
     current_length = 0
     for document in documents[:_MAX_DOCUMENTS]:
-        if not isinstance(document, KnowledgeDocument) or not isinstance(
-            document.content, str
-        ):
+        if not isinstance(document, KnowledgeDocument) or not isinstance(document.content, str):
             continue
         content = " ".join(document.content.split())
         deduplication_key = content.casefold()

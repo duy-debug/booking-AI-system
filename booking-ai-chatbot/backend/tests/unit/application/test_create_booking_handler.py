@@ -34,6 +34,7 @@ from app.domain.booking_models import (
     TherapistPreferenceType,
 )
 from app.domain.booking_state import BookingState
+from app.domain.outcomes import HandlerOutcome
 
 SHOP_ID = UUID("11111111-1111-1111-1111-111111111111")
 MAIN_ID = UUID("22222222-2222-2222-2222-222222222222")
@@ -82,9 +83,7 @@ class FakeBookingGateway:
             BOOKING,
             reservation_code="RSV-001",
             reservation_codes=("RSV-CHILD-1",),
-            child_reservations=(
-                ChildReservationReference(RESERVATION_ID, participant_index=1),
-            ),
+            child_reservations=(ChildReservationReference(RESERVATION_ID, participant_index=1),),
         )
         self.final_error = final_error
         self.create_error = create_error
@@ -166,7 +165,7 @@ def make_context() -> BookingContext:
         phone_confirmed=True,
         member_rank="gold",
         ng_list_checked=True,
-        pending_action="create_booking",
+        last_failure_code="create_booking",
     )
 
 
@@ -205,9 +204,7 @@ async def test_unready_context_never_calls_gateway(
 async def test_group_with_gender_preference_reaches_gateway() -> None:
     context = make_context()
     context.num_customer = 2
-    context.therapist_preference = TherapistPreference(
-        TherapistPreferenceType.FEMALE
-    )
+    context.therapist_preference = TherapistPreference(TherapistPreferenceType.FEMALE)
     fake = FakeBookingGateway()
 
     await make_handler(fake).execute(context, "attempt-1")
@@ -270,14 +267,14 @@ async def test_final_check_precedes_create_and_requests_are_complete() -> None:
             customer_name="Nguyen An",
         )
     ]
-    assert result is fake.create_result
-    assert context.booking is BOOKING
-    assert context.booking_id == BOOKING_ID
-    assert context.reservation_code == "RSV-001"
-    assert context.reservation_codes == ("RSV-CHILD-1",)
-    assert context.child_reservation_ids == (RESERVATION_ID,)
+    assert result.outcome is HandlerOutcome.SUCCESS
+    assert result.data["create_result"] is fake.create_result
+    assert result.context_updates["booking"] is BOOKING
+    assert result.context_updates["booking_id"] == BOOKING_ID
+    assert result.context_updates["reservation_code"] == "RSV-001"
+    assert context.booking is None
     assert context.state is original_state
-    assert context.pending_action == "create_booking"
+    assert context.last_failure_code == "create_booking"
 
 
 @pytest.mark.asyncio
@@ -288,7 +285,6 @@ async def test_unavailable_final_check_raises_conflict_with_nearest_slots() -> N
         context.booking,
         context.booking_id,
         context.reservation_code,
-        context.child_reservation_ids,
     )
     fake = FakeBookingGateway(
         final_result=FinalAvailabilityResult(
@@ -309,7 +305,6 @@ async def test_unavailable_final_check_raises_conflict_with_nearest_slots() -> N
         context.booking,
         context.booking_id,
         context.reservation_code,
-        context.child_reservation_ids,
     ) == original_values
 
 

@@ -47,7 +47,7 @@ from app.domain.outcomes import HandlerOutcome, HandlerResult
 from app.infrastructure.context_store import elapsed_ms, trace_log
 
 _ACTION_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
-_EXTERNAL_SIDE_EFFECT_ACTIONS = frozenset({"create_booking", "retry_booking"})
+_EXTERNAL_SIDE_EFFECT_ACTIONS = frozenset({"create_booking"})
 T = TypeVar("T")
 
 
@@ -154,16 +154,13 @@ def _require_payload_value(
     expected_type: type[T],
 ) -> T:
     if key not in context.payload:
-        raise InvalidActionInputError(
-            f"Action '{context.intent}' requires payload key '{key}'."
-        )
+        raise InvalidActionInputError(f"Action '{context.intent}' requires payload key '{key}'.")
 
     value = context.payload[key]
     invalid_bool = expected_type is int and isinstance(value, bool)
     if value is None or not isinstance(value, expected_type) or invalid_bool:
         raise InvalidActionInputError(
-            f"Action '{context.intent}' requires '{key}' to be "
-            f"{expected_type.__name__}."
+            f"Action '{context.intent}' requires '{key}' to be {expected_type.__name__}."
         )
     return value
 
@@ -199,9 +196,7 @@ class ActionRegistry:
         if not callable(action):
             raise TypeError("Action must be callable.")
         if normalized_name in self._actions:
-            raise DuplicateActionError(
-                f"Action '{normalized_name}' is already registered."
-            )
+            raise DuplicateActionError(f"Action '{normalized_name}' is already registered.")
         self._actions[normalized_name] = action
 
     def has_action(self, name: str) -> bool:
@@ -218,9 +213,7 @@ class ActionRegistry:
         try:
             return self._actions[normalized_name]
         except KeyError as error:
-            raise UnknownActionError(
-                f"Action '{normalized_name}' is not registered."
-            ) from error
+            raise UnknownActionError(f"Action '{normalized_name}' is not registered.") from error
 
     def find_unregistered_actions(
         self,
@@ -283,14 +276,10 @@ class ActionRegistry:
     ) -> ActionExecutionReport:
         """Execute recovery actions without applying the failure target."""
         forbidden = tuple(
-            action
-            for action in failure.actions
-            if action in _EXTERNAL_SIDE_EFFECT_ACTIONS
+            action for action in failure.actions if action in _EXTERNAL_SIDE_EFFECT_ACTIONS
         )
         if forbidden:
-            raise InvalidActionSequenceError(
-                "Failure actions must not create or retry a booking."
-            )
+            raise InvalidActionSequenceError("Failure actions must not create or retry a booking.")
         return await self.execute_actions(failure.actions, context)
 
     async def execute_action(
@@ -422,7 +411,6 @@ class ActionRegistry:
             return "slot_api_error"
         if action_name in {
             "create_booking",
-            "retry_booking",
             "handle_phone_collection",
         }:
             return "booking_api_error"
@@ -430,9 +418,7 @@ class ActionRegistry:
 
     @staticmethod
     def _validate_action_sequence(action_names: tuple[str, ...]) -> None:
-        side_effects = tuple(
-            name for name in action_names if name in _EXTERNAL_SIDE_EFFECT_ACTIONS
-        )
+        side_effects = tuple(name for name in action_names if name in _EXTERNAL_SIDE_EFFECT_ACTIONS)
         if len(side_effects) > 1:
             raise InvalidActionSequenceError(
                 "An action sequence may contain only one booking side effect."
@@ -486,13 +472,11 @@ class ActionRegistry:
             result = await action(context)
             if not isinstance(result, ActionResult):
                 raise TypeError(
-                    f"Action '{action_name}' must return ActionResult, "
-                    f"not {type(result).__name__}."
+                    f"Action '{action_name}' must return ActionResult, not {type(result).__name__}."
                 )
             if result.action_name != action_name:
                 raise TypeError(
-                    f"Action '{action_name}' returned result for "
-                    f"'{result.action_name}'."
+                    f"Action '{action_name}' returned result for '{result.action_name}'."
                 )
             trace_log(
                 logging.getLogger(__name__),
@@ -517,9 +501,7 @@ class ActionRegistry:
                 function=function_name,
                 action=action_name,
                 output_summary=(
-                    type(result.output).__name__
-                    if result.output is not None
-                    else "none"
+                    type(result.output).__name__ if result.output is not None else "none"
                 ),
                 status="success",
                 context_updates=updated_fields,
@@ -573,7 +555,6 @@ class ActionRegistry:
             ("change_phone", self._change_phone),
             ("skip_therapist", self._skip_therapist),
             ("skip_therapist_for_group", self._skip_therapist_for_group),
-            ("clear_date", self._clear_date),
             ("clear_phone_confirmation", self._clear_phone_confirmation),
             ("validate_phone", self._validate_phone),
             ("handle_customer_name", self._handle_customer_name),
@@ -607,15 +588,11 @@ class ActionRegistry:
         del context
         return ActionResult(action_name)
 
-    async def _clear_course_for_reselect(
-        self, context: ActionExecutionContext
-    ) -> ActionResult:
+    async def _clear_course_for_reselect(self, context: ActionExecutionContext) -> ActionResult:
         context.booking_context.change_course_selection(None)
         return ActionResult("clear_course_for_reselect")
 
-    async def _infer_duration_from_course(
-        self, context: ActionExecutionContext
-    ) -> ActionResult:
+    async def _infer_duration_from_course(self, context: ActionExecutionContext) -> ActionResult:
         booking = context.booking_context
         if booking.duration_minutes is None and booking.main_course is not None:
             booking.set_duration(booking.main_course.duration_minutes)
@@ -638,7 +615,6 @@ class ActionRegistry:
             self.register_action("mark_phone_confirmed", self._mark_phone_confirmed)
         if self._create_booking_handler is not None:
             self.register_action("create_booking", self._create_booking)
-            self.register_action("retry_booking", self._retry_booking)
 
     async def _search_shop(
         self,
@@ -653,7 +629,9 @@ class ActionRegistry:
             raise InvalidActionInputError("Requested start time is invalid.")
         context.booking_context.requested_booking_date = requested_date
         context.booking_context.requested_start_time = requested_time
-        shops = await self._search_shop_handler.execute()
+        result = await self._search_shop_handler.execute()
+        _ensure_success(result)
+        shops = _typed_result_items(result, "shops", Shop)
         context.booking_context.suggested_shops = tuple(shops)
         context.booking_context.suggested_shops_loaded = True
         return ActionResult("search_shop", shops)
@@ -675,7 +653,9 @@ class ActionRegistry:
         if handler is None:
             context.booking_context.set_booking_date(booking_date)
         else:
-            _ensure_success(handler.select_date(context.booking_context, booking_date))
+            result = handler.select_date(context.booking_context, booking_date)
+            _ensure_success(result)
+            context.booking_context.set_booking_date(booking_date)
         return ActionResult("handle_date_selection", booking_date)
 
     async def _handle_people_selection(
@@ -687,7 +667,9 @@ class ActionRegistry:
         if handler is None:
             context.booking_context.set_num_customer(num_customer)
         else:
-            _ensure_success(handler.select_people(context.booking_context, num_customer))
+            result = handler.select_people(context.booking_context, num_customer)
+            _ensure_success(result)
+            context.booking_context.set_num_customer(num_customer)
         return ActionResult("handle_people_selection", num_customer)
 
     async def _handle_duration_selection(
@@ -703,6 +685,7 @@ class ActionRegistry:
             if result.error_code == "duration_not_multiple_15":
                 raise InvalidDurationError(result.error_code)
             _ensure_success(result)
+            context.booking_context.set_duration(duration)
         return ActionResult("handle_duration_selection", duration)
 
     async def _handle_course_selection(
@@ -736,7 +719,9 @@ class ActionRegistry:
         if handler is None:
             context.booking_context.set_start_time(start_time)
         else:
-            _ensure_success(handler.select_time(context.booking_context, start_time))
+            result = handler.select_time(context.booking_context, start_time)
+            _ensure_success(result)
+            context.booking_context.set_start_time(start_time)
         return ActionResult("handle_time_selection", start_time)
 
     async def _handle_therapist_selection(
@@ -756,6 +741,8 @@ class ActionRegistry:
             if result.error_code == "group_therapist_not_allowed":
                 raise TherapistNotAllowedForGroupError(result.error_code)
             _ensure_success(result)
+            context.booking_context.set_therapist_preference(preference)
+            context.booking_context.set_therapist_verified(True)
         return ActionResult("handle_therapist_selection", preference)
 
     async def _change_shop(self, context: ActionExecutionContext) -> ActionResult:
@@ -789,9 +776,7 @@ class ActionRegistry:
     async def _change_course(self, context: ActionExecutionContext) -> ActionResult:
         selection = context.payload.get("course_selection")
         if selection is not None and not isinstance(selection, CourseSelection):
-            raise InvalidActionInputError(
-                "Changed course must be a CourseSelection."
-            )
+            raise InvalidActionInputError("Changed course must be a CourseSelection.")
         context.booking_context.change_course_selection(selection)
         return ActionResult("change_course", selection)
 
@@ -810,9 +795,7 @@ class ActionRegistry:
         if gender is not None and gender not in {"male", "female", "none"}:
             raise InvalidActionInputError("Changed therapist gender is invalid.")
         preference = (
-            None
-            if gender is None
-            else TherapistPreference(TherapistPreferenceType(gender))
+            None if gender is None else TherapistPreference(TherapistPreferenceType(gender))
         )
         context.booking_context.change_therapist_preference(preference)
         return ActionResult("change_therapist", preference)
@@ -847,15 +830,11 @@ class ActionRegistry:
         if handler is None:
             context.booking_context.set_therapist_preference(preference)
         else:
-            _ensure_success(handler.select_therapist(context.booking_context, preference))
+            result = handler.select_therapist(context.booking_context, preference)
+            _ensure_success(result)
+            context.booking_context.set_therapist_preference(preference)
+            context.booking_context.set_therapist_verified(True)
         return ActionResult("skip_therapist_for_group")
-
-    async def _clear_date(
-        self,
-        context: ActionExecutionContext,
-    ) -> ActionResult:
-        context.booking_context.set_booking_date(None)
-        return ActionResult("clear_date")
 
     async def _validate_phone(
         self,
@@ -863,9 +842,7 @@ class ActionRegistry:
     ) -> ActionResult:
         phone = context.booking_context.phone
         if phone is None:
-            raise InvalidActionInputError(
-                "Action 'validate_phone' requires a collected phone."
-            )
+            raise InvalidActionInputError("Action 'validate_phone' requires a collected phone.")
         BookingRules.validate_phone(phone)
         return ActionResult("validate_phone", phone)
 
@@ -883,10 +860,15 @@ class ActionRegistry:
         action_name: str = "load_time_slots",
     ) -> ActionResult:
         assert self._check_availability_handler is not None
-        await self._check_availability_handler.execute(context.booking_context)
+        result = await self._check_availability_handler.execute(context.booking_context)
+        if result.outcome is HandlerOutcome.NO_SLOTS:
+            raise SlotConflictError(reason=result.error_code)
+        _ensure_success(result)
+        slots = _typed_result_items(result, "slots", time)
+        context.booking_context.set_available_slots(slots)
         return ActionResult(
             action_name,
-            context.booking_context.available_slots,
+            slots,
         )
 
     async def _handle_phone_collection(
@@ -910,6 +892,7 @@ class ActionRegistry:
         if result.error_code == "customer_verification_mismatch":
             raise CustomerVerificationMismatchError(result.error_code)
         _ensure_success(result)
+        _apply_context_updates(context.booking_context, result)
         return ActionResult("handle_phone_collection", result.data["verification"])
 
     async def _mark_phone_confirmed(
@@ -917,7 +900,9 @@ class ActionRegistry:
         context: ActionExecutionContext,
     ) -> ActionResult:
         assert self._check_customer_handler is not None
-        _ensure_success(self._check_customer_handler.confirm(context.booking_context))
+        result = self._check_customer_handler.confirm(context.booking_context)
+        _ensure_success(result)
+        _apply_context_updates(context.booking_context, result)
         return ActionResult("mark_phone_confirmed")
 
     async def _handle_customer_name(
@@ -943,22 +928,35 @@ class ActionRegistry:
             context.booking_context,
             context.idempotency_key,
         )
-        return ActionResult("create_booking", result)
-
-    async def _retry_booking(
-        self,
-        context: ActionExecutionContext,
-    ) -> ActionResult:
-        assert self._create_booking_handler is not None
-        assert context.idempotency_key is not None
-        result = await self._create_booking_handler.execute(
-            context.booking_context,
-            context.idempotency_key,
-        )
-        return ActionResult("retry_booking", result)
+        _ensure_success(result)
+        _apply_context_updates(context.booking_context, result)
+        return ActionResult("create_booking", result.data["create_result"])
 
 
 def _ensure_success(result: HandlerResult) -> None:
     if result.outcome is HandlerOutcome.SUCCESS:
         return
     raise InvalidBookingDataError(result.error_code or result.outcome.value)
+
+
+def _typed_result_items(
+    result: HandlerResult,
+    key: str,
+    item_type: type[T],
+) -> tuple[T, ...]:
+    value = result.data.get(key)
+    if not isinstance(value, tuple) or any(not isinstance(item, item_type) for item in value):
+        raise InvalidBookingDataError(f"Handler result '{key}' is invalid.")
+    return value
+
+
+def _apply_context_updates(
+    context: BookingContext,
+    result: HandlerResult,
+) -> None:
+    allowed_fields = {item.name for item in fields(BookingContext)}
+    unknown = set(result.context_updates) - allowed_fields
+    if unknown:
+        raise InvalidBookingDataError("Handler returned unknown context updates.")
+    for name, value in result.context_updates.items():
+        setattr(context, name, value)

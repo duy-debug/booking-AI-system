@@ -84,29 +84,20 @@ class StateMachine:
     ) -> bool:
         op = condition.op
         if op not in SUPPORTED_OPERATORS:
-            raise InvalidFlowConditionError(
-                f"Unsupported condition operator '{op}'."
-            )
+            raise InvalidFlowConditionError(f"Unsupported condition operator '{op}'.")
 
         if op in {"and", "or"}:
             if condition.field is not None:
-                raise InvalidFlowConditionError(
-                    f"Operator '{op}' must not define a field."
-                )
+                raise InvalidFlowConditionError(f"Operator '{op}' must not define a field.")
             if not condition.conditions:
                 raise InvalidFlowConditionError(
                     f"Operator '{op}' requires at least one child condition."
                 )
-            results = (
-                self._evaluate_condition(child, context)
-                for child in condition.conditions
-            )
+            results = (self._evaluate_condition(child, context) for child in condition.conditions)
             return all(results) if op == "and" else any(results)
 
         if condition.field is None:
-            raise InvalidFlowConditionError(
-                f"Operator '{op}' requires a field."
-            )
+            raise InvalidFlowConditionError(f"Operator '{op}' requires a field.")
 
         actual = self._resolve_field(context, condition.field)
         if op == "in":
@@ -117,18 +108,14 @@ class StateMachine:
                     "Operator 'in' requires exactly one of value or ref."
                 )
             collection = (
-                condition.value
-                if has_value
-                else self._resolve_field(context, condition.ref or "")
+                condition.value if has_value else self._resolve_field(context, condition.ref or "")
             )
             if actual is None or not isinstance(
                 collection,
                 self._COLLECTION_TYPES,
             ):
                 return False
-            normalized_collection = tuple(
-                self._normalize_value(item) for item in collection
-            )
+            normalized_collection = tuple(self._normalize_value(item) for item in collection)
             try:
                 return operator.contains(
                     normalized_collection,
@@ -166,10 +153,7 @@ class StateMachine:
         conditions: tuple[FlowCondition, ...],
         context: BookingContext,
     ) -> bool:
-        return all(
-            self._evaluate_condition(condition, context)
-            for condition in conditions
-        )
+        return all(self._evaluate_condition(condition, context) for condition in conditions)
 
     def resolve_transition(
         self,
@@ -282,31 +266,19 @@ class StateMachine:
     ) -> FlowFailure | None:
         """Resolve an exact failure code before canonical fallback routes."""
         exact = next(
-            (
-                failure
-                for failure in transition.on_fail
-                if failure.condition == failure_code
-            ),
+            (failure for failure in transition.on_fail if failure.condition == failure_code),
             None,
         )
         if exact is not None:
             return exact
         wildcard = next(
-            (
-                failure
-                for failure in transition.on_fail
-                if failure.condition == "*"
-            ),
+            (failure for failure in transition.on_fail if failure.condition == "*"),
             None,
         )
         if wildcard is not None:
             return wildcard
         return next(
-            (
-                failure
-                for failure in transition.on_fail
-                if failure.condition == "default"
-            ),
+            (failure for failure in transition.on_fail if failure.condition == "default"),
             None,
         )
 

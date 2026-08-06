@@ -212,7 +212,6 @@ def test_phone_readback_masks_phone_and_never_adds_it_to_metadata() -> None:
 def test_confirmation_summary_formats_context_without_internal_identifiers() -> None:
     context = ready_context()
     context.therapist_preference = TherapistPreference(TherapistPreferenceType.FEMALE)
-    context.child_reservation_ids = (BOOKING_ID,)
 
     response = InstructionBuilder().build_response(
         result=turn_result("final_confirmation", BookingState.AWAITING_CONFIRMATION),

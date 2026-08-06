@@ -1,6 +1,7 @@
 """Runtime configuration consumed by the application composition root."""
 # ruff: noqa: E402
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -35,8 +36,6 @@ class Settings:
     booking_flow_path: Path = field(default_factory=_default_booking_flow_path)
     change_handlers_path: Path = field(default_factory=_default_change_handlers_path)
     max_auto_transitions: int = 8
-    enable_llm_nlu_fallback: bool = True
-    llm_nlu_required: bool = False
     llm_nlg_required: bool = False
     llm_nlu_min_confidence: float = 0.70
     llm_provider: str = "gemini"
@@ -46,15 +45,15 @@ class Settings:
     gemini_fallback_model: str | None = None
     llm_max_retries: int = 0
     dialog_intent_tool_enabled: bool = True
-    embedding_model_name: str = (
-        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-    )
+    business_timezone: str = "Asia/Ho_Chi_Minh"
+    embedding_model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     qdrant_host: str = "localhost"
     qdrant_port: int = 6333
     qdrant_api_key: str | None = None
     qdrant_collection: str = "kb_chunks"
     knowledge_qdrant_enabled: bool = False
     rag_hybrid_score_threshold: float = 0.45
+
 
 """Central masking and redaction for observability data."""
 
@@ -170,6 +169,7 @@ def _restore(value: str, protected: list[str]) -> str:
     for index, original in enumerate(protected):
         value = value.replace(f"\x00UUID{index}\x00", original)
     return value
+
 
 """Async-safe trace identity and FastAPI/ASGI header propagation."""
 
@@ -314,9 +314,7 @@ class TraceMiddleware:
             for key, value in scope.get("headers", [])
         }
         trace_id = _validated_or_default(incoming.get("x-trace-id"), new_trace_id())
-        request_id = _validated_or_default(
-            incoming.get("x-request-id"), new_request_id()
-        )
+        request_id = _validated_or_default(incoming.get("x-request-id"), new_request_id())
         session_id = _validated_or_default(incoming.get("x-session-id"), "-")
         turn_id = _parse_turn(incoming.get("x-turn-id"))
         token = bind_trace_context(
@@ -370,7 +368,6 @@ class TraceMiddleware:
 
 def _event(event: str, service: str, scope: dict[str, Any], **fields: object) -> None:
 
-
     exc_info = bool(fields.pop("exc_info", False))
     trace_log(
         logging.getLogger("app.trace_middleware"),
@@ -396,6 +393,7 @@ def _parse_turn(value: str | None) -> int | None:
         return None
     parsed = int(value)
     return parsed if parsed > 0 else None
+
 
 """Centralized, security-conscious application logging configuration."""
 
@@ -723,6 +721,7 @@ def _sanitize_text(value: str) -> str:
         sanitized = sanitized.replace(f"\x00UUID{index}\x00", uuid_value)
     return sanitized
 
+
 """In-process storage for booking conversation contexts."""
 
 from app.domain.booking_context import BookingContext
@@ -735,24 +734,25 @@ class ContextStore:
         self._contexts: dict[str, BookingContext] = {}
 
     async def get(self, conversation_id: str) -> BookingContext | None:
-        """Return a stored context without creating one."""
-        return self._contexts.get(conversation_id)
+        """Return an isolated copy without exposing the stored snapshot."""
+        context = self._contexts.get(conversation_id)
+        return deepcopy(context) if context is not None else None
 
     async def save(self, context: BookingContext) -> None:
-        """Store or replace a context using its conversation identifier."""
-        self._contexts[context.conversation_id] = context
+        """Store an isolated snapshot using its conversation identifier."""
+        self._contexts[context.conversation_id] = deepcopy(context)
 
     async def delete(self, conversation_id: str) -> None:
         """Delete a context when it exists."""
         self._contexts.pop(conversation_id, None)
 
-    async def get_or_create(self, conversation_id: str) -> BookingContext:
-        """Return a stored context or create and store a new one."""
+    async def get_copy(self, conversation_id: str) -> BookingContext:
+        """Return a working copy or create and snapshot a new context."""
         context = self._contexts.get(conversation_id)
         if context is None:
             context = BookingContext(conversation_id=conversation_id)
-            self._contexts[conversation_id] = context
-        return context
+            self._contexts[conversation_id] = deepcopy(context)
+        return deepcopy(context)
 
     def __len__(self) -> int:
         """Return the number of stored contexts."""

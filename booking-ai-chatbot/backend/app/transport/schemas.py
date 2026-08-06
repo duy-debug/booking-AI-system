@@ -5,7 +5,7 @@ from typing import Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-class   ChatRequest(BaseModel):
+class ChatRequest(BaseModel):
     """Contains one user message and its transport-owned conversation identity."""
 
     model_config = ConfigDict(extra="forbid")

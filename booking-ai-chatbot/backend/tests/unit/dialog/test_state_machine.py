@@ -111,7 +111,10 @@ def test_resolve_field_rejects_invalid_or_private_paths(field_path: str) -> None
 @pytest.mark.parametrize(
     ("condition", "context"),
     [
-        (FlowCondition("pending_action", "eq", "change"), make_context(pending_action="change")),
+        (
+            FlowCondition("last_failure_code", "eq", "change"),
+            make_context(last_failure_code="change"),
+        ),
         (FlowCondition("num_customer", "eq", 2), make_context(num_customer=2)),
         (FlowCondition("phone_confirmed", "eq", True), make_context(phone_confirmed=True)),
         (
@@ -120,11 +123,7 @@ def test_resolve_field_rejects_invalid_or_private_paths(field_path: str) -> None
                 "eq",
                 "female",
             ),
-            make_context(
-                therapist_preference=TherapistPreference(
-                    TherapistPreferenceType.FEMALE
-                )
-            ),
+            make_context(therapist_preference=TherapistPreference(TherapistPreferenceType.FEMALE)),
         ),
     ],
 )
@@ -147,7 +146,7 @@ def test_eq_returns_false_for_mismatch_and_missing_field() -> None:
     [
         ("phone_confirmed", False),
         ("num_customer", 0),
-        ("pending_action", ""),
+        ("last_failure_code", ""),
         ("available_slots", ()),
     ],
 )
@@ -178,8 +177,8 @@ def test_null_and_not_null_handle_none() -> None:
         (FlowCondition("num_customer", "lte", 2), make_context(num_customer=3), False),
         (FlowCondition("num_customer", "gte", 2), make_context(num_customer=None), False),
         (
-            FlowCondition("pending_action", "gte", 2),
-            make_context(pending_action="invalid"),
+            FlowCondition("last_failure_code", "gte", 2),
+            make_context(last_failure_code="invalid"),
             False,
         ),
     ],
@@ -231,7 +230,7 @@ def test_in_supports_reference_collection() -> None:
     [
         ("missing", None),
         ("available_slots", None),
-        ("pending_action", "not-a-collection"),
+        ("last_failure_code", "not-a-collection"),
     ],
 )
 def test_in_returns_false_for_invalid_runtime_reference(
@@ -319,12 +318,12 @@ def duplicate_intent_flow() -> FlowDefinition:
         FlowTransition(
             "deny",
             BookingState.SELECTING_THERAPIST,
-            conditions=(FlowCondition("pending_action", "eq", "therapist"),),
+            conditions=(FlowCondition("last_failure_code", "eq", "therapist"),),
         ),
         FlowTransition(
             "deny",
             BookingState.SELECTING_TIME,
-            conditions=(FlowCondition("pending_action", "eq", "time"),),
+            conditions=(FlowCondition("last_failure_code", "eq", "time"),),
         ),
         FlowTransition("deny", BookingState.CANCELLED),
         FlowTransition("*", BookingState.IDLE),
@@ -333,7 +332,7 @@ def duplicate_intent_flow() -> FlowDefinition:
 
 
 @pytest.mark.parametrize(
-    ("pending_action", "target"),
+    ("last_failure_code", "target"),
     [
         ("therapist", BookingState.SELECTING_THERAPIST),
         ("time", BookingState.SELECTING_TIME),
@@ -341,10 +340,10 @@ def duplicate_intent_flow() -> FlowDefinition:
     ],
 )
 def test_duplicate_intent_prefers_matching_condition_then_unconditional(
-    pending_action: str,
+    last_failure_code: str,
     target: BookingState,
 ) -> None:
-    context = make_context(pending_action=pending_action)
+    context = make_context(last_failure_code=last_failure_code)
 
     transition = StateMachine(duplicate_intent_flow()).resolve_transition(
         context,
@@ -385,7 +384,7 @@ def test_exact_and_wildcard_resolution_order() -> None:
         FlowTransition(
             "*",
             BookingState.SELECTING_TIME,
-            conditions=(FlowCondition("pending_action", "eq", "recover"),),
+            conditions=(FlowCondition("last_failure_code", "eq", "recover"),),
         ),
         FlowTransition("*", BookingState.IDLE),
     )
@@ -400,15 +399,12 @@ def test_exact_and_wildcard_resolution_order() -> None:
     )
     assert (
         machine.resolve_transition(
-            make_context(phone_confirmed=False, pending_action="recover"),
+            make_context(phone_confirmed=False, last_failure_code="recover"),
             "confirm",
         ).target
         is BookingState.SELECTING_TIME
     )
-    assert (
-        machine.resolve_transition(make_context(), "unknown").target
-        is BookingState.IDLE
-    )
+    assert machine.resolve_transition(make_context(), "unknown").target is BookingState.IDLE
 
 
 def test_missing_transition_raises() -> None:
@@ -430,7 +426,7 @@ def test_auto_transition_returns_first_match_without_mutation_or_action_executio
     context = make_context(
         state=BookingState.SELECTING_THERAPIST,
         num_customer=2,
-        pending_action="keep",
+        last_failure_code="keep",
     )
     machine = StateMachine(
         make_flow(
@@ -444,7 +440,7 @@ def test_auto_transition_returns_first_match_without_mutation_or_action_executio
     assert resolved is second
     assert resolved.actions == ("skip_therapist_for_group",)
     assert context.state is BookingState.SELECTING_THERAPIST
-    assert context.pending_action == "keep"
+    assert context.last_failure_code == "keep"
 
 
 def test_auto_transition_returns_none_when_no_condition_matches() -> None:
@@ -594,37 +590,38 @@ def test_resolve_failure_uses_wildcard_then_default_fallback() -> None:
     default = FlowFailure("default", BookingState.SELECTING_SERVICE)
     machine = StateMachine(make_flow())
 
-    assert machine.resolve_failure(
-        FlowTransition(
-            "select_time",
-            BookingState.SELECTING_THERAPIST,
-            on_fail=(default, wildcard),
-        ),
-        "unmapped",
-    ) is wildcard
-    assert machine.resolve_failure(
-        FlowTransition(
-            "select_time",
-            BookingState.SELECTING_THERAPIST,
-            on_fail=(default,),
-        ),
-        "unmapped",
-    ) is default
+    assert (
+        machine.resolve_failure(
+            FlowTransition(
+                "select_time",
+                BookingState.SELECTING_THERAPIST,
+                on_fail=(default, wildcard),
+            ),
+            "unmapped",
+        )
+        is wildcard
+    )
+    assert (
+        machine.resolve_failure(
+            FlowTransition(
+                "select_time",
+                BookingState.SELECTING_THERAPIST,
+                on_fail=(default,),
+            ),
+            "unmapped",
+        )
+        is default
+    )
 
 
 def test_resolve_failure_returns_none_without_match_or_fallback() -> None:
     transition = FlowTransition(
         "select_time",
         BookingState.SELECTING_THERAPIST,
-        on_fail=(
-            FlowFailure("slot_unavailable", BookingState.SELECTING_TIME),
-        ),
+        on_fail=(FlowFailure("slot_unavailable", BookingState.SELECTING_TIME),),
     )
 
-    assert (
-        StateMachine(make_flow()).resolve_failure(transition, "booking_api_error")
-        is None
-    )
+    assert StateMachine(make_flow()).resolve_failure(transition, "booking_api_error") is None
 
 
 def test_resolve_failure_does_not_mutate_until_apply_failure() -> None:
@@ -659,10 +656,7 @@ def test_failure_code_is_not_evaluated_as_flow_condition() -> None:
         on_fail=(failure,),
     )
 
-    assert (
-        StateMachine(make_flow()).resolve_failure(transition, "gte")
-        is failure
-    )
+    assert StateMachine(make_flow()).resolve_failure(transition, "gte") is failure
 
 
 def test_resolve_failure_supports_flow_on_enter_without_mutation() -> None:
@@ -692,7 +686,4 @@ def test_resolve_failure_supports_flow_on_enter_without_mutation() -> None:
 def test_flow_on_enter_failure_returns_none_without_route() -> None:
     on_enter = FlowOnEnter("instruction", ("action",))
 
-    assert (
-        StateMachine(make_flow()).resolve_failure(on_enter, "booking_api_error")
-        is None
-    )
+    assert StateMachine(make_flow()).resolve_failure(on_enter, "booking_api_error") is None

@@ -1,14 +1,12 @@
 """Application handler for loading POS-backed booking availability."""
 
-from datetime import time
-
 from app.domain.booking_context import BookingContext
 from app.domain.booking_models import (
     AvailabilityRequest,
     BookingContextNotReadyError,
     BookingGateway,
-    SlotConflictError,
 )
+from app.domain.outcomes import HandlerOutcome, HandlerResult
 
 
 class CheckAvailabilityHandler:
@@ -17,8 +15,8 @@ class CheckAvailabilityHandler:
     def __init__(self, booking_gateway: BookingGateway) -> None:
         self._booking_gateway = booking_gateway
 
-    async def execute(self, context: BookingContext) -> tuple[time, ...]:
-        """Load slots and store them without changing dialog state."""
+    async def execute(self, context: BookingContext) -> HandlerResult:
+        """Load slots without mutating the working booking context."""
         if (
             context.shop is None
             or context.booking_date is None
@@ -43,7 +41,14 @@ class CheckAvailabilityHandler:
             therapist_preference=context.therapist_preference,
         )
         slots = await self._booking_gateway.get_available_slots(request)
-        context.set_available_slots(slots)
         if not slots:
-            raise SlotConflictError(reason="No available slots for the booking shape.")
-        return slots
+            return HandlerResult(
+                HandlerOutcome.NO_SLOTS,
+                error_code="no_slots_available",
+            )
+        normalized_slots = tuple(slots)
+        return HandlerResult(
+            HandlerOutcome.SUCCESS,
+            {"slots": normalized_slots},
+            {"available_slots": normalized_slots},
+        )

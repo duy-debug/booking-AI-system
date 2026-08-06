@@ -3,11 +3,10 @@
 from dataclasses import dataclass, field
 from datetime import date, time
 from enum import StrEnum
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from app.domain.booking_models import (
     Booking,
-    BookingOption,
     Course,
     CourseSelection,
     Customer,
@@ -53,21 +52,17 @@ class BookingContext:
     duration_minutes: int | None = None
     therapist_preference: TherapistPreference | None = None
     therapist_verified: bool = False
-    options: tuple[BookingOption, ...] = ()
     addons: tuple[Course, ...] = ()
     available_slots: tuple[time, ...] | None = None
     booking_id: UUID | None = None
     phone: str | None = None
     phone_confirmed: bool = False
     member_rank: str | None = None
-    visit_count: int | None = None
     ng_list_checked: bool = False
     is_ng_customer: bool = False
     booking: Booking | None = None
     reservation_code: str | None = None
-    reservation_codes: tuple[str, ...] = ()
-    child_reservation_ids: tuple[UUID, ...] = ()
-    pending_action: str | None = None
+    booking_attempt_id: str | None = None
     last_failure_code: str | None = None
 
     @property
@@ -167,14 +162,23 @@ class BookingContext:
         return not (
             self.num_customer >= 2
             and self.therapist_preference is not None
-            and self.therapist_preference.preference_type
-            is not TherapistPreferenceType.NONE
+            and self.therapist_preference.preference_type is not TherapistPreferenceType.NONE
         )
 
     def begin_turn(self) -> int:
         """Advance and return the conversation-local trace sequence."""
         self.turn_sequence += 1
         return self.turn_sequence
+
+    def ensure_booking_attempt_id(self) -> str:
+        """Return the server-owned identifier for the current booking attempt."""
+        if self.booking_attempt_id is None:
+            self.booking_attempt_id = str(uuid4())
+        return self.booking_attempt_id
+
+    def clear_booking_attempt(self) -> None:
+        """Invalidate idempotency when booking-defining data changes."""
+        self.booking_attempt_id = None
 
     @property
     def course_selection(self) -> CourseSelection | None:
@@ -187,12 +191,12 @@ class BookingContext:
         """Set a shop and invalidate shop-dependent selections."""
         if shop == self.shop:
             return
+        self.clear_booking_attempt()
         self.shop = shop
         self.suggested_shops = ()
         self.suggested_shops_loaded = False
         self._clear_course_and_availability()
         self.member_rank = None
-        self.visit_count = None
         self.ng_list_checked = False
         self.is_ng_customer = False
 
@@ -200,17 +204,17 @@ class BookingContext:
         """Set a date and invalidate date-dependent selections."""
         if booking_date == self.booking_date:
             return
+        self.clear_booking_attempt()
         self.booking_date = booking_date
         self._clear_course_and_availability()
 
     def set_num_customer(self, value: int) -> None:
         """Set a valid number of customers."""
         if not 1 <= value <= 3:
-            raise InvalidCustomerCountError(
-                "Number of customers must be between one and three."
-            )
+            raise InvalidCustomerCountError("Number of customers must be between one and three.")
         if value == self.num_customer:
             return
+        self.clear_booking_attempt()
         self.num_customer = value
         self.available_slots = None
         self.start_time = None
@@ -221,25 +225,23 @@ class BookingContext:
     def set_duration(self, value: int) -> None:
         """Set a positive duration divisible by 15 minutes."""
         if value <= 0 or value % 15 != 0:
-            raise InvalidDurationError(
-                "Booking duration must be positive and divisible by 15."
-            )
+            raise InvalidDurationError("Booking duration must be positive and divisible by 15.")
         if value == self.duration_minutes:
             return
+        self.clear_booking_attempt()
         self.duration_minutes = value
         self._clear_course_and_availability()
         self.course_selection_mode = CourseSelectionMode.MAIN
 
     def set_course_selection(self, selection: CourseSelection) -> None:
         """Set the main course and add-ons and invalidate availability."""
+        if selection != self.course_selection:
+            self.clear_booking_attempt()
         self.main_course = selection.main_course
         self.addons = selection.addons
-        self.options = ()
         self._clear_availability_and_therapist()
         self.course_selection_mode = (
-            CourseSelectionMode.ADDON
-            if not selection.addons
-            else CourseSelectionMode.NONE
+            CourseSelectionMode.ADDON if not selection.addons else CourseSelectionMode.NONE
         )
 
     def skip_addon(self) -> None:
@@ -256,6 +258,8 @@ class BookingContext:
 
     def set_start_time(self, start_time: time | None) -> None:
         """Set a time and require therapist revalidation."""
+        if start_time != self.start_time:
+            self.clear_booking_attempt()
         self.start_time = start_time
         self.therapist_verified = False
 
@@ -273,6 +277,8 @@ class BookingContext:
             raise TherapistNotAllowedForGroupError(
                 "Group bookings cannot specify a therapist preference."
             )
+        if preference != self.therapist_preference:
+            self.clear_booking_attempt()
         self.therapist_preference = preference
         self.therapist_verified = False
 
@@ -280,24 +286,15 @@ class BookingContext:
         """Store whether the selected therapist has been externally verified."""
         self.therapist_verified = verified
 
-    def set_options(self, options: tuple[BookingOption, ...]) -> None:
-        """Set compatible non-course options and invalidate availability."""
-        option_ids = [option.option_id for option in options]
-        if len(option_ids) != len(set(option_ids)):
-            raise InvalidCourseSelectionError(
-                "Booking options must have unique IDs."
-            )
-        self.options = options
-        self._clear_availability_and_therapist()
-
     def set_phone(self, phone: str) -> None:
         """Store a phone number and reset all customer verification."""
+        if phone != self.phone:
+            self.clear_booking_attempt()
         self.phone = phone
         self.customer = None
         self.customer_id = None
         self.phone_confirmed = False
         self.member_rank = None
-        self.visit_count = None
         self.ng_list_checked = False
         self.is_ng_customer = False
 
@@ -311,7 +308,6 @@ class BookingContext:
         self,
         *,
         member_rank: str | None,
-        visit_count: int | None = None,
         is_ng_customer: bool,
     ) -> None:
         """Store member and NG-list results supplied by the application."""
@@ -320,7 +316,6 @@ class BookingContext:
                 "A phone number is required before customer verification."
             )
         self.member_rank = member_rank
-        self.visit_count = visit_count
         self.ng_list_checked = True
         self.is_ng_customer = is_ng_customer
 
@@ -329,7 +324,6 @@ class BookingContext:
         self.phone = None
         self.phone_confirmed = False
         self.member_rank = None
-        self.visit_count = None
         self.ng_list_checked = False
         self.is_ng_customer = False
 
@@ -338,10 +332,8 @@ class BookingContext:
         self.shop = shop
         self.main_course = None
         self.addons = ()
-        self.options = ()
         self._clear_availability_and_therapist()
         self.member_rank = None
-        self.visit_count = None
         self.ng_list_checked = False
         self.is_ng_customer = False
         self._clear_booking_result()
@@ -355,9 +347,7 @@ class BookingContext:
     def change_num_customer(self, value: int | None) -> None:
         """Replace the party size after validating its domain range."""
         if value is not None and not 1 <= value <= 3:
-            raise InvalidCustomerCountError(
-                "Number of customers must be between one and three."
-            )
+            raise InvalidCustomerCountError("Number of customers must be between one and three.")
         self.num_customer = value
         self._clear_availability_and_therapist()
         self._clear_booking_result()
@@ -365,13 +355,10 @@ class BookingContext:
     def change_duration(self, value: int | None) -> None:
         """Replace duration and invalidate its course and slot dependencies."""
         if value is not None and (value <= 0 or value % 15 != 0):
-            raise InvalidDurationError(
-                "Booking duration must be positive and divisible by 15."
-            )
+            raise InvalidDurationError("Booking duration must be positive and divisible by 15.")
         self.duration_minutes = value
         self.main_course = None
         self.addons = ()
-        self.options = ()
         self._clear_availability_and_therapist()
         self._clear_booking_result()
         self.course_selection_mode = (
@@ -389,13 +376,10 @@ class BookingContext:
         else:
             self.main_course = selection.main_course
             self.addons = selection.addons
-        self.options = ()
         self._clear_availability_and_therapist()
         self._clear_booking_result()
         self.course_selection_mode = (
-            CourseSelectionMode.MAIN
-            if selection is None
-            else CourseSelectionMode.ADDON
+            CourseSelectionMode.MAIN if selection is None else CourseSelectionMode.ADDON
         )
 
     def change_start_time(self, start_time: time | None) -> None:
@@ -435,7 +419,6 @@ class BookingContext:
     def _clear_course_and_availability(self) -> None:
         self.main_course = None
         self.addons = ()
-        self.options = ()
         self._clear_availability_and_therapist()
         self.course_selection_mode = CourseSelectionMode.MAIN
 
@@ -446,12 +429,10 @@ class BookingContext:
         self.therapist_verified = False
 
     def _clear_booking_result(self) -> None:
+        self.clear_booking_attempt()
         self.booking_id = None
         self.booking = None
         self.reservation_code = None
-        self.reservation_codes = ()
-        self.child_reservation_ids = ()
-        self.pending_action = None
         self.last_failure_code = None
 
     def reset(self) -> None:
@@ -469,21 +450,34 @@ class BookingContext:
         self.duration_minutes = None
         self.therapist_preference = None
         self.therapist_verified = False
-        self.options = ()
         self.addons = ()
         self.available_slots = None
         self.booking_id = None
         self.phone = None
         self.phone_confirmed = False
         self.member_rank = None
-        self.visit_count = None
         self.ng_list_checked = False
         self.is_ng_customer = False
         self.booking = None
         self.reservation_code = None
-        self.reservation_codes = ()
-        self.child_reservation_ids = ()
-        self.pending_action = None
+        self.booking_attempt_id = None
         self.course_selection_mode = CourseSelectionMode.NONE
         self.last_failure_code = None
         self.turn_sequence = turn_sequence
+
+    def restart_booking(self) -> None:
+        """Reset booking data and enter the first selection state."""
+        self.reset()
+        self.state = BookingState.SELECTING_SHOP
+
+    def enter_shop_selection(self) -> None:
+        """Enter shop selection for a read-only shop discovery turn."""
+        if self.state is not BookingState.IDLE:
+            raise InvalidBookingDataError("Shop discovery can only start a booking from idle.")
+        self.state = BookingState.SELECTING_SHOP
+
+    def enter_time_selection(self) -> None:
+        """Enter time selection after externally loading current slots."""
+        if self.available_slots is None:
+            raise InvalidBookingDataError("Available slots are required before time selection.")
+        self.state = BookingState.SELECTING_TIME

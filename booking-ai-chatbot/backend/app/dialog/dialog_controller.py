@@ -1,9 +1,17 @@
-"""Orchestrate one parsed dialog turn across workflow primitives."""
+"""Own complete message and parsed-turn dialog orchestration."""
 
+from __future__ import annotations
+
+import logging
+import os
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+from datetime import datetime, timedelta
+from datetime import time as clock_time
 from enum import StrEnum
+from time import perf_counter
 from types import MappingProxyType
+from typing import TYPE_CHECKING, TypeVar, cast
 
 from app.application.action_registry import (
     ActionExecutionContext,
@@ -12,6 +20,9 @@ from app.application.action_registry import (
     ActionRegistry,
     ActionRegistryError,
 )
+from app.application.handlers.check_availability_handler import CheckAvailabilityHandler
+from app.application.handlers.search_course_handler import SearchCourseHandler
+from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.dialog.flow_loader import (
     ChangeRule,
     FlowAutoTransition,
@@ -20,9 +31,98 @@ from app.dialog.flow_loader import (
     FlowOnEnter,
     FlowTransition,
 )
+from app.dialog.nlu import (
+    EntityResolutionResult,
+    EntityResolutionStatus,
+    NLUEntityKind,
+    NLUResolutionStatus,
+    NLUResult,
+    entity_resolution_to_dialog_turn_input,
+    to_dialog_turn_input,
+)
 from app.dialog.state_machine import StateMachine
-from app.domain.booking_context import BookingContext
+from app.domain.booking_context import BookingContext, CourseSelectionMode
+from app.domain.booking_models import (
+    AvailableTherapistRequest,
+    Course,
+    CourseType,
+    Shop,
+    TherapistAvailabilityGateway,
+    TherapistPreference,
+)
 from app.domain.booking_state import BookingState
+from app.domain.outcomes import HandlerOutcome, HandlerResult
+from app.infrastructure.context_store import (
+    begin_turn_metrics,
+    bind_conversation,
+    bind_correlation_id,
+    bind_trace_context,
+    bind_turn,
+    current_turn_metrics,
+    elapsed_ms,
+    record_turn_metrics,
+    reset_conversation,
+    reset_correlation_id,
+    reset_trace_context,
+    reset_turn,
+    reset_turn_metrics,
+    trace_log,
+)
+
+if TYPE_CHECKING:
+    from app.dependencies import ApplicationContainer
+    from app.dialog.instruction_builder import DialogResponse
+
+logger = logging.getLogger(__name__)
+T = TypeVar("T")
+
+_UNRESOLVED_TEXT = {
+    BookingState.IDLE: "Tôi chưa hiểu yêu cầu. Bạn có thể nói: Tôi muốn đặt lịch.",
+    BookingState.SELECTING_SHOP: "Vui lòng cho biết cửa hàng hoặc khu vực bạn muốn đặt.",
+    BookingState.SELECTING_DATE: "Vui lòng nhập ngày, ví dụ: ngày mai hoặc 15/08.",
+    BookingState.SELECTING_PEOPLE: "Vui lòng cho biết số người từ 1 đến 3.",
+    BookingState.SELECTING_DURATION: "Vui lòng nhập thời lượng, ví dụ: 60 phút.",
+    BookingState.SELECTING_SERVICE: "Vui lòng nhập tên liệu trình bạn muốn chọn.",
+    BookingState.SELECTING_TIME: "Vui lòng nhập giờ rõ ràng, ví dụ: 19:00 hoặc 7 giờ tối.",
+    BookingState.SELECTING_THERAPIST: "Bạn có thể chọn Nam, Nữ hoặc Không yêu cầu.",
+    BookingState.COLLECTING_PHONE: "Vui lòng nhập số điện thoại hợp lệ.",
+    BookingState.COLLECTING_NAME: "Vui lòng nhập tên khách hàng.",
+}
+_AMBIGUOUS_TEXT = {
+    NLUEntityKind.SHOP: "Đã tìm thấy nhiều cửa hàng phù hợp. Vui lòng chọn một cửa hàng.",
+    NLUEntityKind.COURSE: "Đã tìm thấy nhiều liệu trình phù hợp. Vui lòng chọn một liệu trình.",
+    NLUEntityKind.THERAPIST: (
+        "Đã tìm thấy nhiều kỹ thuật viên phù hợp. Vui lòng chọn một kỹ thuật viên."
+    ),
+}
+_NOT_FOUND_TEXT = {
+    NLUEntityKind.SHOP: "Không tìm thấy cửa hàng phù hợp. Vui lòng nhập lại tên hoặc khu vực.",
+    NLUEntityKind.COURSE: "Không tìm thấy liệu trình phù hợp. Vui lòng nhập lại tên liệu trình.",
+    NLUEntityKind.THERAPIST: "Không tìm thấy kỹ thuật viên phù hợp.",
+}
+_UNSUPPORTED_TEXT = {
+    NLUEntityKind.SHOP: "Hiện tại hệ thống chưa hỗ trợ tra cứu cửa hàng này.",
+    NLUEntityKind.COURSE: "Hiện tại hệ thống chưa hỗ trợ tra cứu liệu trình này.",
+    NLUEntityKind.THERAPIST: (
+        "Hiện tại hệ thống chưa hỗ trợ tìm kỹ thuật viên theo tên. "
+        "Bạn có thể chọn Nam, Nữ hoặc Không yêu cầu."
+    ),
+}
+_ENTITY_FAILURE_TEXT = "Hệ thống chưa thể tra cứu thông tin lúc này. Vui lòng thử lại."
+_DEFAULT_UNRESOLVED_TEXT = "Tôi chưa hiểu yêu cầu. Vui lòng nhập lại rõ hơn."
+_RECOVERY_QUICK_REPLIES = {
+    BookingState.IDLE: ("Tôi muốn đặt lịch", "Xem danh sách cửa hàng"),
+    BookingState.SELECTING_DATE: ("Hôm nay", "Ngày mai"),
+    BookingState.SELECTING_PEOPLE: ("1 người", "2 người", "3 người"),
+    BookingState.SELECTING_DURATION: ("45 phút", "60 phút", "90 phút"),
+    BookingState.SELECTING_THERAPIST: ("Không yêu cầu", "Nam", "Nữ"),
+    BookingState.VERIFYING_PHONE: ("Xác nhận", "Nhập lại"),
+    BookingState.AWAITING_CONFIRMATION: ("Xác nhận", "Chỉnh sửa", "Hủy"),
+    BookingState.BOOKING_FAILED: ("Thử lại", "Chọn giờ khác", "Hủy"),
+}
+_TERMINAL_CHANGE_TEXT = (
+    "Đặt lịch này đã hoàn tất. Vui lòng tạo yêu cầu mới để thay đổi hoặc hủy lịch."
+)
 
 
 class DialogControllerError(Exception):
@@ -101,6 +201,34 @@ class DialogController:
         self._action_registry = action_registry
         self._change_rules = dict(change_rules or {})
         self._max_auto_transitions = max_auto_transitions
+        self._runtime: ApplicationContainer | None = None
+
+    def bind_runtime(self, runtime: "ApplicationContainer") -> None:
+        """Bind the completed composition graph once for message orchestration."""
+        if self._runtime is not None and self._runtime is not runtime:
+            raise RuntimeError("DialogController runtime is already bound.")
+        self._runtime = runtime
+
+    async def handle_message(
+        self,
+        *,
+        conversation_id: str,
+        message: str,
+        idempotency_key: str | None = None,
+        correlation_id: str | None = None,
+    ) -> "DialogResponse":
+        """Own one complete turn from context load through response generation."""
+        if self._runtime is None:
+            raise RuntimeError("DialogController runtime is not bound.")
+        runtime = self._runtime
+        async with runtime.conversation_context_store.conversation_lock(conversation_id):
+            return await _process_serialized_chat_message(
+                conversation_id=conversation_id,
+                message=message,
+                idempotency_key=idempotency_key,
+                container=runtime,
+                correlation_id=correlation_id,
+            )
 
     async def handle_turn(
         self,
@@ -109,11 +237,25 @@ class DialogController:
     ) -> DialogTurnResult:
         """Execute one already parsed dialog turn without rendering output."""
         initial_state = booking_context.state
+        if initial_state is BookingState.COMPLETED and turn.intent == "confirm":
+            return self._success_result(
+                booking_context=booking_context,
+                initial_state=initial_state,
+                intent=turn.intent,
+                instruction_template="booking_complete",
+                committed_actions=(),
+                auto_transition_count=0,
+            )
+        if turn.intent == "confirm" and initial_state in {
+            BookingState.AWAITING_CONFIRMATION,
+            BookingState.BOOKING_FAILED,
+        }:
+            booking_context.ensure_booking_attempt_id()
         action_context = ActionExecutionContext(
             booking_context=booking_context,
             intent=turn.intent,
             payload=turn.payload,
-            idempotency_key=turn.idempotency_key,
+            idempotency_key=booking_context.booking_attempt_id,
         )
         change_rule: ChangeRule | None = None
         has_change_value = False
@@ -147,6 +289,8 @@ class DialogController:
 
         committed_actions = transition_report.executed_action_names
         self._state_machine.apply_transition(booking_context, transition)
+        if booking_context.state is BookingState.CANCELLED:
+            booking_context.clear_booking_attempt()
         on_enter = self._flow.states[booking_context.state].on_enter
         try:
             on_enter_report = await self._execute_state_on_enter(
@@ -196,9 +340,7 @@ class DialogController:
     ) -> tuple[ChangeRule, FlowTransition, bool]:
         target = turn.payload.get("change_target")
         if not isinstance(target, str):
-            raise InvalidDialogTurnError(
-                "A booking change requires a supported change target."
-            )
+            raise InvalidDialogTurnError("A booking change requires a supported change target.")
         try:
             rule = self._change_rules[target]
         except KeyError as error:
@@ -234,9 +376,7 @@ class DialogController:
         count = 0
         seen: set[tuple[BookingState, BookingState, tuple[str, ...]]] = set()
         while True:
-            auto_transition = self._state_machine.resolve_auto_transition(
-                booking_context
-            )
+            auto_transition = self._state_machine.resolve_auto_transition(booking_context)
             if auto_transition is None:
                 return self._success_result(
                     booking_context=booking_context,
@@ -367,9 +507,7 @@ class DialogController:
             final_state=booking_context.state,
             intent=intent,
             instruction_template=failure.instruction_template,
-            executed_actions=(
-                committed_actions + failure_report.executed_action_names
-            ),
+            executed_actions=(committed_actions + failure_report.executed_action_names),
             auto_transition_count=auto_transition_count,
             failure_code=failure_code,
             failed_action=error.action_name,
@@ -428,14 +566,10 @@ class DialogController:
         seen: set[tuple[BookingState, BookingState, tuple[str, ...]]],
     ) -> None:
         if count >= self._max_auto_transitions:
-            raise AutoTransitionLimitError(
-                "Maximum auto transitions exceeded for one turn."
-            )
+            raise AutoTransitionLimitError("Maximum auto transitions exceeded for one turn.")
         signature = (source_state, transition.target, transition.actions)
         if signature in seen:
-            raise AutoTransitionCycleError(
-                "An auto-transition signature repeated in one turn."
-            )
+            raise AutoTransitionCycleError("An auto-transition signature repeated in one turn.")
         seen.add(signature)
 
     @staticmethod
@@ -507,3 +641,1091 @@ class DialogController:
             failed_action=failed_action,
             original_error=original_error,
         )
+
+
+async def _process_serialized_chat_message(
+    *,
+    conversation_id: str,
+    message: str,
+    idempotency_key: str | None,
+    container: ApplicationContainer,
+    correlation_id: str | None = None,
+) -> DialogResponse:
+    """Run the deterministic message pipeline without booking business rules."""
+    token = bind_conversation(conversation_id)
+    correlation_token = bind_correlation_id(correlation_id)
+    started_at = perf_counter()
+    context = await container.conversation_context_store.get_copy(conversation_id)
+    turn_token = bind_turn(context.begin_turn())
+    distributed_trace_token = bind_trace_context(
+        trace_id=correlation_id,
+        session_id=conversation_id,
+        turn_id=context.turn_sequence,
+    )
+    metrics_token = begin_turn_metrics()
+    context_before = _context_snapshot(context)
+    initial_state = context.state
+    trace_log(
+        logger,
+        logging.INFO,
+        "ChatAPI",
+        "user_message_received",
+        current_state=initial_state.value,
+        message_length=len(message),
+    )
+    trace_log(logger, logging.INFO, "DialogController", "turn_started", state=initial_state.value)
+    if _local_debug_enabled("LOG_USER_MESSAGES"):
+        trace_log(
+            logger,
+            logging.DEBUG,
+            "Turn",
+            "user_message",
+            function="handle_message",
+            user_message=message[:500],
+        )
+    try:
+        response = await _process_bound_chat_message(
+            conversation_id=conversation_id,
+            message=message,
+            idempotency_key=idempotency_key,
+            container=container,
+            context=context,
+        )
+        if getattr(container, "llm_nlg_required", False):
+            response = await container.response_generator.generate(
+                response=response,
+                context=context,
+            )
+        if response.status is not DialogTurnStatus.FAILURE_UNHANDLED:
+            await container.conversation_context_store.save(
+                conversation_id,
+                context,
+            )
+            _trace_context_saved(context)
+        _log_instruction(response)
+        _trace_context_diff(context_before, context)
+        trace_log(
+            logger,
+            logging.INFO,
+            "Response",
+            "prepared",
+            state=response.state.value,
+            status=response.status.value,
+            quick_reply_count=len(response.quick_replies),
+            instruction_template=response.instruction_template or "none",
+        )
+        if _local_debug_enabled("LOG_AI_MESSAGES"):
+            trace_log(
+                logger,
+                logging.DEBUG,
+                "ResponseGenerator",
+                "ai_response_created",
+                function="handle_message",
+                assistant_message=response.text[:1000],
+            )
+        trace_log(
+            logger,
+            logging.INFO,
+            "DialogController",
+            "turn_completed",
+            state=response.state.value,
+            status=response.status.value,
+            intent=current_turn_metrics().intent or "unresolved",
+            handler=current_turn_metrics().handler or "none",
+            outcome=current_turn_metrics().outcome or response.status.value,
+            state_transition=f"{initial_state.value}->{response.state.value}",
+            pos_calls=current_turn_metrics().pos_calls,
+            qdrant_calls=current_turn_metrics().qdrant_calls,
+            nlu_duration_ms=current_turn_metrics().nlu_duration_ms,
+            handler_duration_ms=current_turn_metrics().handler_duration_ms,
+            nlg_duration_ms=current_turn_metrics().nlg_duration_ms,
+            duration_ms=elapsed_ms(started_at),
+        )
+        return response
+    except Exception as error:
+        trace_log(
+            logger,
+            logging.ERROR,
+            "DialogController",
+            "turn_failed",
+            state=context.state.value,
+            exception_type=type(error).__name__,
+            duration_ms=elapsed_ms(started_at),
+            _exc_info=True,
+        )
+        raise
+    finally:
+        reset_turn_metrics(metrics_token)
+        reset_trace_context(distributed_trace_token)
+        reset_turn(turn_token)
+        reset_correlation_id(correlation_token)
+        reset_conversation(token)
+
+
+async def _process_bound_chat_message(
+    *,
+    conversation_id: str,
+    message: str,
+    idempotency_key: str | None,
+    container: ApplicationContainer,
+    context: BookingContext,
+) -> DialogResponse:
+    """Process a turn after its safe logging context has been bound."""
+    if context.state is BookingState.AWAITING_CONFIRMATION and _is_generic_change_request(message):
+        return _change_menu_response(context)
+
+    nlu_result = await container.llm_nlu.parse(
+        text=message,
+        state=context.state,
+        context=context,
+    )
+    resolver = "llm"
+
+    if context.state in {
+        BookingState.COMPLETED,
+        BookingState.CANCELLED,
+    } and nlu_result.matched_rule in {
+        "change_booking_field",
+        "change_entity_query",
+        "state_incompatible_change_info",
+    }:
+        return _handled_response(context, _TERMINAL_CHANGE_TEXT)
+
+    trace_log(
+        logger,
+        logging.INFO,
+        "NLU",
+        "resolved",
+        intent=nlu_result.intent or "unresolved",
+        resolver=resolver,
+        entity=nlu_result.entity_kind.value if nlu_result.entity_kind else "none",
+        function="parse",
+        input_summary=f"state={context.state.value}, chars={len(message)}",
+        output_summary=(
+            f"status={nlu_result.resolution_status.value}, rule={nlu_result.matched_rule or 'none'}"
+        ),
+        status=nlu_result.resolution_status.value,
+    )
+    record_turn_metrics(intent=nlu_result.intent or "unresolved")
+
+    if nlu_result.intent in {"greeting", "thanks", "ask_why", "repeat_last_question"}:
+        _trace_route("global_intent", "global_intent", nlu_result, context)
+        if nlu_result.intent == "repeat_last_question" and context.last_failure_code in {
+            "slot_api_error",
+            "no_slots_available",
+        }:
+            return await _retry_availability(container=container, context=context)
+        return _global_intent_response(nlu_result.intent, context)
+
+    if nlu_result.intent == "restart_booking":
+        _trace_route("restart", "llm", nlu_result, context)
+        context.restart_booking()
+        response = _global_intent_response("restart_booking", context)
+        response = await _with_proactive_suggestions(
+            response=response,
+            container=container,
+            context=context,
+        )
+        return response
+
+    if nlu_result.intent in _DISCOVERY_INTENTS:
+        _trace_route("discovery", "llm", nlu_result, context)
+        response = await _handle_discovery(
+            nlu_result=nlu_result,
+            container=container,
+            context=context,
+        )
+        return response
+
+    if nlu_result.intent == "ask_question":
+        _trace_route(
+            "faq",
+            "llm",
+            nlu_result,
+            context,
+        )
+        faq_turn = to_dialog_turn_input(
+            nlu_result,
+            state=context.state,
+            intent_policy=container.state_intent_policy,
+            raw_message=message,
+        )
+        query = faq_turn.payload["query"]
+        assert isinstance(query, str)
+        knowledge_started = perf_counter()
+        response = await container.faq_manager.answer(
+            query=query,
+            context=context,
+        )
+        trace_log(
+            logger,
+            logging.INFO,
+            "Knowledge",
+            "completed",
+            status=response.status.value,
+            source_count=response.metadata.get("source_count", 0),
+            duration_ms=elapsed_ms(knowledge_started),
+        )
+        return response
+
+    if nlu_result.resolution_status is NLUResolutionStatus.UNRESOLVED:
+        _trace_route("unresolved_recovery", "unresolved_recovery", nlu_result, context)
+        return _handled_response(
+            context,
+            _UNRESOLVED_TEXT.get(context.state, _DEFAULT_UNRESOLVED_TEXT),
+            _state_recovery_quick_replies(context),
+        )
+
+    if nlu_result.resolution_status is NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED:
+        _trace_route("entity_resolution", "state_expected_entity", nlu_result, context)
+        entity_kind = nlu_result.entity_kind
+        assert entity_kind is not None
+        resolution_started = perf_counter()
+        resolution = await container.entity_resolution_coordinator.resolve(
+            nlu_result=nlu_result,
+            state=context.state,
+            context=context,
+        )
+        trace_log(
+            logger,
+            logging.INFO,
+            "EntityResolver",
+            "completed",
+            entity=resolution.entity_kind.value,
+            resolution_status=resolution.status.value,
+            candidate_count=len(resolution.candidates),
+            function="resolve",
+            input_summary=f"state={context.state.value}, entity={entity_kind.value}",
+            output_summary=f"matched={_matched_display_name(resolution)}",
+            search_scope=context.state.value,
+            error_code=resolution.failure_code or "none",
+            duration_ms=elapsed_ms(resolution_started),
+        )
+        if _local_debug_enabled("LOG_USER_MESSAGES"):
+            trace_log(
+                logger,
+                logging.DEBUG,
+                "EntityResolver",
+                "query",
+                function="resolve",
+                query=message[:500],
+                entity_type=entity_kind.value,
+                search_scope=context.state.value,
+            )
+        if resolution.status is not EntityResolutionStatus.RESOLVED:
+            return await _entity_response(context, resolution, container)
+        turn = entity_resolution_to_dialog_turn_input(
+            resolution,
+            state=context.state,
+            intent_policy=container.state_intent_policy,
+            idempotency_key=idempotency_key,
+        )
+    else:
+        _trace_route(
+            "dialog",
+            "llm",
+            nlu_result,
+            context,
+        )
+        turn = to_dialog_turn_input(
+            nlu_result,
+            state=context.state,
+            intent_policy=container.state_intent_policy,
+            idempotency_key=idempotency_key,
+            raw_message=message,
+        )
+
+    trace_log(
+        logger,
+        logging.INFO,
+        "DialogCtrl",
+        "dispatch",
+        intent=turn.intent,
+        state=context.state.value,
+    )
+    controller_started = perf_counter()
+    result = await container.dialog_controller.handle_turn(context, turn)
+    result = await _consume_requested_entities(
+        container=container,
+        context=context,
+        result=result,
+        idempotency_key=idempotency_key,
+    )
+    record_turn_metrics(
+        intent=result.intent,
+        handler=",".join(result.executed_actions) or "none",
+        outcome=result.status.value,
+        handler_duration_ms=elapsed_ms(controller_started),
+    )
+    trace_log(
+        logger,
+        logging.INFO,
+        "DialogCtrl",
+        "transition",
+        from_state=result.initial_state.value,
+        to_state=result.final_state.value,
+        intent=result.intent,
+        status=result.status.value,
+        function="handle_turn",
+        input_summary=(
+            f"intent={turn.intent}, payload_keys={','.join(sorted(turn.payload)) or 'none'}"
+        ),
+        output_summary=f"actions={','.join(result.executed_actions) or 'none'}",
+        error_code=result.failure_code or "none",
+        duration_ms=elapsed_ms(controller_started),
+    )
+    trace_log(
+        logger,
+        logging.INFO,
+        "StateMachine",
+        "transition",
+        from_state=result.initial_state.value,
+        to_state=result.final_state.value,
+    )
+    if result.executed_actions:
+        trace_log(
+            logger,
+            logging.INFO,
+            "ActionRegistry",
+            "completed",
+            function="execute_actions",
+            input_summary=f"action_count={len(result.executed_actions)}",
+            output_summary=",".join(result.executed_actions),
+            status=result.status.value,
+        )
+    if result.failure_code is not None:
+        trace_log(
+            logger,
+            logging.WARNING,
+            "DialogCtrl",
+            "business_failure",
+            error_code=result.failure_code,
+            failed_action=result.failed_action or "none",
+        )
+    response = container.instruction_builder.build_response(
+        result=result,
+        context=context,
+    )
+    if result.status is DialogTurnStatus.SUCCESS:
+        response = await _with_proactive_suggestions(
+            response=response,
+            container=container,
+            context=context,
+        )
+    elif not response.quick_replies:
+        response = _with_state_recovery_suggestions(response, context)
+    return response
+
+
+async def _consume_requested_entities(
+    *,
+    container: ApplicationContainer,
+    context: BookingContext,
+    result: DialogTurnResult,
+    idempotency_key: str | None,
+) -> DialogTurnResult:
+    """Apply previously extracted fields only when their workflow step is reached."""
+    follow_up: DialogTurnInput | None = None
+    if (
+        result.status is DialogTurnStatus.SUCCESS
+        and context.state is BookingState.SELECTING_DATE
+        and context.requested_booking_date is not None
+    ):
+        booking_date = context.requested_booking_date
+        context.requested_booking_date = None
+        follow_up = DialogTurnInput(
+            "select_date",
+            {"booking_date": booking_date},
+            idempotency_key=idempotency_key,
+        )
+    elif (
+        result.status is DialogTurnStatus.SUCCESS
+        and context.state is BookingState.SELECTING_TIME
+        and context.requested_start_time is not None
+    ):
+        start_time = context.requested_start_time
+        context.requested_start_time = None
+        follow_up = DialogTurnInput(
+            "select_time",
+            {"start_time": start_time},
+            idempotency_key=idempotency_key,
+        )
+    if follow_up is None:
+        return result
+    consumed = await container.dialog_controller.handle_turn(context, follow_up)
+    trace_log(
+        logger,
+        logging.INFO,
+        "DialogCtrl",
+        "prefilled_entity_consumed",
+        intent=follow_up.intent,
+        from_state=consumed.initial_state.value,
+        to_state=consumed.final_state.value,
+        status=consumed.status.value,
+    )
+    return consumed
+
+
+def _trace_route(
+    route: str,
+    reason: str,
+    result: NLUResult,
+    context: BookingContext,
+) -> None:
+    trace_log(
+        logger,
+        logging.INFO,
+        "Router",
+        "dispatch",
+        route=route,
+        reason=reason,
+        intent=result.intent or "unresolved",
+        state=context.state.value,
+    )
+
+
+def _context_snapshot(context: BookingContext) -> dict[str, object]:
+    return {
+        item.name: getattr(context, item.name)
+        for item in fields(context)
+        if item.name not in {"conversation_id", "turn_sequence"}
+    }
+
+
+def _trace_context_diff(before: Mapping[str, object], context: BookingContext) -> None:
+    after = _context_snapshot(context)
+    changed = sorted(name for name, value in after.items() if value != before[name])
+    cleared = sorted(name for name in changed if before[name] is not None and after[name] is None)
+    preserved = sorted(
+        name
+        for name, value in after.items()
+        if _is_meaningful_context_value(value) and value == before[name]
+    )
+    trace_log(
+        logger,
+        logging.INFO,
+        "ContextStore",
+        "context_updated",
+        function="handle_turn",
+        fields_changed=changed,
+        fields_preserved=preserved,
+        fields_cleared=cleared,
+        updated_fields=changed,
+        status="changed" if changed else "unchanged",
+    )
+
+
+def _is_meaningful_context_value(value: object) -> bool:
+    return value is not None and value is not False and value != () and value != "none"
+
+
+def _matched_display_name(resolution: EntityResolutionResult) -> str:
+    for value in resolution.dispatch_payload.values():
+        display_name = getattr(value, "name", None)
+        if isinstance(display_name, str):
+            return display_name
+    return "none"
+
+
+def _trace_context_saved(context: BookingContext) -> None:
+    trace_log(
+        logger,
+        logging.DEBUG,
+        "Context",
+        "saved",
+        state=context.state.value,
+    )
+
+
+async def _with_proactive_suggestions(
+    *,
+    response: DialogResponse,
+    container: ApplicationContainer,
+    context: BookingContext,
+) -> DialogResponse:
+    """Load safe choices for the state the customer has just entered."""
+    from app.dialog.instruction_builder import DialogResponse
+
+    try:
+        if context.state is BookingState.SELECTING_SHOP:
+            shops = list(context.suggested_shops)
+            if not context.suggested_shops_loaded:
+                shop_handler = cast(SearchShopHandler, container.handler(SearchShopHandler))
+                result = await shop_handler.execute()
+                shops = _handler_items(result, "shops", Shop)
+            return _shop_catalog_response(context, shops, filtered=False)
+
+        if context.state is BookingState.SELECTING_SERVICE and context.shop is not None:
+            course_type = (
+                CourseType.ADDON
+                if context.course_selection_mode is CourseSelectionMode.ADDON
+                else CourseType.MAIN
+            )
+            service_handler = cast(
+                SearchCourseHandler,
+                container.handler(SearchCourseHandler),
+            )
+            result = await service_handler.execute(
+                context.shop.shop_id,
+                course_type=course_type,
+            )
+            courses = _handler_items(result, "courses", Course)
+            if course_type is CourseType.MAIN and context.duration_minutes is not None:
+                courses = [
+                    service
+                    for service in courses
+                    if service.duration_minutes == context.duration_minutes
+                ]
+            return _service_step_response(
+                context,
+                courses,
+                course_type=course_type,
+            )
+
+        if context.state is BookingState.SELECTING_THERAPIST and context.num_customer == 1:
+            therapists = await _available_therapists(container, context)
+            names = tuple(
+                item.therapist_name for item in therapists[:8] if item.therapist_name is not None
+            )
+            if names:
+                return DialogResponse(
+                    text=(
+                        "Kỹ thuật viên đang phù hợp với khung giờ đã chọn:\n"
+                        + "\n".join(f"{index}. {name}" for index, name in enumerate(names, 1))
+                        + "\nBạn có thể chọn theo tên, giới tính hoặc không yêu cầu."
+                    ),
+                    instruction_template=response.instruction_template,
+                    state=context.state,
+                    status=response.status,
+                    quick_replies=names + ("Không yêu cầu", "Nam", "Nữ"),
+                    metadata=response.metadata,
+                )
+    except Exception as error:
+        trace_log(
+            logger,
+            logging.WARNING,
+            "Handler",
+            "suggestions_failed",
+            state=context.state.value,
+            error_code=type(error).__name__,
+        )
+    return response
+
+
+async def _available_therapists(
+    container: ApplicationContainer,
+    context: BookingContext,
+) -> list[TherapistPreference]:
+    if (
+        context.shop is None
+        or context.booking_date is None
+        or context.start_time is None
+        or context.total_duration_minutes is None
+    ):
+        return []
+    end_time = (
+        datetime.combine(context.booking_date, context.start_time)
+        + timedelta(minutes=context.total_duration_minutes)
+    ).time()
+    gateway = cast(TherapistAvailabilityGateway, container.booking_gateway)
+    return await gateway.search_available_therapists(
+        AvailableTherapistRequest(
+            shop_id=context.shop.shop_id,
+            booking_date=context.booking_date,
+            start_time=context.start_time,
+            end_time=end_time,
+        )
+    )
+
+
+def _log_instruction(response: DialogResponse) -> None:
+    trace_log(
+        logger,
+        logging.INFO,
+        "InstructionBuilder",
+        "instruction_built",
+        instruction_template=response.instruction_template or "none",
+        instruction_length=len(response.text),
+        template_key=response.instruction_template or "none",
+    )
+    if _local_debug_enabled("LOG_LLM_PROMPTS"):
+        trace_log(
+            logger,
+            logging.DEBUG,
+            "DialogCtrl",
+            "instruction_content",
+            instruction=response.text,
+        )
+
+
+def _local_debug_enabled(name: str) -> bool:
+    environment = os.getenv("APP_ENV", "production").strip().casefold()
+    enabled = os.getenv(name, "false").strip().casefold()
+    return environment in {"local", "development", "dev"} and enabled in {
+        "true",
+        "1",
+        "yes",
+        "on",
+    }
+
+
+_DISCOVERY_INTENTS = frozenset(
+    {
+        "list_shops",
+        "search_shops",
+        "list_services",
+        "list_addons",
+        "list_available_times",
+        "list_therapists",
+    }
+)
+
+
+async def _handle_discovery(
+    *,
+    nlu_result: NLUResult,
+    container: ApplicationContainer,
+    context: BookingContext,
+) -> DialogResponse:
+    """Run one read-only catalog operation without selecting an entity."""
+    try:
+        if nlu_result.intent in {"list_shops", "search_shops"}:
+            query = nlu_result.payload.get("location_query")
+            if query is not None and not isinstance(query, str):
+                return _handled_response(context, "Vui lòng nhập lại khu vực cần tìm.")
+            shop_handler = cast(SearchShopHandler, container.handler(SearchShopHandler))
+            result = await shop_handler.execute(query)
+            shops = _handler_items(result, "shops", Shop, allow_not_found=True)
+            if shops and context.state is BookingState.IDLE:
+                context.enter_shop_selection()
+            return _shop_catalog_response(context, shops, filtered=query is not None)
+
+        if nlu_result.intent in {"list_services", "list_addons"}:
+            if context.shop is None:
+                return _handled_response(
+                    context,
+                    "Bạn hãy chọn cửa hàng trước để tôi tải danh sách liệu trình từ POS.",
+                )
+            course_type = (
+                CourseType.ADDON if nlu_result.intent == "list_addons" else CourseType.MAIN
+            )
+            service_handler = cast(
+                SearchCourseHandler,
+                container.handler(SearchCourseHandler),
+            )
+            result = await service_handler.execute(
+                context.shop.shop_id,
+                course_type=course_type,
+            )
+            courses = _handler_items(
+                result,
+                "courses",
+                Course,
+                allow_not_found=True,
+            )
+            if context.duration_minutes is not None:
+                courses = [
+                    service
+                    for service in courses
+                    if course_type is CourseType.ADDON
+                    or service.duration_minutes == context.duration_minutes
+                ]
+            return _service_catalog_response(context, courses)
+
+        if nlu_result.intent == "list_available_times":
+            missing = _missing_availability_field(context)
+            if missing is not None:
+                return _handled_response(context, missing)
+            availability_handler = cast(
+                CheckAvailabilityHandler,
+                container.handler(CheckAvailabilityHandler),
+            )
+            result = await availability_handler.execute(context)
+            slots = _handler_items(result, "slots", clock_time)
+            context.set_available_slots(tuple(slots))
+            context.enter_time_selection()
+            context.last_failure_code = None
+            labels = tuple(slot.strftime("%H:%M") for slot in slots)
+            return _catalog_response(
+                context,
+                "Các khung giờ đang trống: " + ", ".join(labels) + ". Bạn muốn chọn giờ nào?",
+                labels,
+                len(labels),
+            )
+
+        if nlu_result.intent == "list_therapists":
+            if context.num_customer is not None and context.num_customer >= 2:
+                return _handled_response(
+                    context,
+                    "Đặt lịch nhóm không hỗ trợ chọn kỹ thuật viên cá nhân.",
+                )
+            return _handled_response(
+                context,
+                "POS hiện chưa cung cấp API danh sách kỹ thuật viên cho chatbot.",
+            )
+    except Exception as error:
+        trace_log(
+            logger,
+            logging.WARNING,
+            "Handler",
+            "discovery_failed",
+            action=nlu_result.intent or "unknown",
+            error_code=type(error).__name__,
+        )
+        context.last_failure_code = type(error).__name__
+        return _handled_response(
+            context,
+            "Hệ thống chưa thể tải danh sách từ POS lúc này. Vui lòng thử lại.",
+        )
+    return _handled_response(context, "Yêu cầu danh sách chưa được hỗ trợ.")
+
+
+def _shop_catalog_response(
+    context: BookingContext,
+    shops: list[Shop],
+    *,
+    filtered: bool,
+) -> DialogResponse:
+    if not shops:
+        message = (
+            "Không tìm thấy cửa hàng trong khu vực này. Vui lòng thử tên khu vực khác."
+            if filtered
+            else "POS hiện không trả về cửa hàng nào."
+        )
+        return _handled_response(context, message)
+    names = tuple(shop.name for shop in shops)
+    visible = names[:8]
+    lines = "\n".join(f"{index}. {name}" for index, name in enumerate(visible, 1))
+    suffix = (
+        f"\nĐang hiển thị 8/{len(names)} kết quả; bạn có thể nhập tên hoặc khu vực."
+        if len(names) > 8
+        else ""
+    )
+    text = f"Komorebi hiện có các cửa hàng:\n{lines}{suffix}\nBạn muốn chọn cửa hàng nào?"
+    return _catalog_response(context, text, visible, len(names))
+
+
+def _service_catalog_response(
+    context: BookingContext,
+    courses: list[Course],
+) -> DialogResponse:
+    if not courses:
+        return _handled_response(
+            context,
+            "POS không trả về liệu trình phù hợp với cửa hàng và thời lượng hiện tại.",
+        )
+    main = [item for item in courses if item.course_type is CourseType.MAIN]
+    addons = [item for item in courses if item.course_type is CourseType.ADDON]
+    sections: list[str] = []
+    if main:
+        sections.append("Liệu trình chính:\n" + _numbered_course_names(main))
+    if addons:
+        sections.append("Add-on:\n" + _numbered_course_names(addons))
+    names = tuple(item.name for item in courses[:8])
+    text = "\n".join(sections) + "\nBạn muốn chọn liệu trình nào?"
+    return _catalog_response(context, text, names, len(courses))
+
+
+def _service_step_response(
+    context: BookingContext,
+    courses: list[Course],
+    *,
+    course_type: CourseType,
+) -> DialogResponse:
+    if course_type is CourseType.MAIN:
+        if not courses:
+            return _handled_response(
+                context,
+                "POS không có liệu trình chính phù hợp với thời lượng đã chọn.",
+            )
+        visible = courses[:8]
+        text = (
+            "Các liệu trình chính phù hợp:\n"
+            + _numbered_course_names(visible)
+            + "\nBạn hãy chọn một liệu trình chính."
+        )
+        return _catalog_response(
+            context,
+            text,
+            tuple(service.name for service in visible),
+            len(courses),
+        )
+
+    if context.main_course is None:
+        raise ValueError("An add-on suggestion requires a selected main course.")
+    visible = courses[:7]
+    if visible:
+        text = (
+            f"Liệu trình chính đã chọn: {context.main_course.name}.\n"
+            "Các add-on có thể chọn thêm:\n"
+            + _numbered_course_names(visible)
+            + "\nBạn hãy chọn một add-on hoặc bỏ qua bước này."
+        )
+    else:
+        text = (
+            f"Liệu trình chính đã chọn: {context.main_course.name}. "
+            "Cửa hàng hiện không có add-on khả dụng; bạn có thể tiếp tục chọn giờ."
+        )
+    return _catalog_response(
+        context,
+        text,
+        tuple(service.name for service in visible) + ("Không chọn add-on",),
+        len(courses),
+    )
+
+
+def _numbered_course_names(courses: list[Course]) -> str:
+    return "\n".join(f"{index}. {service.name}" for index, service in enumerate(courses[:8], 1))
+
+
+def _catalog_response(
+    context: BookingContext,
+    text: str,
+    quick_replies: tuple[str, ...],
+    item_count: int,
+) -> DialogResponse:
+    from app.dialog.instruction_builder import DialogResponse
+
+    return DialogResponse(
+        text=text,
+        instruction_template=None,
+        state=context.state,
+        status=DialogTurnStatus.SUCCESS,
+        quick_replies=quick_replies,
+        metadata={"item_count": item_count},
+    )
+
+
+def _missing_availability_field(context: BookingContext) -> str | None:
+    fields = (
+        (context.shop, "Bạn hãy chọn cửa hàng trước khi xem giờ trống."),
+        (context.booking_date, "Bạn hãy chọn ngày trước khi xem giờ trống."),
+        (context.num_customer, "Bạn hãy chọn số người trước khi xem giờ trống."),
+        (context.duration_minutes, "Bạn hãy chọn thời lượng trước khi xem giờ trống."),
+        (context.main_course, "Bạn hãy chọn liệu trình trước khi xem giờ trống."),
+    )
+    return next((message for value, message in fields if value is None), None)
+
+
+async def _entity_response(
+    context: BookingContext,
+    result: EntityResolutionResult,
+    container: ApplicationContainer,
+) -> DialogResponse:
+    if result.status is EntityResolutionStatus.AMBIGUOUS:
+        return _handled_response(
+            context,
+            _AMBIGUOUS_TEXT[result.entity_kind],
+            _candidate_names(result),
+        )
+    if result.status is EntityResolutionStatus.NOT_FOUND:
+        if result.entity_kind is NLUEntityKind.COURSE and context.shop is not None:
+            handler = cast(SearchCourseHandler, container.handler(SearchCourseHandler))
+            course_type = (
+                CourseType.ADDON
+                if context.course_selection_mode is CourseSelectionMode.ADDON
+                else CourseType.MAIN
+            )
+            handler_result = await handler.execute(
+                context.shop.shop_id,
+                course_type=course_type,
+            )
+            courses = _handler_items(
+                handler_result,
+                "courses",
+                Course,
+                allow_not_found=True,
+            )
+            if course_type is CourseType.MAIN and context.duration_minutes is not None:
+                courses = [
+                    service
+                    for service in courses
+                    if service.duration_minutes == context.duration_minutes
+                ]
+            if courses:
+                noun = "add-on" if course_type is CourseType.ADDON else "liệu trình chính"
+                visible = courses[:8]
+                return _handled_response(
+                    context,
+                    f"Không tìm thấy {noun} phù hợp. Bạn có thể chọn:\n"
+                    + _numbered_course_names(visible),
+                    tuple(service.name for service in visible),
+                )
+        return _handled_response(context, _NOT_FOUND_TEXT[result.entity_kind])
+    if result.status is EntityResolutionStatus.UNSUPPORTED:
+        return _handled_response(context, _UNSUPPORTED_TEXT[result.entity_kind])
+    return _handled_response(context, _ENTITY_FAILURE_TEXT)
+
+
+async def _retry_availability(
+    *, container: ApplicationContainer, context: BookingContext
+) -> DialogResponse:
+    try:
+        missing = _missing_availability_field(context)
+        if missing is not None:
+            return _handled_response(context, missing)
+        handler = cast(
+            CheckAvailabilityHandler,
+            container.handler(CheckAvailabilityHandler),
+        )
+        result = await handler.execute(context)
+        slots = _handler_items(result, "slots", clock_time)
+        context.set_available_slots(tuple(slots))
+        context.enter_time_selection()
+        context.last_failure_code = None
+        labels = tuple(slot.strftime("%H:%M") for slot in slots)
+        return _catalog_response(
+            context,
+            "Đã tải lại các khung giờ trống: " + ", ".join(labels) + ".",
+            labels,
+            len(labels),
+        )
+    except Exception as error:
+        context.last_failure_code = type(error).__name__
+        return _handled_response(
+            context,
+            "Tôi vẫn chưa tải được khung giờ từ POS. Các thông tin đã chọn "
+            "vẫn được giữ; bạn có thể thử lại hoặc bỏ add-on.",
+            ("Thử lại", "Không chọn add-on"),
+        )
+
+
+def _global_intent_response(intent: str, context: BookingContext) -> DialogResponse:
+    from app.dialog.instruction_builder import DialogResponse
+
+    if intent == "greeting":
+        text = "Xin chào! Thông tin đặt lịch hiện tại của bạn vẫn được giữ."
+    elif intent == "thanks":
+        text = "Rất vui được hỗ trợ bạn."
+    elif intent == "restart_booking":
+        text = "Mình đã bắt đầu lại. Bạn hãy chọn cửa hàng."
+    else:
+        prompt = _UNRESOLVED_TEXT.get(context.state, _DEFAULT_UNRESOLVED_TEXT)
+        if context.last_failure_code in {"slot_api_error", "no_slots_available"}:
+            text = (
+                "Hiện tại tôi chưa tải được khung giờ từ POS. Thông tin cửa hàng, ngày, "
+                "số người và liệu trình vẫn được giữ. Bạn có thể thử lại hoặc chọn liệu trình khác."
+            )
+        else:
+            text = f"Bước hiện tại: {prompt}"
+    return DialogResponse(
+        text=text,
+        instruction_template=None,
+        state=context.state,
+        status=DialogTurnStatus.SUCCESS,
+    )
+
+
+def _candidate_names(result: EntityResolutionResult) -> tuple[str, ...]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for candidate in result.candidates:
+        if candidate.display_name not in seen:
+            seen.add(candidate.display_name)
+            names.append(candidate.display_name)
+            if len(names) == 8:
+                break
+    return tuple(names)
+
+
+def _handled_response(
+    context: BookingContext,
+    text: str,
+    quick_replies: tuple[str, ...] = (),
+) -> DialogResponse:
+    from app.dialog.instruction_builder import DialogResponse
+
+    return DialogResponse(
+        text=text,
+        instruction_template=None,
+        state=context.state,
+        status=DialogTurnStatus.FAILURE_HANDLED,
+        quick_replies=quick_replies or _state_recovery_quick_replies(context),
+    )
+
+
+def _with_state_recovery_suggestions(
+    response: DialogResponse,
+    context: BookingContext,
+) -> DialogResponse:
+    """Add verified next-step choices without replacing the failure explanation."""
+    from app.dialog.instruction_builder import DialogResponse
+
+    return DialogResponse(
+        text=response.text,
+        instruction_template=response.instruction_template,
+        state=response.state,
+        status=response.status,
+        quick_replies=_state_recovery_quick_replies(context),
+        metadata=response.metadata,
+    )
+
+
+def _state_recovery_quick_replies(context: BookingContext) -> tuple[str, ...]:
+    """Return safe choices derived from the current state and validated context."""
+    if context.state is BookingState.SELECTING_SHOP:
+        names = tuple(shop.name for shop in context.suggested_shops[:8])
+        return names or ("Xem danh sách cửa hàng",)
+    if context.state is BookingState.SELECTING_SERVICE:
+        if context.main_course is not None:
+            return ("Không chọn add-on", "Xem danh sách add-on")
+        return ("Xem danh sách liệu trình",)
+    if context.state is BookingState.SELECTING_TIME:
+        return tuple(slot.strftime("%H:%M") for slot in (context.available_slots or ()))
+    return _RECOVERY_QUICK_REPLIES.get(context.state, ())
+
+
+def _is_generic_change_request(message: str) -> bool:
+    normalized = " ".join(message.casefold().strip().split())
+    return normalized in {
+        "chỉnh sửa",
+        "chỉnh sửa booking",
+        "chỉnh sửa đặt lịch",
+        "tôi muốn chỉnh sửa",
+        "tôi muốn chỉnh sửa booking",
+        "sửa thông tin",
+        "chỉnh lại thông tin",
+        "quay lại sửa",
+    }
+
+
+def _change_menu_response(context: BookingContext) -> DialogResponse:
+    from app.dialog.instruction_builder import DialogResponse
+
+    return DialogResponse(
+        text=(
+            "Bạn muốn chỉnh sửa thông tin nào? Việc chỉnh sửa sẽ không tạo booking "
+            "cho đến khi bạn xác nhận lại."
+        ),
+        instruction_template=None,
+        state=context.state,
+        status=DialogTurnStatus.SUCCESS,
+        quick_replies=(
+            "Đổi cửa hàng",
+            "Đổi ngày",
+            "Đổi số người",
+            "Đổi thời lượng",
+            "Đổi liệu trình",
+            "Đổi giờ",
+            "Đổi kỹ thuật viên",
+            "Đổi số điện thoại",
+        ),
+        metadata={"can_change_info": True},
+    )
+
+
+def _handler_items(
+    result: HandlerResult,
+    key: str,
+    item_type: type[T],
+    *,
+    allow_not_found: bool = False,
+) -> list[T]:
+    if allow_not_found and result.outcome is HandlerOutcome.NOT_FOUND:
+        return []
+    if result.outcome not in {HandlerOutcome.SUCCESS, HandlerOutcome.AMBIGUOUS}:
+        raise RuntimeError(result.error_code or result.outcome.value)
+    value = result.data.get(key)
+    if not isinstance(value, tuple) or any(not isinstance(item, item_type) for item in value):
+        raise RuntimeError(f"Handler result '{key}' is invalid.")
+    return list(value)

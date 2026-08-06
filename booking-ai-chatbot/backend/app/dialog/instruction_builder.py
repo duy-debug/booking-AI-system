@@ -25,9 +25,7 @@ _SAFE_METADATA_KEYS = frozenset(
         "item_count",
     }
 )
-_UNHANDLED_FAILURE_TEXT = (
-    "Đã có lỗi xảy ra. Vui lòng thử lại hoặc liên hệ cửa hàng."
-)
+_UNHANDLED_FAILURE_TEXT = "Đã có lỗi xảy ra. Vui lòng thử lại hoặc liên hệ cửa hàng."
 
 
 class InstructionBuilderError(Exception):
@@ -221,11 +219,7 @@ class InstructionBuilder:
             raise ValueError("FAQ answer must not be empty.")
         if type(source_count) is not int or source_count < 0 or source_count > 3:
             raise ValueError("FAQ source count must be between zero and three.")
-        status = (
-            DialogTurnStatus.FAILURE_HANDLED
-            if handled_failure
-            else DialogTurnStatus.SUCCESS
-        )
+        status = DialogTurnStatus.FAILURE_HANDLED if handled_failure else DialogTurnStatus.SUCCESS
         text = answer.strip()
         quick_replies: tuple[str, ...] = ()
         if context.state in {
@@ -272,9 +266,7 @@ class InstructionBuilder:
     @staticmethod
     def _normalize_template_name(name: str) -> str:
         if not isinstance(name, str):
-            raise InvalidInstructionTemplateNameError(
-                "Instruction template name must be a string."
-            )
+            raise InvalidInstructionTemplateNameError("Instruction template name must be a string.")
         normalized = name.strip()
         if not _TEMPLATE_NAME_PATTERN.fullmatch(normalized):
             raise InvalidInstructionTemplateNameError(
@@ -471,10 +463,7 @@ class InstructionBuilder:
     ) -> DialogResponseDraft:
         text = "Bạn muốn chọn liệu trình chính nào?"
         if context.main_course is not None:
-            text = (
-                f"Bạn đã chọn {context.main_course.name}. "
-                "Bạn muốn chọn thêm add-on nào?"
-            )
+            text = f"Bạn đã chọn {context.main_course.name}. Bạn muốn chọn thêm add-on nào?"
             if context.addons:
                 addon_names = ", ".join(item.name for item in context.addons)
                 text += f" Add-on đang chọn: {addon_names}."
@@ -489,9 +478,7 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft(
-            "Vui lòng chọn liệu trình chính trước khi chọn add-on."
-        )
+        return DialogResponseDraft("Vui lòng chọn liệu trình chính trước khi chọn add-on.")
 
     @staticmethod
     def _main_course_required(
@@ -515,9 +502,7 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft(
-            "Thời lượng đã chọn không hợp lệ. Vui lòng chọn lại."
-        )
+        return DialogResponseDraft("Thời lượng đã chọn không hợp lệ. Vui lòng chọn lại.")
 
     @staticmethod
     def _no_slots_available(
@@ -581,18 +566,14 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft(
-            "Kỹ thuật viên đã chọn hiện không khả dụng. Vui lòng chọn lại."
-        )
+        return DialogResponseDraft("Kỹ thuật viên đã chọn hiện không khả dụng. Vui lòng chọn lại.")
 
     @staticmethod
     def _ask_phone(
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft(
-            "Vui lòng nhập số điện thoại để kiểm tra thông tin khách hàng."
-        )
+        return DialogResponseDraft("Vui lòng nhập số điện thoại để kiểm tra thông tin khách hàng.")
 
     @staticmethod
     def _ask_customer_name(
@@ -608,9 +589,7 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft(
-            "Số điện thoại chưa hợp lệ. Vui lòng kiểm tra và nhập lại."
-        )
+        return DialogResponseDraft("Số điện thoại chưa hợp lệ. Vui lòng kiểm tra và nhập lại.")
 
     @staticmethod
     def _customer_not_allowed(
@@ -705,9 +684,7 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft(
-            "Thông tin đặt lịch chưa đầy đủ. Vui lòng kiểm tra lại."
-        )
+        return DialogResponseDraft("Thông tin đặt lịch chưa đầy đủ. Vui lòng kiểm tra lại.")
 
     @staticmethod
     def _booking_failed(

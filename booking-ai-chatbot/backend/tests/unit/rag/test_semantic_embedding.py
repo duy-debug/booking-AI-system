@@ -150,8 +150,7 @@ def test_importing_app_main_does_not_import_sentence_transformers() -> None:
         [
             sys.executable,
             "-c",
-            "import sys; import app.main; "
-            "raise SystemExit('sentence_transformers' in sys.modules)",
+            "import sys; import app.main; raise SystemExit('sentence_transformers' in sys.modules)",
         ],
         check=False,
     )

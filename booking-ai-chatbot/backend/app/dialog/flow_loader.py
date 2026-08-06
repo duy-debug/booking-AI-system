@@ -10,7 +10,7 @@ from app.domain.booking_state import BookingState
 
 SUPPORTED_OPERATORS = frozenset({"eq", "not_null", "null", "gte", "lte", "in", "and", "or"})
 _ACTION_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
-_FORBIDDEN_FAILURE_ACTIONS = frozenset({"create_booking", "retry_booking"})
+_FORBIDDEN_FAILURE_ACTIONS = frozenset({"create_booking"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,8 +164,7 @@ class FlowLoader:
                 "Change handlers must define exactly the supported change targets."
             )
         return {
-            target: _parse_change_rule(target, definition)
-            for target, definition in root.items()
+            target: _parse_change_rule(target, definition) for target, definition in root.items()
         }
 
 
@@ -177,9 +176,7 @@ def _parse_change_rule(target: str, raw: object) -> ChangeRule:
         "applied_state",
         "prompt_template",
     }:
-        raise InvalidFlowDefinitionError(
-            f"Change handler '{target}' has an invalid schema."
-        )
+        raise InvalidFlowDefinitionError(f"Change handler '{target}' has an invalid schema.")
     reset_action = _required_string(
         value,
         "reset_action",
@@ -269,21 +266,14 @@ def _parse_state(
     on_enter = _parse_on_enter(name, definition.get("on_enter"), declared)
     terminal = definition.get("terminal", False)
     if type(terminal) is not bool:
-        raise InvalidFlowDefinitionError(
-            f"State '{name}' field 'terminal' must be a boolean."
-        )
+        raise InvalidFlowDefinitionError(f"State '{name}' field 'terminal' must be a boolean.")
     raw_transitions = definition.get("transitions")
     if not isinstance(raw_transitions, list):
-        raise InvalidFlowDefinitionError(
-            f"State '{name}' field 'transitions' must be a list."
-        )
+        raise InvalidFlowDefinitionError(f"State '{name}' field 'transitions' must be a list.")
     if terminal and raw_transitions:
-        raise InvalidFlowDefinitionError(
-            f"Terminal state '{name}' must not define transitions."
-        )
+        raise InvalidFlowDefinitionError(f"Terminal state '{name}' must not define transitions.")
     transitions = tuple(
-        _parse_transition(name, index, item, declared)
-        for index, item in enumerate(raw_transitions)
+        _parse_transition(name, index, item, declared) for index, item in enumerate(raw_transitions)
     )
     auto_transitions = _parse_auto_transitions(name, definition, declared)
     if terminal and auto_transitions:
@@ -358,10 +348,7 @@ def _actions(raw: object, location: str) -> tuple[str, ...]:
         raise InvalidFlowDefinitionError(f"Actions for {location} must be a list.")
     result: list[str] = []
     for action in raw:
-        if (
-            not isinstance(action, str)
-            or not _ACTION_NAME_PATTERN.fullmatch(action)
-        ):
+        if not isinstance(action, str) or not _ACTION_NAME_PATTERN.fullmatch(action):
             raise InvalidFlowDefinitionError(
                 f"Actions for {location} must contain snake_case identifiers."
             )
@@ -424,9 +411,7 @@ def _failures(
         target = _target(value.get("target"), condition, state, declared)
         actions = _actions(value.get("actions", []), f"failure '{condition}'")
         if _FORBIDDEN_FAILURE_ACTIONS.intersection(actions):
-            raise InvalidFlowDefinitionError(
-                "Failure actions must not create or retry a booking."
-            )
+            raise InvalidFlowDefinitionError("Failure actions must not create or retry a booking.")
         template = _optional_string(
             value.get("instruction_template"),
             f"Failure '{condition}' instruction_template",
@@ -449,9 +434,7 @@ def _parse_auto_transitions(
         items.append(definition["auto_transition"])
     raw_many = definition.get("auto_transitions", [])
     if not isinstance(raw_many, list):
-        raise InvalidFlowDefinitionError(
-            f"State '{state}' auto_transitions must be a list."
-        )
+        raise InvalidFlowDefinitionError(f"State '{state}' auto_transitions must be a list.")
     items.extend(raw_many)
     result: list[FlowAutoTransition] = []
     for item in items:

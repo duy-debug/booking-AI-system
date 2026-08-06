@@ -27,11 +27,11 @@ from app.domain.booking_models import (
     InvalidBookingDataError,
     InvalidCourseSelectionError,
     Shop,
-    SlotConflictError,
     TherapistPreference,
     TherapistPreferenceType,
 )
 from app.domain.booking_state import BookingState
+from app.domain.outcomes import HandlerOutcome
 
 SHOP_ID = UUID("11111111-1111-1111-1111-111111111111")
 MAIN_ID = UUID("22222222-2222-2222-2222-222222222222")
@@ -158,8 +158,10 @@ async def test_execute_maps_complete_request_and_updates_slots_only() -> None:
             therapist_preference=preference,
         )
     ]
-    assert result is SLOTS
-    assert context.available_slots is SLOTS
+    assert result.outcome is HandlerOutcome.SUCCESS
+    assert result.data["slots"] == SLOTS
+    assert result.context_updates["available_slots"] == SLOTS
+    assert context.available_slots is None
     assert context.start_time is None
     assert context.state is original_state
 
@@ -169,10 +171,11 @@ async def test_empty_availability_is_a_typed_conflict_and_stores_no_slots() -> N
     context = make_context()
     fake = FakeBookingGateway(slots=())
 
-    with pytest.raises(SlotConflictError):
-        await make_handler(fake).execute(context)
+    result = await make_handler(fake).execute(context)
 
-    assert context.available_slots == ()
+    assert result.outcome is HandlerOutcome.NO_SLOTS
+    assert result.error_code == "no_slots_available"
+    assert context.available_slots is None
     assert context.start_time is None
     assert len(fake.availability_requests) == 1
 

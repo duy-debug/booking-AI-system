@@ -1,6 +1,8 @@
 """Unit tests for composition-root settings and resource ownership."""
 
+import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -8,13 +10,15 @@ import httpx
 import pytest
 
 import app.dependencies as dependencies
+from app.application.action_registry import ActionRegistry
 from app.dependencies import (
     ConversationContextStore,
     InvalidCachedContextError,
     InvalidConversationContextError,
     InvalidConversationIdError,
 )
-from app.dialog.flow_loader import FlowDefinition, FlowLoader
+from app.dialog.flow_loader import FlowDefinition, FlowLoader, FlowTransition
+from app.dialog.instruction_builder import InstructionBuilder
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.infrastructure.context_store import ContextStore, Settings
@@ -50,6 +54,56 @@ class FakeQdrantClient:
 
     def close(self) -> None:
         self.closed = True
+
+
+def test_runtime_flow_validation_rejects_unregistered_action() -> None:
+    flow = FlowLoader.load(settings().booking_flow_path)
+
+    with pytest.raises(
+        dependencies.RuntimeFlowValidationError,
+        match="Unregistered flow actions",
+    ):
+        dependencies.validate_runtime_flow(
+            flow,
+            ActionRegistry(),
+            InstructionBuilder(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_runtime_flow_validation_rejects_unsupported_intent() -> None:
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(500, request=request))
+    )
+    container = await dependencies.create_application_container(
+        settings(),
+        http_client=client,
+        llm_gateway=FakeLLMGateway(),
+    )
+    try:
+        idle = container.flow_definition.states[BookingState.IDLE]
+        invalid_idle = replace(
+            idle,
+            transitions=idle.transitions
+            + (FlowTransition("unsupported_runtime_intent", BookingState.IDLE),),
+        )
+        invalid_flow = replace(
+            container.flow_definition,
+            states={**container.flow_definition.states, BookingState.IDLE: invalid_idle},
+        )
+
+        with pytest.raises(
+            dependencies.RuntimeFlowValidationError,
+            match="Unsupported flow intents: unsupported_runtime_intent",
+        ):
+            dependencies.validate_runtime_flow(
+                invalid_flow,
+                container.action_registry,
+                container.instruction_builder,
+            )
+    finally:
+        await container.close()
+        await client.aclose()
 
 
 class LazyFakeEmbedding:
@@ -233,16 +287,14 @@ async def test_invalid_settings_are_rejected_before_container_creation(
     invalid = Settings(
         pos_base_url=str(overrides.get("pos_base_url", defaults.pos_base_url)),
         pos_timeout_seconds=cast(
-            float,
-            overrides.get("pos_timeout_seconds", defaults.pos_timeout_seconds)
+            float, overrides.get("pos_timeout_seconds", defaults.pos_timeout_seconds)
         ),
         booking_flow_path=cast(
             Path,
             overrides.get("booking_flow_path", defaults.booking_flow_path),
         ),
         max_auto_transitions=cast(
-            int,
-            overrides.get("max_auto_transitions", defaults.max_auto_transitions)
+            int, overrides.get("max_auto_transitions", defaults.max_auto_transitions)
         ),
     )
     with pytest.raises(ValueError, match=message):
@@ -260,9 +312,7 @@ async def test_owned_client_is_closed_when_flow_loading_fails(
     monkeypatch.setattr(dependencies.httpx, "AsyncClient", lambda **kwargs: client)
 
     with pytest.raises(json.JSONDecodeError):
-        await dependencies.create_application_container(
-            settings(booking_flow_path=invalid_flow)
-        )
+        await dependencies.create_application_container(settings(booking_flow_path=invalid_flow))
 
     assert client.is_closed
 
@@ -326,13 +376,12 @@ async def test_dependency_getters_return_container_instances() -> None:
         http_client=client,
     )
 
-
     await container.close()
     await client.aclose()
 
 
 @pytest.mark.asyncio
-async def test_factory_injects_one_llm_gateway_into_the_fallback() -> None:
+async def test_factory_injects_one_llm_gateway_into_nlu() -> None:
     client = httpx.AsyncClient()
     gateway = FakeLLMGateway()
     container = await dependencies.create_application_container(
@@ -342,7 +391,7 @@ async def test_factory_injects_one_llm_gateway_into_the_fallback() -> None:
     )
 
     assert container.llm_gateway is gateway
-    assert container.llm_nlu_fallback._llm_gateway is gateway
+    assert container.llm_nlu._llm_gateway is gateway
 
     await container.close()
     await client.aclose()
@@ -401,7 +450,7 @@ async def test_context_store_rejects_invalid_conversation_ids(
     store = ConversationContextStore(cache=ContextStore())
 
     with pytest.raises(InvalidConversationIdError):
-        await store.get_or_create(conversation_id)
+        await store.get_copy(conversation_id)
 
 
 @pytest.mark.asyncio
@@ -409,23 +458,71 @@ async def test_context_store_normalizes_and_reuses_a_valid_conversation_id() -> 
     cache = ContextStore()
     store = ConversationContextStore(cache=cache)
 
-    created = await store.get_or_create("  conversation-1  ")
-    loaded = await store.get_or_create("conversation-1")
+    created = await store.get_copy("  conversation-1  ")
+    loaded = await store.get_copy("conversation-1")
 
     assert created.conversation_id == "conversation-1"
-    assert loaded is created
-    assert await cache.get("conversation-1") is created
+    assert loaded == created
+    assert loaded is not created
+    assert await cache.get("conversation-1") == created
 
 
 @pytest.mark.asyncio
 async def test_context_store_keeps_conversations_independent() -> None:
     store = ConversationContextStore(cache=ContextStore())
 
-    first = await store.get_or_create("conversation-1")
-    second = await store.get_or_create("conversation-2")
+    first = await store.get_copy("conversation-1")
+    second = await store.get_copy("conversation-2")
 
     assert first is not second
     assert first.conversation_id != second.conversation_id
+
+
+@pytest.mark.asyncio
+async def test_conversation_lock_serializes_same_session_and_cleans_up() -> None:
+    store = ConversationContextStore(cache=ContextStore())
+    active = 0
+    maximum_active = 0
+
+    async def worker() -> None:
+        nonlocal active, maximum_active
+        async with store.conversation_lock("conversation-1"):
+            active += 1
+            maximum_active = max(maximum_active, active)
+            await asyncio.sleep(0)
+            active -= 1
+
+    await asyncio.gather(worker(), worker())
+
+    assert maximum_active == 1
+    assert store._conversation_locks == {}
+
+
+@pytest.mark.asyncio
+async def test_conversation_lock_allows_different_sessions_in_parallel() -> None:
+    store = ConversationContextStore(cache=ContextStore())
+    both_entered = asyncio.Event()
+    release = asyncio.Event()
+    active = 0
+
+    async def worker(conversation_id: str) -> None:
+        nonlocal active
+        async with store.conversation_lock(conversation_id):
+            active += 1
+            if active == 2:
+                both_entered.set()
+            await release.wait()
+            active -= 1
+
+    tasks = [
+        asyncio.create_task(worker("conversation-1")),
+        asyncio.create_task(worker("conversation-2")),
+    ]
+    await asyncio.wait_for(both_entered.wait(), timeout=1)
+    release.set()
+    await asyncio.gather(*tasks)
+
+    assert store._conversation_locks == {}
 
 
 @pytest.mark.asyncio
@@ -437,9 +534,10 @@ async def test_context_store_save_preserves_identity_and_state() -> None:
     )
 
     await store.save("conversation-1", context)
-    loaded = await store.get_or_create("conversation-1")
+    loaded = await store.get_copy("conversation-1")
 
-    assert loaded is context
+    assert loaded == context
+    assert loaded is not context
     assert loaded.state is BookingState.SELECTING_SERVICE
 
 
@@ -467,7 +565,7 @@ async def test_context_store_rejects_invalid_cached_value() -> None:
     store = ConversationContextStore(cache=cache)
 
     with pytest.raises(InvalidCachedContextError):
-        await store.get_or_create("conversation-1")
+        await store.get_copy("conversation-1")
 
 
 @pytest.mark.asyncio
@@ -478,7 +576,7 @@ async def test_context_store_reset_replaces_context_and_preserves_other_conversa
         conversation_id="conversation-1",
         state=BookingState.SELECTING_SERVICE,
         phone="0901234567",
-        pending_action="search_courses",
+        last_failure_code="search_courses",
     )
     other = BookingContext(
         conversation_id="conversation-2",
@@ -492,6 +590,6 @@ async def test_context_store_reset_replaces_context_and_preserves_other_conversa
     assert reset_context is not original
     assert reset_context.state is BookingState.IDLE
     assert reset_context.phone is None
-    assert reset_context.pending_action is None
-    assert await cache.get("conversation-1") is reset_context
-    assert await cache.get("conversation-2") is other
+    assert reset_context.last_failure_code is None
+    assert await cache.get("conversation-1") == reset_context
+    assert await cache.get("conversation-2") == other

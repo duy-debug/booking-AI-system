@@ -66,18 +66,14 @@ def intent_policy() -> StateIntentPolicy:
             BookingState.SELECTING_THERAPIST: frozenset(
                 {"select_therapist", "deny", "cancel_flow", "unknown"}
             ),
-            BookingState.COLLECTING_PHONE: frozenset(
-                {"provide_phone", "cancel_flow", "unknown"}
-            ),
+            BookingState.COLLECTING_PHONE: frozenset({"provide_phone", "cancel_flow", "unknown"}),
             BookingState.VERIFYING_PHONE: frozenset(
                 {"provide_phone", "confirm", "deny", "cancel_flow", "unknown"}
             ),
             BookingState.AWAITING_CONFIRMATION: frozenset(
                 {"confirm", "deny", "change_info", "cancel_flow", "unknown"}
             ),
-            BookingState.BOOKING_FAILED: frozenset(
-                {"confirm", "deny", "select_time", "unknown"}
-            ),
+            BookingState.BOOKING_FAILED: frozenset({"confirm", "deny", "select_time", "unknown"}),
         },
         frozenset(
             {
@@ -94,9 +90,7 @@ def test_state_intent_policy_defensively_copies_and_separates_wildcard() -> None
     policy = StateIntentPolicy(source, frozenset({BookingState.IDLE}))
     source[BookingState.IDLE] = frozenset({"changed"})
 
-    assert policy.allowed_for(BookingState.IDLE) == frozenset(
-        {"start_booking", "unknown"}
-    )
+    assert policy.allowed_for(BookingState.IDLE) == frozenset({"start_booking", "unknown"})
     assert policy.allowed_for(BookingState.COMPLETED) == frozenset()
     assert policy.is_allowed(BookingState.IDLE, "start_booking")
     assert not policy.is_allowed(BookingState.IDLE, "*")
@@ -372,8 +366,7 @@ def test_duration_extraction(
 
 def test_invalid_or_out_of_state_duration_is_unknown(nlu: NLUProcessor) -> None:
     assert (
-        nlu.parse(text="khoảng một lúc", state=BookingState.SELECTING_DURATION).intent
-        == "unknown"
+        nlu.parse(text="khoảng một lúc", state=BookingState.SELECTING_DURATION).intent == "unknown"
     )
     assert nlu.parse(text="60", state=BookingState.SELECTING_DATE).intent == "unknown"
 
@@ -404,10 +397,7 @@ def test_date_extraction_with_injected_today(
 
 def test_invalid_or_ambiguous_date_is_unknown(nlu: NLUProcessor) -> None:
     assert nlu.parse(text="31/02/2026", state=BookingState.SELECTING_DATE).intent == "unknown"
-    assert (
-        nlu.parse(text="thứ bảy tuần sau", state=BookingState.SELECTING_DATE).intent
-        == "unknown"
-    )
+    assert nlu.parse(text="thứ bảy tuần sau", state=BookingState.SELECTING_DATE).intent == "unknown"
 
 
 @pytest.mark.parametrize(

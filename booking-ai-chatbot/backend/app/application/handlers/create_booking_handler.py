@@ -5,11 +5,11 @@ from app.domain.booking_models import (
     BookingGateway,
     BookingRules,
     CreateBookingRequest,
-    CreateBookingResult,
     FinalAvailabilityRequest,
     InvalidIdempotencyKeyError,
     SlotConflictError,
 )
+from app.domain.outcomes import HandlerOutcome, HandlerResult
 
 
 class CreateBookingHandler:
@@ -22,7 +22,7 @@ class CreateBookingHandler:
         self,
         context: BookingContext,
         idempotency_key: str,
-    ) -> CreateBookingResult:
+    ) -> HandlerResult:
         """Validate, recheck availability and create without changing dialog state."""
         if not idempotency_key.strip():
             raise InvalidIdempotencyKeyError("Idempotency key must not be empty.")
@@ -50,9 +50,7 @@ class CreateBookingHandler:
             addon_ids=addon_ids,
             therapist_preference=context.therapist_preference,
         )
-        final_result = await self._booking_gateway.check_final_availability(
-            final_request
-        )
+        final_result = await self._booking_gateway.check_final_availability(final_request)
         if not final_result.available:
             raise SlotConflictError(
                 nearest_slots=final_result.nearest_slots,
@@ -75,13 +73,13 @@ class CreateBookingHandler:
         )
         result = await self._booking_gateway.create_booking(create_request)
 
-        context.booking = result.booking
-        context.booking_id = result.booking.booking_id
-        context.reservation_code = (
-            result.reservation_code or result.booking.reservation_code
+        reservation_code = result.reservation_code or result.booking.reservation_code
+        return HandlerResult(
+            HandlerOutcome.SUCCESS,
+            {"create_result": result},
+            {
+                "booking": result.booking,
+                "booking_id": result.booking.booking_id,
+                "reservation_code": reservation_code,
+            },
         )
-        context.reservation_codes = result.reservation_codes
-        context.child_reservation_ids = tuple(
-            child.reservation_id for child in result.child_reservations
-        )
-        return result

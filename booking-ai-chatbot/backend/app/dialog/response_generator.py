@@ -97,10 +97,7 @@ class ResponseGenerator:
 
 
 def _full_prompt_logging_enabled() -> bool:
-    environment = os.getenv(
-        "APP_ENV",
-        os.getenv("ENVIRONMENT", "production"),
-    ).strip().casefold()
+    environment = os.getenv("APP_ENV", "production").strip().casefold()
     enabled = os.getenv("LOG_LLM_PROMPTS", "false").strip().casefold()
     return environment in {"local", "development", "dev"} and enabled in {
         "1",

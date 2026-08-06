@@ -68,9 +68,23 @@ async def test_generate_parses_openai_compatible_tool_calls() -> None:
         return httpx.Response(
             200,
             request=request,
-            json={"choices": [{"message": {"content": None, "tool_calls": [{
-                "function": {"name": "extract_intent", "arguments": '{"intent":"faq"}'},
-            }]}}]},
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "function": {
+                                        "name": "extract_intent",
+                                        "arguments": '{"intent":"faq"}',
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            },
         )
 
     client, adapter = gateway(httpx.MockTransport(handler))
@@ -179,9 +193,7 @@ async def test_timeout_uses_fallback_and_preserves_tools() -> None:
             json={"choices": [{"message": {"content": "ok"}}]},
         )
 
-    tools: list[dict[str, object]] = [
-        {"type": "function", "function": {"name": "extract_intent"}}
-    ]
+    tools: list[dict[str, object]] = [{"type": "function", "function": {"name": "extract_intent"}}]
     client, adapter = gateway(
         httpx.MockTransport(handler),
         model="primary-model",

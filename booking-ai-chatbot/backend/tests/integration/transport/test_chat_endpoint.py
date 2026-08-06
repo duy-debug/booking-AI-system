@@ -17,25 +17,25 @@ from app.application.handlers.check_availability_handler import CheckAvailabilit
 from app.application.handlers.search_course_handler import SearchCourseHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.dependencies import ApplicationContainer
+from app.dialog.dialog_controller import DialogController, DialogTurnInput, DialogTurnResult
 from app.dialog.nlu import (
+    LLMNLU,
     EntityCandidate,
     EntityResolutionCoordinator,
     EntityResolutionResult,
     EntityResolutionStatus,
-    LLMNLUFallback,
     NLUEntityKind,
-    NLUProcessor,
-    NLUResolutionStatus,
     NLUResult,
-    NLUSource,
 )
 from app.domain.booking_context import BookingContext
 from app.domain.booking_models import Course, CourseSelection, CourseType, Shop
 from app.domain.booking_state import BookingState
+from app.domain.outcomes import HandlerOutcome, HandlerResult
 from app.infrastructure.context_store import Settings
 from app.infrastructure.gemini_client import LLMMessage, LLMResponse
 from app.infrastructure.qdrant_client import FAQManager, KnowledgeDocument
 from app.main import create_app
+from tests.structured_nlu_gateway import StructuredNLUGateway
 
 SHOP = Shop(
     shop_id=UUID("11111111-1111-1111-1111-111111111111"),
@@ -61,18 +61,18 @@ class RecordingSearchShopHandler(SearchShopHandler):
     def __init__(self) -> None:
         self.calls: list[str | None] = []
 
-    async def execute(self, query: str | None = None) -> list[Shop]:
+    async def execute(self, query: str | None = None) -> HandlerResult:
         self.calls.append(query)
-        return [SHOP]
+        return HandlerResult(HandlerOutcome.SUCCESS, {"shops": (SHOP,)})
 
 
 class RecordingDiscoveryShopHandler(SearchShopHandler):
     def __init__(self) -> None:
         self.calls: list[str | None] = []
 
-    async def execute(self, query: str | None = None) -> list[Shop]:
+    async def execute(self, query: str | None = None) -> HandlerResult:
         self.calls.append(query)
-        return [
+        shops = [
             SHOP,
             Shop(
                 shop_id=UUID("33333333-3333-3333-3333-333333333333"),
@@ -80,6 +80,7 @@ class RecordingDiscoveryShopHandler(SearchShopHandler):
                 address="Huế",
             ),
         ]
+        return HandlerResult(HandlerOutcome.SUCCESS, {"shops": tuple(shops)})
 
 
 class RecordingDiscoveryCourseHandler(SearchCourseHandler):
@@ -93,9 +94,10 @@ class RecordingDiscoveryCourseHandler(SearchCourseHandler):
         *,
         course_type: CourseType | None = None,
         is_active: bool = True,
-    ) -> list[Course]:
+    ) -> HandlerResult:
         self.calls.append((shop_id, course_type))
-        return [ADDON] if course_type is CourseType.ADDON else [COURSE]
+        courses = (ADDON,) if course_type is CourseType.ADDON else (COURSE,)
+        return HandlerResult(HandlerOutcome.SUCCESS, {"courses": courses})
 
 
 class RecordingAvailabilityHandler(CheckAvailabilityHandler):
@@ -103,10 +105,13 @@ class RecordingAvailabilityHandler(CheckAvailabilityHandler):
         self.calls: list[BookingContext] = []
         self.slots = (time(10, 30), time(11, 0))
 
-    async def execute(self, context: BookingContext) -> tuple[time, ...]:
+    async def execute(self, context: BookingContext) -> HandlerResult:
         self.calls.append(context)
-        context.set_available_slots(self.slots)
-        return self.slots
+        return HandlerResult(
+            HandlerOutcome.SUCCESS,
+            {"slots": self.slots},
+            {"available_slots": self.slots},
+        )
 
 
 class StaticResolver:
@@ -155,15 +160,33 @@ class StaticKnowledgeGateway:
         return self.documents
 
 
-class AlwaysUnresolvedNLU:
-    def parse(self, *, text: str, state: BookingState) -> NLUResult:
-        return NLUResult(
-            intent=None,
-            payload={},
-            confidence=0.0,
-            source=NLUSource.FALLBACK,
-            resolution_status=NLUResolutionStatus.UNRESOLVED,
+class ControllerBoundarySpy:
+    def __init__(self, delegate: DialogController) -> None:
+        self.delegate = delegate
+        self.message_calls = 0
+
+    async def handle_message(
+        self,
+        *,
+        conversation_id: str,
+        message: str,
+        idempotency_key: str | None = None,
+        correlation_id: str | None = None,
+    ) -> object:
+        self.message_calls += 1
+        return await self.delegate.handle_message(
+            conversation_id=conversation_id,
+            message=message,
+            idempotency_key=idempotency_key,
+            correlation_id=correlation_id,
         )
+
+    async def handle_turn(
+        self,
+        context: BookingContext,
+        turn: DialogTurnInput,
+    ) -> DialogTurnResult:
+        return await self.delegate.handle_turn(context, turn)
 
 
 @pytest.fixture
@@ -191,7 +214,10 @@ def chat_client(
             ApplicationContainer,
             application.state.application_container,
         )
-
+        container.llm_nlu = LLMNLU(
+            llm_gateway=StructuredNLUGateway(),
+            intent_policy=container.state_intent_policy,
+        )
         container.action_registry._search_shop_handler = RecordingSearchShopHandler()
         yield client, outbound_requests
 
@@ -199,6 +225,24 @@ def chat_client(
 def container_of(client: TestClient) -> ApplicationContainer:
     application = cast(FastAPI, client.app)
     return cast(ApplicationContainer, application.state.application_container)
+
+
+def test_json_endpoint_calls_dialog_controller_once(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, _ = chat_client
+    container = container_of(client)
+    spy = ControllerBoundarySpy(container.dialog_controller)
+    container.dialog_controller = cast(DialogController, spy)
+
+    response = post_message(
+        client,
+        conversation_id="controller-boundary",
+        message="Tôi muốn đặt lịch",
+    )
+
+    assert response.status_code == 200
+    assert spy.message_calls == 1
 
 
 def post_message(
@@ -224,8 +268,7 @@ def test_shop_discovery_enters_shop_selection_without_selecting_a_candidate(
     container = container_of(client)
     handler = RecordingDiscoveryShopHandler()
     container._handlers = tuple(
-        handler if isinstance(item, SearchShopHandler) else item
-        for item in container._handlers
+        handler if isinstance(item, SearchShopHandler) else item for item in container._handlers
     )
 
     response = post_message(
@@ -289,8 +332,7 @@ def test_service_package_synonym_lists_services_during_duration_selection(
     container = container_of(client)
     handler = RecordingDiscoveryCourseHandler()
     container._handlers = tuple(
-        handler if isinstance(item, SearchCourseHandler) else item
-        for item in container._handlers
+        handler if isinstance(item, SearchCourseHandler) else item for item in container._handlers
     )
     context = BookingContext(
         "conversation-package-list",
@@ -320,8 +362,7 @@ def test_service_discovery_keeps_booking_selection_and_calls_pos_once(
     container = container_of(client)
     handler = RecordingDiscoveryCourseHandler()
     container._handlers = tuple(
-        handler if isinstance(item, SearchCourseHandler) else item
-        for item in container._handlers
+        handler if isinstance(item, SearchCourseHandler) else item for item in container._handlers
     )
     context = BookingContext(
         "conversation-list-courses",
@@ -428,7 +469,7 @@ def test_json_happy_path_reaches_people_without_preload_calls(
         response.json()["status"] == "success"
         for response in (started, selected_shop, selected_date)
     )
-    assert context.shop is SHOP
+    assert context.shop == SHOP
     assert context.booking_date == date(2099, 8, 15)
     assert search.calls == [None]
     assert resolver.calls == 1
@@ -504,12 +545,13 @@ def test_json_phone_denial_clears_phone_and_returns_to_collection(
     assert response.status_code == 200
     assert response.json()["status"] == "success"
     assert response.json()["state"] == "collecting_phone"
-    assert context.phone is None
-    assert context.phone_confirmed is False
-    assert context.shop is SHOP
-    assert context.main_course is COURSE
-    assert context.booking_date == date(2099, 8, 15)
-    assert context.start_time == time(10, 30)
+    saved = container.memory_cache._contexts[context.conversation_id]
+    assert saved.phone is None
+    assert saved.phone_confirmed is False
+    assert saved.shop == SHOP
+    assert saved.main_course == COURSE
+    assert saved.booking_date == date(2099, 8, 15)
+    assert saved.start_time == time(10, 30)
     assert outbound_requests == []
 
 
@@ -551,9 +593,7 @@ def test_booking_proactively_suggests_main_course_then_addon_then_slots(
                 status=EntityResolutionStatus.RESOLVED,
                 entity_kind=NLUEntityKind.COURSE,
                 dispatch_intent="select_course",
-                dispatch_payload={
-                    "course_selection": CourseSelection(main_course=COURSE)
-                },
+                dispatch_payload={"course_selection": CourseSelection(main_course=COURSE)},
                 matched_count=1,
             )
         ),
@@ -578,7 +618,8 @@ def test_booking_proactively_suggests_main_course_then_addon_then_slots(
     )
     assert slot_response.json()["state"] == "selecting_time"
     assert slot_response.json()["quick_replies"] == ["10:30", "11:00"]
-    assert availability.calls == [context]
+    assert len(availability.calls) == 1
+    assert availability.calls[0].conversation_id == context.conversation_id
     assert outbound_requests == []
 
 
@@ -600,7 +641,7 @@ def test_json_booking_failure_refreshes_slots_without_booking_creation(
             }
         )
     )
-    container.llm_nlu_fallback = LLMNLUFallback(
+    container.llm_nlu = LLMNLU(
         llm_gateway=gateway,
         intent_policy=container.state_intent_policy,
     )
@@ -626,11 +667,13 @@ def test_json_booking_failure_refreshes_slots_without_booking_creation(
     assert response.status_code == 200
     assert response.json()["status"] == "success"
     assert response.json()["state"] == "selecting_time"
-    assert availability.calls == [context]
-    assert context.available_slots == availability.slots
-    assert context.start_time == time(9, 0)
-    assert context.booking is None
-    assert gateway.calls == 0
+    assert len(availability.calls) == 1
+    assert availability.calls[0].conversation_id == context.conversation_id
+    saved = container.memory_cache._contexts[context.conversation_id]
+    assert saved.available_slots == availability.slots
+    assert saved.start_time == time(9, 0)
+    assert saved.booking is None
+    assert gateway.calls == 1
     assert outbound_requests == []
 
 
@@ -650,8 +693,7 @@ def test_valid_structured_llm_fallback_returns_http_200(
             }
         )
     )
-    container.nlu_processor = cast(NLUProcessor, AlwaysUnresolvedNLU())
-    container.llm_nlu_fallback = LLMNLUFallback(
+    container.llm_nlu = LLMNLU(
         llm_gateway=gateway,
         intent_policy=container.state_intent_policy,
     )
@@ -729,7 +771,7 @@ def test_in_progress_change_returns_200_and_persists_atomic_result(
     saved = container.memory_cache._contexts[context.conversation_id]
     assert saved.booking_date is None
     assert saved.start_time is None
-    assert saved.shop is SHOP
+    assert saved.shop == SHOP
     assert outbound_requests == []
 
 
@@ -754,7 +796,8 @@ def test_completed_booking_change_is_rejected_without_mutation_or_pos_call(
     assert response.status_code == 200
     assert response.json()["state"] == "completed"
     assert "Đặt lịch này đã hoàn tất" in response.json()["text"]
-    assert context.booking_date == date(2026, 8, 5)
+    saved = container.memory_cache._contexts[context.conversation_id]
+    assert saved.booking_date == date(2026, 8, 5)
     assert outbound_requests == []
 
 
@@ -808,7 +851,7 @@ def test_conversations_are_independent_and_same_conversation_is_retained(
     assert retained.json()["state"] == "selecting_shop"
 
 
-def test_prepared_people_state_processes_deterministic_turn(
+def test_prepared_people_state_processes_structured_llm_turn(
     chat_client: tuple[TestClient, list[httpx.Request]],
 ) -> None:
     client, outbound_requests = chat_client
@@ -827,7 +870,8 @@ def test_prepared_people_state_processes_deterministic_turn(
 
     assert response.status_code == 200
     assert response.json()["state"] == "selecting_duration"
-    assert context.num_customer == 2
+    saved = container.memory_cache._contexts[context.conversation_id]
+    assert saved.num_customer == 2
     assert outbound_requests == []
 
 
@@ -863,7 +907,8 @@ def test_single_entity_result_runs_through_resolver_and_controller(
 
     assert response.status_code == 200
     assert response.json()["state"] == "selecting_date"
-    assert context.shop is SHOP
+    saved = container.memory_cache._contexts[context.conversation_id]
+    assert saved.shop == SHOP
     assert resolver.calls == 1
     assert outbound_requests == []
 
@@ -947,7 +992,7 @@ def test_response_never_exposes_sensitive_context_fields(
         conversation_id="conversation-a",
         state=BookingState.BOOKING_FAILED,
         phone="0901234567",
-        pending_action="internal_action",
+        last_failure_code="internal_action",
     )
     container.memory_cache._contexts[context.conversation_id] = context
 

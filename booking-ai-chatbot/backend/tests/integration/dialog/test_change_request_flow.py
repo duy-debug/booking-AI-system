@@ -39,6 +39,7 @@ from app.domain.booking_models import (
     TherapistPreferenceType,
 )
 from app.domain.booking_state import BookingState
+from app.domain.outcomes import HandlerOutcome, HandlerResult
 
 FLOW_DIR = Path(__file__).resolve().parents[3] / "app" / "dialog"
 OLD_SHOP = Shop(UUID("11111111-1111-1111-1111-111111111111"), "Old Shop")
@@ -63,9 +64,7 @@ def runtime() -> tuple[
         flow=flow,
         state_machine=StateMachine(flow),
         action_registry=ActionRegistry(),
-        change_rules=FlowLoader.load_change_handlers(
-            FLOW_DIR / "booking_flow.json"
-        ),
+        change_rules=FlowLoader.load_change_handlers(FLOW_DIR / "booking_flow.json"),
     )
     return (
         NLUProcessor(
@@ -171,9 +170,17 @@ class ShopSearch:
         self.shops = shops
         self.calls = 0
 
-    async def execute(self, query: str | None = None) -> list[Shop]:
+    async def execute(self, query: str | None = None) -> HandlerResult:
         self.calls += 1
-        return self.shops
+        if not self.shops:
+            return HandlerResult(
+                HandlerOutcome.NOT_FOUND,
+                error_code="shop_not_found",
+            )
+        return HandlerResult(
+            HandlerOutcome.SUCCESS,
+            {"shops": tuple(self.shops)},
+        )
 
 
 class ServiceSearch:
@@ -181,8 +188,11 @@ class ServiceSearch:
         self,
         shop_id: UUID,
         query: str | None = None,
-    ) -> list[Course]:
-        return []
+    ) -> HandlerResult:
+        return HandlerResult(
+            HandlerOutcome.NOT_FOUND,
+            error_code="course_not_found",
+        )
 
 
 @pytest.mark.asyncio

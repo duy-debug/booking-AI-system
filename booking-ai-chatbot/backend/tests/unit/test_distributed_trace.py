@@ -106,7 +106,5 @@ def test_json_log_has_mandatory_trace_fields() -> None:
 def test_shared_sensitive_data_masks_customer_and_credentials() -> None:
     assert mask_phone("0912345678") == "091***5678"
     assert mask_email("duy@example.com") == "d***@example.com"
-    headers = redact_headers(
-        {"Authorization": "Bearer private", "X-Trace-ID": "trace-safe"}
-    )
+    headers = redact_headers({"Authorization": "Bearer private", "X-Trace-ID": "trace-safe"})
     assert headers == {"Authorization": "***", "X-Trace-ID": "trace-safe"}

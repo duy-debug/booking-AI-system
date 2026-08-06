@@ -18,16 +18,13 @@ from app.application.handlers.create_booking_handler import CreateBookingHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.dependencies import ApplicationContainer
 from app.dialog.nlu import (
+    LLMNLU,
     EntityCandidate,
     EntityResolutionCoordinator,
     EntityResolutionResult,
     EntityResolutionStatus,
-    LLMNLUFallback,
     NLUEntityKind,
-    NLUProcessor,
-    NLUResolutionStatus,
     NLUResult,
-    NLUSource,
 )
 from app.domain.booking_context import BookingContext
 from app.domain.booking_models import (
@@ -42,6 +39,7 @@ from app.domain.booking_models import (
     Shop,
 )
 from app.domain.booking_state import BookingState
+from app.domain.outcomes import HandlerOutcome, HandlerResult
 from app.infrastructure.context_store import Settings
 from app.infrastructure.gemini_client import (
     LLMGatewayUnavailableError,
@@ -54,6 +52,7 @@ from app.infrastructure.qdrant_client import (
     KnowledgeGatewayUnavailableError,
 )
 from app.main import create_app
+from tests.structured_nlu_gateway import StructuredNLUGateway
 
 SHOP = Shop(
     shop_id=UUID("11111111-1111-1111-1111-111111111111"),
@@ -72,9 +71,9 @@ class RecordingSearchShopHandler(SearchShopHandler):
     def __init__(self) -> None:
         self.calls: list[str | None] = []
 
-    async def execute(self, query: str | None = None) -> list[Shop]:
+    async def execute(self, query: str | None = None) -> HandlerResult:
         self.calls.append(query)
-        return [SHOP]
+        return HandlerResult(HandlerOutcome.SUCCESS, {"shops": (SHOP,)})
 
 
 class RecordingAvailabilityHandler(CheckAvailabilityHandler):
@@ -82,10 +81,13 @@ class RecordingAvailabilityHandler(CheckAvailabilityHandler):
         self.calls: list[BookingContext] = []
         self.slots = (time(10, 30), time(11, 0))
 
-    async def execute(self, context: BookingContext) -> tuple[time, ...]:
+    async def execute(self, context: BookingContext) -> HandlerResult:
         self.calls.append(context)
-        context.set_available_slots(self.slots)
-        return self.slots
+        return HandlerResult(
+            HandlerOutcome.SUCCESS,
+            {"slots": self.slots},
+            {"available_slots": self.slots},
+        )
 
 
 class EndpointCreateGateway:
@@ -134,19 +136,14 @@ class StaticResolver:
 
 
 class FailingNLU:
-    def parse(self, *, text: str, state: BookingState) -> NLUResult:
+    async def parse(
+        self,
+        *,
+        text: str,
+        state: BookingState,
+        context: BookingContext | None = None,
+    ) -> NLUResult:
         raise RuntimeError("private runtime failure")
-
-
-class AlwaysUnresolvedNLU:
-    def parse(self, *, text: str, state: BookingState) -> NLUResult:
-        return NLUResult(
-            intent=None,
-            payload={},
-            confidence=0.0,
-            source=NLUSource.FALLBACK,
-            resolution_status=NLUResolutionStatus.UNRESOLVED,
-        )
 
 
 class StaticLLMGateway:
@@ -218,7 +215,10 @@ def stream_client(
             ApplicationContainer,
             application.state.application_container,
         )
-
+        container.llm_nlu = LLMNLU(
+            llm_gateway=StructuredNLUGateway(),
+            intent_policy=container.state_intent_policy,
+        )
         container.action_registry._search_shop_handler = RecordingSearchShopHandler()
         yield client, outbound_requests
 
@@ -323,8 +323,9 @@ def test_change_request_has_json_parity_and_normal_sse_event_order(
     assert events[1][1]["state"] == "selecting_date"
     assert events[1][1]["text"] == "Bạn muốn đổi sang ngày nào?"
     assert "token" not in {event for event, _ in events}
-    assert context.booking_date is None
-    assert context.start_time is None
+    saved = container.memory_cache._contexts[context.conversation_id]
+    assert saved.booking_date is None
+    assert saved.start_time is None
     assert outbound_requests == []
 
 
@@ -346,7 +347,7 @@ def test_p2_recovery_keeps_sse_order_and_json_parity(
             }
         )
     )
-    container.llm_nlu_fallback = LLMNLUFallback(
+    container.llm_nlu = LLMNLU(
         llm_gateway=gateway,
         intent_policy=container.state_intent_policy,
     )
@@ -374,11 +375,13 @@ def test_p2_recovery_keeps_sse_order_and_json_parity(
     assert [event for event, _ in events] == ["started", "message", "completed"]
     assert events[1][1]["status"] == "success"
     assert events[1][1]["state"] == "selecting_time"
-    assert availability.calls == [context]
-    assert context.available_slots == availability.slots
-    assert context.start_time == time(9, 0)
-    assert context.booking is None
-    assert gateway.calls == 0
+    assert len(availability.calls) == 1
+    assert availability.calls[0].conversation_id == context.conversation_id
+    saved = container.memory_cache._contexts[context.conversation_id]
+    assert saved.available_slots == availability.slots
+    assert saved.start_time == time(9, 0)
+    assert saved.booking is None
+    assert gateway.calls == 1
     assert outbound_requests == []
 
 
@@ -447,10 +450,10 @@ def test_completed_booking_without_code_has_json_sse_parity_and_one_create_per_r
     assert events[1][1]["metadata"] == regular.json()["metadata"]
     assert len(gateway.final_requests) == 2
     assert len(gateway.create_requests) == 2
-    assert {request.idempotency_key for request in gateway.create_requests} == {
-        "endpoint-json",
-        "endpoint-sse",
-    }
+    attempt_ids = {request.idempotency_key for request in gateway.create_requests}
+    assert len(attempt_ids) == 2
+    assert "endpoint-json" not in attempt_ids
+    assert "endpoint-sse" not in attempt_ids
     assert outbound_requests == []
 
 
@@ -484,11 +487,8 @@ def test_unknown_input_is_a_normal_message_not_an_error(
 ) -> None:
     client, _ = stream_client
     container = container_of(client)
-    gateway = StaticLLMGateway(
-        error=LLMGatewayUnavailableError("provider unavailable")
-    )
-    container.nlu_processor = cast(NLUProcessor, AlwaysUnresolvedNLU())
-    container.llm_nlu_fallback = LLMNLUFallback(
+    gateway = StaticLLMGateway(error=LLMGatewayUnavailableError("provider unavailable"))
+    container.llm_nlu = LLMNLU(
         llm_gateway=gateway,
         intent_policy=container.state_intent_policy,
     )
@@ -561,7 +561,7 @@ def test_runtime_processing_error_becomes_terminal_safe_error_event(
 ) -> None:
     client, _ = stream_client
     container = container_of(client)
-    container.nlu_processor = cast(NLUProcessor, FailingNLU())
+    container.llm_nlu = cast(LLMNLU, FailingNLU())
 
     response = post_stream(
         client,
@@ -592,7 +592,7 @@ def test_stream_payload_does_not_expose_sensitive_context_or_request_data(
         state=BookingState.COMPLETED,
         phone="0901234567",
         booking_id=internal_id,
-        pending_action="private_action",
+        last_failure_code="private_action",
     )
     container.memory_cache._contexts[context.conversation_id] = context
 
@@ -653,8 +653,7 @@ def test_stream_message_has_parity_with_json_on_independent_contexts(
             }
         )
     )
-    container.nlu_processor = cast(NLUProcessor, AlwaysUnresolvedNLU())
-    container.llm_nlu_fallback = LLMNLUFallback(
+    container.llm_nlu = LLMNLU(
         llm_gateway=gateway,
         intent_policy=container.state_intent_policy,
     )

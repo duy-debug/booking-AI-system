@@ -35,6 +35,7 @@ from app.domain.booking_models import (
     TherapistPreferenceType,
 )
 from app.domain.booking_state import BookingState
+from app.domain.outcomes import HandlerOutcome, HandlerResult
 
 SHOP = Shop(
     UUID("11111111-1111-1111-1111-111111111111"),
@@ -78,12 +79,20 @@ class FakeSearchShopHandler:
         self.calls = 0
         self.received_query: str | None = None
 
-    async def execute(self, query: str | None = None) -> list[Shop]:
+    async def execute(self, query: str | None = None) -> HandlerResult:
         self.calls += 1
         self.received_query = query
         if self.error is not None:
             raise self.error
-        return self.results
+        if not self.results:
+            return HandlerResult(
+                HandlerOutcome.NOT_FOUND,
+                error_code="shop_not_found",
+            )
+        return HandlerResult(
+            HandlerOutcome.SUCCESS,
+            {"shops": tuple(self.results)},
+        )
 
 
 class FakeSearchCourseHandler:
@@ -104,17 +113,21 @@ class FakeSearchCourseHandler:
         shop_id: UUID,
         query: str | None = None,
         **kwargs: object,
-    ) -> list[Course]:
+    ) -> HandlerResult:
         self.calls += 1
         self.received_shop_id = shop_id
         self.received_query = query
         course_type = kwargs.get("course_type")
-        self.received_course_type = (
-            course_type if isinstance(course_type, CourseType) else None
-        )
+        self.received_course_type = course_type if isinstance(course_type, CourseType) else None
         if self.error is not None:
             raise self.error
-        return self.results
+        if not self.results:
+            return HandlerResult(
+                HandlerOutcome.NOT_FOUND,
+                error_code="course_not_found",
+            )
+        outcome = HandlerOutcome.AMBIGUOUS if len(self.results) > 1 else HandlerOutcome.SUCCESS
+        return HandlerResult(outcome, {"courses": tuple(self.results)})
 
 
 def coordinator(
@@ -237,9 +250,7 @@ async def test_one_shop_resolves_exact_action_registry_payload_without_mutation(
 
 @pytest.mark.asyncio
 async def test_multiple_shops_are_ambiguous_and_preserve_order_without_uuid() -> None:
-    result = await coordinator(
-        shops=FakeSearchShopHandler([SHOP, OTHER_SHOP])
-    ).resolve(
+    result = await coordinator(shops=FakeSearchShopHandler([SHOP, OTHER_SHOP])).resolve(
         nlu_result=entity_request(NLUEntityKind.SHOP, "sen"),
         state=BookingState.SELECTING_SHOP,
         context=BookingContext("conversation-1"),
@@ -261,9 +272,7 @@ async def test_multiple_shops_are_ambiguous_and_preserve_order_without_uuid() ->
 @pytest.mark.asyncio
 async def test_shop_handler_exception_becomes_safe_failed_result() -> None:
     secret = "raw-gateway-secret"
-    result = await coordinator(
-        shops=FakeSearchShopHandler(error=RuntimeError(secret))
-    ).resolve(
+    result = await coordinator(shops=FakeSearchShopHandler(error=RuntimeError(secret))).resolve(
         nlu_result=entity_request(NLUEntityKind.SHOP, "sen"),
         state=BookingState.SELECTING_SHOP,
         context=BookingContext("conversation-1"),
@@ -340,9 +349,7 @@ async def test_course_resolution_uses_selected_duration_to_disambiguate_main_cou
         duration_minutes=60,
     )
 
-    result = await coordinator(
-        courses=FakeSearchCourseHandler([MAIN, OTHER_MAIN])
-    ).resolve(
+    result = await coordinator(courses=FakeSearchCourseHandler([MAIN, OTHER_MAIN])).resolve(
         nlu_result=entity_request(NLUEntityKind.COURSE, "massage"),
         state=context.state,
         context=context,
@@ -354,16 +361,12 @@ async def test_course_resolution_uses_selected_duration_to_disambiguate_main_cou
 
 @pytest.mark.asyncio
 async def test_addon_preserves_type_and_requires_existing_main_course() -> None:
-    without_main = await coordinator(
-        courses=FakeSearchCourseHandler([ADDON])
-    ).resolve(
+    without_main = await coordinator(courses=FakeSearchCourseHandler([ADDON])).resolve(
         nlu_result=entity_request(NLUEntityKind.COURSE, "đá nóng"),
         state=BookingState.SELECTING_SERVICE,
         context=BookingContext("conversation-1", shop=SHOP),
     )
-    with_main = await coordinator(
-        courses=FakeSearchCourseHandler([ADDON])
-    ).resolve(
+    with_main = await coordinator(courses=FakeSearchCourseHandler([ADDON])).resolve(
         nlu_result=entity_request(NLUEntityKind.COURSE, "đá nóng"),
         state=BookingState.SELECTING_SERVICE,
         context=BookingContext(
@@ -376,9 +379,7 @@ async def test_addon_preserves_type_and_requires_existing_main_course() -> None:
 
     assert without_main.status is EntityResolutionStatus.UNSUPPORTED
     assert without_main.failure_code == "main_course_required"
-    assert with_main.dispatch_payload == {
-        "course_selection": CourseSelection(MAIN, (ADDON,))
-    }
+    assert with_main.dispatch_payload == {"course_selection": CourseSelection(MAIN, (ADDON,))}
     assert ADDON.course_type is CourseType.ADDON
 
 
@@ -404,9 +405,7 @@ async def test_addon_mode_queries_only_addons() -> None:
 
 @pytest.mark.asyncio
 async def test_multiple_courses_are_ambiguous_with_decimal_metadata() -> None:
-    result = await coordinator(
-        courses=FakeSearchCourseHandler([MAIN, OTHER_MAIN])
-    ).resolve(
+    result = await coordinator(courses=FakeSearchCourseHandler([MAIN, OTHER_MAIN])).resolve(
         nlu_result=entity_request(NLUEntityKind.COURSE, "massage"),
         state=BookingState.SELECTING_SERVICE,
         context=BookingContext("conversation-1", shop=SHOP),
@@ -425,9 +424,7 @@ async def test_multiple_courses_are_ambiguous_with_decimal_metadata() -> None:
 @pytest.mark.asyncio
 async def test_course_handler_exception_becomes_safe_failure() -> None:
     secret = "malformed-response-secret"
-    result = await coordinator(
-        courses=FakeSearchCourseHandler(error=RuntimeError(secret))
-    ).resolve(
+    result = await coordinator(courses=FakeSearchCourseHandler(error=RuntimeError(secret))).resolve(
         nlu_result=entity_request(NLUEntityKind.COURSE, "massage"),
         state=BookingState.SELECTING_SERVICE,
         context=BookingContext("conversation-1", shop=SHOP),

@@ -96,9 +96,7 @@ class TherapistPreference:
             and self.therapist_id is None
             and self.therapist_name is None
         ):
-            raise InvalidBookingDataError(
-                "A personal therapist preference requires an ID or name."
-            )
+            raise InvalidBookingDataError("A personal therapist preference requires an ID or name.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,9 +129,7 @@ class Course:
 
     def __post_init__(self) -> None:
         if self.duration_minutes <= 0 or self.duration_minutes % 15 != 0:
-            raise InvalidDurationError(
-                "Course duration must be positive and divisible by 15."
-            )
+            raise InvalidDurationError("Course duration must be positive and divisible by 15.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,13 +145,9 @@ class CourseSelection:
         if any(addon.course_type is not CourseType.ADDON for addon in self.addons):
             raise InvalidCourseSelectionError("Every add-on must have type ADDON.")
 
-        course_ids = (self.main_course.course_id,) + tuple(
-            addon.course_id for addon in self.addons
-        )
+        course_ids = (self.main_course.course_id,) + tuple(addon.course_id for addon in self.addons)
         if len(course_ids) != len(set(course_ids)):
-            raise InvalidCourseSelectionError(
-                "Course selection must contain unique course IDs."
-            )
+            raise InvalidCourseSelectionError("Course selection must contain unique course IDs.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,19 +178,14 @@ class Booking:
 
     def __post_init__(self) -> None:
         if not 1 <= self.num_customer <= 3:
-            raise InvalidCustomerCountError(
-                "Number of customers must be between one and three."
-            )
+            raise InvalidCustomerCountError("Number of customers must be between one and three.")
         if self.duration_minutes <= 0 or self.duration_minutes % 15 != 0:
-            raise InvalidDurationError(
-                "Booking duration must be positive and divisible by 15."
-            )
+            raise InvalidDurationError("Booking duration must be positive and divisible by 15.")
         CourseSelection(main_course=self.main_course, addons=self.addons)
         if (
             self.num_customer >= 2
             and self.therapist_preference is not None
-            and self.therapist_preference.preference_type
-            is TherapistPreferenceType.PERSONAL
+            and self.therapist_preference.preference_type is TherapistPreferenceType.PERSONAL
         ):
             raise TherapistNotAllowedForGroupError(
                 "Group bookings cannot specify a therapist preference."
@@ -228,9 +215,7 @@ class BookingRules:
     @staticmethod
     def validate_course_duration(duration_minutes: int) -> None:
         if duration_minutes <= 0 or duration_minutes % 15 != 0:
-            raise InvalidDurationError(
-                "Course duration must be positive and divisible by 15."
-            )
+            raise InvalidDurationError("Course duration must be positive and divisible by 15.")
 
     @classmethod
     def validate_booking_datetime(
@@ -251,9 +236,7 @@ class BookingRules:
         else:
             current_datetime = current_datetime.astimezone(cls._VIETNAM_TIMEZONE)
         if booking_datetime <= current_datetime:
-            raise InvalidBookingDataError(
-                "Booking date and time must be in the future."
-            )
+            raise InvalidBookingDataError("Booking date and time must be in the future.")
 
     @classmethod
     def validate_create_context(cls, context: "BookingContext") -> None:
@@ -261,17 +244,10 @@ class BookingRules:
         customer = context.customer
         booking_date = context.booking_date
         start_time = context.start_time
-        if (
-            shop is None
-            or customer is None
-            or booking_date is None
-            or start_time is None
-        ):
+        if shop is None or customer is None or booking_date is None or start_time is None:
             raise BookingContextNotReadyError("Booking context is incomplete.")
         if context.num_customer is None or not 1 <= context.num_customer <= 3:
-            raise InvalidCustomerCountError(
-                "Number of customers must be between one and three."
-            )
+            raise InvalidCustomerCountError("Number of customers must be between one and three.")
         if context.duration_minutes is None:
             raise InvalidDurationError("Booking duration is required.")
         cls.validate_course_duration(context.duration_minutes)
@@ -280,8 +256,7 @@ class BookingRules:
         if (
             context.num_customer >= 2
             and context.therapist_preference is not None
-            and context.therapist_preference.preference_type
-            is TherapistPreferenceType.PERSONAL
+            and context.therapist_preference.preference_type is TherapistPreferenceType.PERSONAL
         ):
             raise TherapistNotAllowedForGroupError(
                 "Group bookings cannot specify a therapist preference."
@@ -299,6 +274,7 @@ class BookingRules:
             raise CustomerNotAllowedError("This customer is not allowed to book.")
         cls.validate_phone(customer.phone)
         cls.validate_booking_datetime(booking_date, start_time)
+
 
 """Framework-independent application exceptions."""
 
@@ -328,6 +304,7 @@ class CustomerVerificationMismatchError(ApplicationError):
 
 class InvalidIdempotencyKeyError(ApplicationError):
     """Raised when booking creation receives an empty idempotency key."""
+
 
 """Application contract for the external booking source of truth."""
 
@@ -378,18 +355,12 @@ def _validate_booking_shape(
     therapist_preference: TherapistPreference | None,
 ) -> None:
     if not 1 <= num_customer <= 3:
-        raise InvalidCustomerCountError(
-            "Number of customers must be between one and three."
-        )
+        raise InvalidCustomerCountError("Number of customers must be between one and three.")
     if duration_minutes <= 0 or duration_minutes % 15 != 0:
-        raise InvalidDurationError(
-            "Booking duration must be positive and divisible by 15."
-        )
+        raise InvalidDurationError("Booking duration must be positive and divisible by 15.")
     course_ids = (main_course_id,) + addon_ids
     if len(course_ids) != len(set(course_ids)):
-        raise InvalidCourseSelectionError(
-            "Main course and add-on IDs must be unique."
-        )
+        raise InvalidCourseSelectionError("Main course and add-on IDs must be unique.")
     if (
         num_customer >= 2
         and therapist_preference is not None
@@ -522,13 +493,8 @@ class CreateBookingResult:
         ]
         if len(participant_indexes) != len(set(participant_indexes)):
             raise ValueError("Child reservation participant indexes must be unique.")
-        if (
-            self.child_reservations
-            and len(self.child_reservations) != self.booking.num_customer
-        ):
-            raise ValueError(
-                "Child reservation count must match the booking customer count."
-            )
+        if self.child_reservations and len(self.child_reservations) != self.booking.num_customer:
+            raise ValueError("Child reservation count must match the booking customer count.")
         codes = (() if self.reservation_code is None else (self.reservation_code,)) + (
             self.reservation_codes
         )
@@ -563,7 +529,6 @@ class BookingGateway(Protocol):
     ) -> CustomerVerificationResult:
         """Return authoritative member and NG-list verification."""
         ...
-
 
     async def check_final_availability(
         self,
@@ -606,6 +571,7 @@ class TherapistAvailabilityGateway(Protocol):
     ) -> list[TherapistPreference]:
         """Return POS-authoritative therapists available for one selected window."""
         ...
+
 
 """Typed failures raised by the HTTP booking gateway."""
 

@@ -56,7 +56,6 @@ class CheckCustomerHandler:
                 )
                 candidate.set_customer_verification(
                     member_rank=None,
-                    visit_count=None,
                     is_ng_customer=True,
                 )
                 raise
@@ -77,12 +76,10 @@ class CheckCustomerHandler:
             if verification.ng_list_checked:
                 candidate.set_customer_verification(
                     member_rank=verification.member_rank,
-                    visit_count=verification.visit_count,
                     is_ng_customer=verification.is_ng_customer,
                 )
             else:
                 candidate.member_rank = verification.member_rank
-                candidate.visit_count = verification.visit_count
                 candidate.ng_list_checked = False
                 candidate.is_ng_customer = verification.is_ng_customer
         except CustomerNotAllowedError:
@@ -107,12 +104,9 @@ class CheckCustomerHandler:
             "customer": candidate.customer,
             "customer_id": candidate.customer_id,
             "member_rank": candidate.member_rank,
-            "visit_count": candidate.visit_count,
             "ng_list_checked": candidate.ng_list_checked,
             "is_ng_customer": candidate.is_ng_customer,
         }
-        for field, value in updates.items():
-            setattr(context, field, value)
         return HandlerResult(
             HandlerOutcome.SUCCESS,
             {"verification": verification},
@@ -120,12 +114,10 @@ class CheckCustomerHandler:
         )
 
     def confirm(self, context: BookingContext) -> HandlerResult:
-        try:
-            context.confirm_phone()
-        except InvalidBookingDataError as error:
+        if context.phone is None:
             return HandlerResult(
                 HandlerOutcome.INVALID_INPUT,
-                error_code=type(error).__name__,
+                error_code="phone_required",
             )
         return HandlerResult(
             HandlerOutcome.SUCCESS,

@@ -54,10 +54,7 @@ def test_encoder_outputs_compact_utf8_json_and_terminal_newlines() -> None:
         data={"text": "Vui lòng chọn cửa hàng.", "ok": True},
     )
 
-    assert frame == (
-        'event: message\n'
-        'data: {"text":"Vui lòng chọn cửa hàng.","ok":true}\n\n'
-    )
+    assert frame == ('event: message\ndata: {"text":"Vui lòng chọn cửa hàng.","ok":true}\n\n')
     assert "\\u" not in frame
     assert frame.endswith("\n\n")
     assert "True" not in frame

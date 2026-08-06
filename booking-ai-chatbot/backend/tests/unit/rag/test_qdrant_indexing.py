@@ -232,9 +232,7 @@ def test_payload_is_minimal_logical_and_contains_no_vector(tmp_path: Path) -> No
     _, client = index(source_file(tmp_path))
     point = next(iter(client.points.values()))
 
-    assert set(point.payload or {}) == {
-        "chunk_id", "content", "source", "section", "chunk_index"
-    }
+    assert set(point.payload or {}) == {"chunk_id", "content", "source", "section", "chunk_index"}
     assert point.payload is not None
     assert point.payload["source"] == "knowledge/README.md"
     assert not Path(cast(str, point.payload["source"])).is_absolute()

@@ -1,4 +1,4 @@
-"""Integration tests for LLM fallback inside the shared chat pipeline."""
+"""Integration tests for Gemini NLU inside the shared chat pipeline."""
 
 import json
 from collections.abc import AsyncIterator
@@ -16,14 +16,11 @@ from app.dialog.nlu import (
     EntityResolutionResult,
     EntityResolutionStatus,
     NLUEntityKind,
-    NLUProcessor,
-    NLUResolutionStatus,
     NLUResult,
-    NLUSource,
 )
 from app.domain.booking_context import BookingContext
-from app.domain.booking_models import Shop
 from app.domain.booking_state import BookingState
+from app.domain.outcomes import HandlerOutcome, HandlerResult
 from app.infrastructure.context_store import Settings
 from app.infrastructure.gemini_client import (
     LLMGatewayUnavailableError,
@@ -56,24 +53,9 @@ class FakeSearchShopHandler(SearchShopHandler):
     def __init__(self) -> None:
         self.calls = 0
 
-    async def execute(self, query: str | None = None) -> list[Shop]:
+    async def execute(self, query: str | None = None) -> HandlerResult:
         self.calls += 1
-        return []
-
-
-class AlwaysUnresolvedNLU:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def parse(self, *, text: str, state: BookingState) -> NLUResult:
-        self.calls += 1
-        return NLUResult(
-            intent=None,
-            payload={},
-            confidence=0.0,
-            source=NLUSource.FALLBACK,
-            resolution_status=NLUResolutionStatus.UNRESOLVED,
-        )
+        return HandlerResult(HandlerOutcome.SUCCESS, {"shops": ()})
 
 
 class ControllerSpy:
@@ -88,6 +70,21 @@ class ControllerSpy:
     ) -> DialogTurnResult:
         self.calls.append(turn)
         return await self.delegate.handle_turn(context, turn)
+
+    async def handle_message(
+        self,
+        *,
+        conversation_id: str,
+        message: str,
+        idempotency_key: str | None = None,
+        correlation_id: str | None = None,
+    ) -> object:
+        return await self.delegate.handle_message(
+            conversation_id=conversation_id,
+            message=message,
+            idempotency_key=idempotency_key,
+            correlation_id=correlation_id,
+        )
 
 
 class ResolverSpy:
@@ -159,12 +156,6 @@ def request(message: str) -> ChatRequest:
     return ChatRequest(conversation_id="conversation-a", message=message)
 
 
-def force_unresolved(container: ApplicationContainer) -> AlwaysUnresolvedNLU:
-    nlu = AlwaysUnresolvedNLU()
-    container.nlu_processor = cast(NLUProcessor, nlu)
-    return nlu
-
-
 def spy_controller(container: ApplicationContainer) -> ControllerSpy:
     spy = ControllerSpy(container.dialog_controller)
     container.dialog_controller = cast(DialogController, spy)
@@ -172,65 +163,74 @@ def spy_controller(container: ApplicationContainer) -> ControllerSpy:
 
 
 @pytest.mark.asyncio
-async def test_deterministic_resolved_does_not_call_llm(
+async def test_start_booking_uses_llm_once(
     runtime: tuple[ApplicationContainer, FakeLLMGateway, list[httpx.Request]],
 ) -> None:
     container, gateway, external_requests = runtime
 
     search_shop = FakeSearchShopHandler()
     container.action_registry._search_shop_handler = search_shop
+    gateway.content = output("start_booking")
 
     response = await _process_chat_message(
         request=request("Tôi muốn đặt lịch"),
         container=container,
     )
 
-    assert gateway.calls == 0
+    assert gateway.calls == 1
     assert search_shop.calls == 1
     assert response.state is BookingState.SELECTING_SHOP
     assert external_requests == []
 
 
 @pytest.mark.asyncio
-async def test_deterministic_entity_query_does_not_call_llm(
+async def test_entity_query_uses_llm_once(
     runtime: tuple[ApplicationContainer, FakeLLMGateway, list[httpx.Request]],
 ) -> None:
     container, gateway, external_requests = runtime
-    context = await container.conversation_context_store.get_or_create(
-        "conversation-a"
-    )
+    context = await container.conversation_context_store.get_copy("conversation-a")
     context.state = BookingState.SELECTING_SHOP
+    await container.conversation_context_store.save("conversation-a", context)
+    gateway.content = output(
+        "select_shop",
+        entity_kind="shop",
+        entity_query="Tokyo",
+    )
 
     response = await _process_chat_message(
         request=request("Tokyo"),
         container=container,
     )
 
-    assert gateway.calls == 0
+    assert gateway.calls == 1
     assert response.state is BookingState.SELECTING_SHOP
     assert len(external_requests) == 1
     assert external_requests[0].url.path == "/api/shops"
 
 
 @pytest.mark.asyncio
-async def test_deterministic_change_request_does_not_call_llm(
+async def test_change_request_uses_llm_once(
     runtime: tuple[ApplicationContainer, FakeLLMGateway, list[httpx.Request]],
 ) -> None:
     container, gateway, external_requests = runtime
-    context = await container.conversation_context_store.get_or_create(
-        "conversation-a"
-    )
+    context = await container.conversation_context_store.get_copy("conversation-a")
     context.state = BookingState.AWAITING_CONFIRMATION
     context.booking_date = date(2026, 8, 5)
+    await container.conversation_context_store.save("conversation-a", context)
+    gateway.content = output(
+        "change_info",
+        entities={"change_target": "date"},
+    )
 
     response = await _process_chat_message(
         request=request("đổi ngày"),
         container=container,
     )
 
-    assert gateway.calls == 0
+    assert gateway.calls == 1
     assert response.state is BookingState.SELECTING_DATE
-    assert context.booking_date is None
+    stored = await container.conversation_context_store.get_copy("conversation-a")
+    assert stored.booking_date is None
     assert external_requests == []
 
 
@@ -239,12 +239,10 @@ async def test_unresolved_then_valid_people_output_runs_one_controller_turn(
     runtime: tuple[ApplicationContainer, FakeLLMGateway, list[httpx.Request]],
 ) -> None:
     container, gateway, external_requests = runtime
-    deterministic = force_unresolved(container)
     controller = spy_controller(container)
-    context = await container.conversation_context_store.get_or_create(
-        "conversation-a"
-    )
+    context = await container.conversation_context_store.get_copy("conversation-a")
     context.state = BookingState.SELECTING_PEOPLE
+    await container.conversation_context_store.save("conversation-a", context)
     gateway.content = output(
         "select_people",
         entities={"number_of_people": 3},
@@ -255,26 +253,25 @@ async def test_unresolved_then_valid_people_output_runs_one_controller_turn(
         container=container,
     )
 
-    assert deterministic.calls == 1
     assert gateway.calls == 1
     assert len(controller.calls) == 1
     assert controller.calls[0].payload == {"num_customer": 3}
-    assert context.num_customer == 3
-    assert context.state is BookingState.SELECTING_DURATION
+    stored = await container.conversation_context_store.get_copy("conversation-a")
+    assert stored.num_customer == 3
+    assert stored.state is BookingState.SELECTING_DURATION
     assert response.state is BookingState.SELECTING_DURATION
     assert external_requests == []
 
 
 @pytest.mark.asyncio
-async def test_composed_nlu_processor_routes_unknown_text_to_llm_fallback(
+async def test_composed_llm_nlu_routes_unknown_text_to_safe_recovery(
     runtime: tuple[ApplicationContainer, FakeLLMGateway, list[httpx.Request]],
 ) -> None:
     container, gateway, external_requests = runtime
     controller = spy_controller(container)
-    context = await container.conversation_context_store.get_or_create(
-        "conversation-a"
-    )
+    context = await container.conversation_context_store.get_copy("conversation-a")
     context.state = BookingState.SELECTING_DURATION
+    await container.conversation_context_store.save("conversation-a", context)
     gateway.content = output(
         "select_duration",
         entities={"duration_minutes": 60},
@@ -288,8 +285,9 @@ async def test_composed_nlu_processor_routes_unknown_text_to_llm_fallback(
     assert gateway.calls == 1
     assert len(controller.calls) == 1
     assert controller.calls[0].payload == {"duration_minutes": 60}
-    assert context.duration_minutes == 60
-    assert context.state is BookingState.SELECTING_SERVICE
+    stored = await container.conversation_context_store.get_copy("conversation-a")
+    assert stored.duration_minutes == 60
+    assert stored.state is BookingState.SELECTING_SERVICE
     assert response.state is BookingState.SELECTING_SERVICE
     assert external_requests == []
 
@@ -299,13 +297,11 @@ async def test_llm_shop_query_goes_through_entity_resolver_without_domain_object
     runtime: tuple[ApplicationContainer, FakeLLMGateway, list[httpx.Request]],
 ) -> None:
     container, gateway, external_requests = runtime
-    force_unresolved(container)
     resolver = ResolverSpy()
     container.entity_resolution_coordinator = cast(EntityResolutionCoordinator, resolver)
-    context = await container.conversation_context_store.get_or_create(
-        "conversation-a"
-    )
+    context = await container.conversation_context_store.get_copy("conversation-a")
     context.state = BookingState.SELECTING_SHOP
+    await container.conversation_context_store.save("conversation-a", context)
     gateway.content = output(
         "select_shop",
         entity_kind="shop",
@@ -332,12 +328,10 @@ async def test_state_disallowed_llm_intent_returns_clarification_without_control
     runtime: tuple[ApplicationContainer, FakeLLMGateway, list[httpx.Request]],
 ) -> None:
     container, gateway, external_requests = runtime
-    force_unresolved(container)
     controller = spy_controller(container)
-    context = await container.conversation_context_store.get_or_create(
-        "conversation-a"
-    )
+    context = await container.conversation_context_store.get_copy("conversation-a")
     context.state = BookingState.SELECTING_PEOPLE
+    await container.conversation_context_store.save("conversation-a", context)
     gateway.content = output("confirm")
 
     response = await _process_chat_message(
@@ -358,12 +352,10 @@ async def test_multiple_llm_entities_apply_only_current_state_entity(
     runtime: tuple[ApplicationContainer, FakeLLMGateway, list[httpx.Request]],
 ) -> None:
     container, gateway, external_requests = runtime
-    force_unresolved(container)
     controller = spy_controller(container)
-    context = await container.conversation_context_store.get_or_create(
-        "conversation-a"
-    )
+    context = await container.conversation_context_store.get_copy("conversation-a")
     context.state = BookingState.SELECTING_PEOPLE
+    await container.conversation_context_store.save("conversation-a", context)
     gateway.content = output(
         "select_people",
         entities={
@@ -400,12 +392,10 @@ async def test_low_confidence_or_provider_failure_is_safe_and_non_mutating(
     error: Exception | None,
 ) -> None:
     container, gateway, external_requests = runtime
-    force_unresolved(container)
     controller = spy_controller(container)
-    context = await container.conversation_context_store.get_or_create(
-        "conversation-a"
-    )
+    context = await container.conversation_context_store.get_copy("conversation-a")
     context.state = BookingState.SELECTING_PEOPLE
+    await container.conversation_context_store.save("conversation-a", context)
     gateway.content = content
     gateway.error = error
 

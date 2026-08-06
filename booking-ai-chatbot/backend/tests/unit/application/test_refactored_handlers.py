@@ -46,9 +46,7 @@ class CourseGateway:
 
 class CustomerGateway:
     async def verify_customer(self, request: object) -> CustomerVerificationResult:
-        return CustomerVerificationResult(
-            "0901234567", "customer-1", None, 0, True, False, None
-        )
+        return CustomerVerificationResult("0901234567", "customer-1", None, 0, True, False, None)
 
 
 def test_select_booking_info_updates_only_valid_values() -> None:
@@ -61,7 +59,8 @@ def test_select_booking_info_updates_only_valid_values() -> None:
     assert invalid.outcome is HandlerOutcome.INVALID_INPUT
     assert context.num_customer is None
     assert selected.outcome is HandlerOutcome.SUCCESS
-    assert context.duration_minutes == 60
+    assert selected.context_updates == {"duration_minutes": 60}
+    assert context.duration_minutes is None
 
 
 def test_select_schedule_rejects_unverified_slot_and_group_therapist() -> None:
@@ -91,23 +90,21 @@ async def test_search_course_returns_typed_outcomes() -> None:
         cast(BookingGateway, CourseGateway(RuntimeError("POS unavailable")))
     )
 
-    found = await success.handle(SHOP.shop_id, "massage", duration_minutes=60)
-    unavailable = await failure.handle(SHOP.shop_id)
+    found = await success.execute(SHOP.shop_id, "massage")
 
     assert found.outcome is HandlerOutcome.SUCCESS
     assert found.data["courses"] == (COURSE,)
-    assert unavailable.outcome is HandlerOutcome.EXTERNAL_FAILURE
+    with pytest.raises(RuntimeError, match="POS unavailable"):
+        await failure.execute(SHOP.shop_id)
 
 
 @pytest.mark.asyncio
-async def test_check_customer_commits_only_after_success() -> None:
+async def test_check_customer_returns_updates_without_mutating_context() -> None:
     handler = CheckCustomerHandler(cast(BookingGateway, CustomerGateway()))
     context = BookingContext("conversation-1", shop=SHOP)
 
     checked = await handler.check(context, "0901234567", "Nguyễn An")
-    confirmed = handler.confirm(context)
-
     assert checked.outcome is HandlerOutcome.SUCCESS
-    assert confirmed.outcome is HandlerOutcome.SUCCESS
-    assert context.customer_name == "Nguyễn An"
-    assert context.phone_confirmed is True
+    assert checked.context_updates["phone"] == "0901234567"
+    assert context.customer is None
+    assert context.phone is None

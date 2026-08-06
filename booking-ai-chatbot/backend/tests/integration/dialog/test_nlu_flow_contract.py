@@ -20,12 +20,7 @@ from app.dialog.state_machine import StateMachine
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 
-FLOW_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "app"
-    / "dialog"
-    / "booking_flow.json"
-)
+FLOW_PATH = Path(__file__).resolve().parents[3] / "app" / "dialog" / "booking_flow.json"
 PARSER_OUTPUT_INTENTS = {
     "ask_question",
     "cancel_flow",
@@ -56,11 +51,7 @@ def nlu(policy: StateIntentPolicy) -> NLUProcessor:
 
 def flow_intents() -> set[str]:
     flow = FlowLoader.load(FLOW_PATH)
-    return {
-        transition.intent
-        for state in flow.states.values()
-        for transition in state.transitions
-    }
+    return {transition.intent for state in flow.states.values() for transition in state.transitions}
 
 
 def test_parser_output_intents_are_supported_by_real_flow_or_system_policy() -> None:

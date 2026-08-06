@@ -1,35 +1,34 @@
 """Assemble and own the application's runtime dependency graph."""
 
+import asyncio
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from math import isfinite
 from typing import cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from qdrant_client import QdrantClient
 
 from app.application.action_registry import ActionRegistry
-from app.application.handlers.cancel_booking_handler import CancelBookingHandler
 from app.application.handlers.check_availability_handler import (
     CheckAvailabilityHandler,
 )
 from app.application.handlers.check_customer_handler import CheckCustomerHandler
 from app.application.handlers.create_booking_handler import CreateBookingHandler
-from app.application.handlers.lookup_booking_handler import LookupBookingHandler
-from app.application.handlers.reschedule_booking_handler import RescheduleBookingHandler
 from app.application.handlers.search_course_handler import SearchCourseHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.application.handlers.select_booking_info_handler import SelectBookingInfoHandler
 from app.application.handlers.select_schedule_handler import SelectScheduleHandler
 from app.dialog.dialog_controller import DialogController
-from app.dialog.flow_loader import FlowDefinition, FlowLoader
+from app.dialog.flow_loader import ChangeRule, FlowDefinition, FlowLoader
 from app.dialog.instruction_builder import InstructionBuilder
 from app.dialog.nlu import (
+    LLMNLU,
+    SUPPORTED_NLU_INTENTS,
     EntityResolutionCoordinator,
-    LLMNLUFallback,
-    NLUProcessor,
     StateIntentPolicy,
     build_state_intent_policy,
 )
@@ -37,6 +36,7 @@ from app.dialog.response_generator import ResponseGenerator
 from app.dialog.state_machine import StateMachine
 from app.domain.booking_context import BookingContext
 from app.domain.booking_models import BookingGateway, TherapistAvailabilityGateway
+from app.domain.booking_state import BookingState
 from app.infrastructure.context_store import ContextStore, Settings
 from app.infrastructure.gemini_client import GeminiClient, LLMGateway
 from app.infrastructure.pos_api_client import PosApiClient
@@ -50,6 +50,7 @@ from app.infrastructure.qdrant_client import (
 
 _MAX_CONVERSATION_ID_LENGTH = 128
 _RAW_PHONE_PATTERN = re.compile(r"\+?\d{9,15}")
+
 
 class ConversationContextError(Exception):
     """Base error for conversation context lifecycle failures."""
@@ -67,14 +68,49 @@ class InvalidConversationContextError(ConversationContextError):
     """Raised when a context cannot be saved under the supplied identifier."""
 
 
+class RuntimeFlowValidationError(ValueError):
+    """Raised when composed runtime bindings cannot execute the loaded flow."""
+
+
+@dataclass(slots=True)
+class _ConversationLockEntry:
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    users: int = 0
+
+
 class ConversationContextStore:
     """Coordinates booking-context persistence in the in-process cache."""
 
     def __init__(self, *, cache: ContextStore) -> None:
         self._cache = cache
+        self._lock_registry_guard = asyncio.Lock()
+        self._conversation_locks: dict[str, _ConversationLockEntry] = {}
 
-    async def get_or_create(self, conversation_id: str) -> BookingContext:
-        """Load a context or create and store an idle context on a cache miss."""
+    @asynccontextmanager
+    async def conversation_lock(
+        self,
+        conversation_id: str,
+    ) -> AsyncIterator[None]:
+        """Serialize one conversation without blocking unrelated sessions."""
+        normalized_id = _validate_conversation_id(conversation_id)
+        async with self._lock_registry_guard:
+            entry = self._conversation_locks.get(normalized_id)
+            if entry is None:
+                entry = _ConversationLockEntry()
+                self._conversation_locks[normalized_id] = entry
+            entry.users += 1
+        await entry.lock.acquire()
+        try:
+            yield
+        finally:
+            entry.lock.release()
+            async with self._lock_registry_guard:
+                entry.users -= 1
+                if entry.users == 0:
+                    self._conversation_locks.pop(normalized_id, None)
+
+    async def get_copy(self, conversation_id: str) -> BookingContext:
+        """Load an isolated working context or create one on a cache miss."""
         normalized_id = _validate_conversation_id(conversation_id)
         context = await self._cache.get(normalized_id)
         if context is None:
@@ -82,9 +118,7 @@ class ConversationContextStore:
             await self._cache.save(context)
             return context
         if not isinstance(context, BookingContext):
-            raise InvalidCachedContextError(
-                "Cached conversation data must be a BookingContext."
-            )
+            raise InvalidCachedContextError("Cached conversation data must be a BookingContext.")
         if context.conversation_id != normalized_id:
             raise InvalidCachedContextError(
                 "Cached BookingContext does not match its conversation key."
@@ -96,12 +130,10 @@ class ConversationContextStore:
         conversation_id: str,
         context: BookingContext,
     ) -> None:
-        """Save the supplied context by reference under its conversation key."""
+        """Commit an isolated snapshot under the conversation key."""
         normalized_id = _validate_conversation_id(conversation_id)
         if not isinstance(context, BookingContext):
-            raise InvalidConversationContextError(
-                "Conversation context must be a BookingContext."
-            )
+            raise InvalidConversationContextError("Conversation context must be a BookingContext.")
         if context.conversation_id != normalized_id:
             raise InvalidConversationContextError(
                 "BookingContext does not match the supplied conversation ID."
@@ -133,12 +165,10 @@ class ApplicationContainer:
     check_customer_handler: CheckCustomerHandler
     select_booking_info_handler: SelectBookingInfoHandler
     select_schedule_handler: SelectScheduleHandler
-    nlu_processor: NLUProcessor | None
     state_intent_policy: StateIntentPolicy
     entity_resolution_coordinator: EntityResolutionCoordinator
     llm_gateway: LLMGateway
-    llm_nlu_fallback: LLMNLUFallback
-    llm_nlu_required: bool
+    llm_nlu: LLMNLU
     llm_nlg_required: bool
     faq_manager: FAQManager
     knowledge_gateway: KnowledgeGateway | None
@@ -201,9 +231,6 @@ async def create_application_container(
         select_booking_info_handler = SelectBookingInfoHandler()
         select_schedule_handler = SelectScheduleHandler()
         create_booking_handler = CreateBookingHandler(booking_gateway)
-        lookup_booking_handler = LookupBookingHandler(booking_gateway)
-        reschedule_booking_handler = RescheduleBookingHandler(booking_gateway)
-        cancel_booking_handler = CancelBookingHandler(booking_gateway)
         entity_resolution_coordinator = EntityResolutionCoordinator(
             search_shop_handler=search_shop_handler,
             search_course_handler=search_course_handler,
@@ -225,9 +252,6 @@ async def create_application_container(
             select_booking_info_handler,
             select_schedule_handler,
             create_booking_handler,
-            lookup_booking_handler,
-            reschedule_booking_handler,
-            cancel_booking_handler,
         )
         action_registry = ActionRegistry(
             search_shop_handler=search_shop_handler,
@@ -236,6 +260,13 @@ async def create_application_container(
             select_booking_info_handler=select_booking_info_handler,
             select_schedule_handler=select_schedule_handler,
             check_customer_handler=check_customer_handler,
+        )
+        instruction_builder = InstructionBuilder()
+        validate_runtime_flow(
+            flow_definition,
+            action_registry,
+            instruction_builder,
+            change_rules=change_rules,
         )
         state_machine = StateMachine(flow_definition)
         dialog_controller = DialogController(
@@ -246,7 +277,6 @@ async def create_application_container(
             max_auto_transitions=settings.max_auto_transitions,
         )
         memory_cache = ContextStore()
-        instruction_builder = InstructionBuilder()
         response_generator = ResponseGenerator(
             configured_llm_gateway,
             instruction_builder,
@@ -260,12 +290,10 @@ async def create_application_container(
             )
             configured_knowledge_gateway = KnowledgeQdrantClient(
                 client=cast(QdrantQueryClient, qdrant_client),
-                embedding=SentenceTransformerEmbedding(
-                    settings.embedding_model_name
-                ),
+                embedding=SentenceTransformerEmbedding(settings.embedding_model_name),
                 collection_name=settings.qdrant_collection,
             )
-        return ApplicationContainer(
+        container = ApplicationContainer(
             http_client=client,
             booking_gateway=booking_gateway,
             dialog_controller=dialog_controller,
@@ -279,27 +307,15 @@ async def create_application_container(
             check_customer_handler=check_customer_handler,
             select_booking_info_handler=select_booking_info_handler,
             select_schedule_handler=select_schedule_handler,
-            nlu_processor=(
-                None
-                if settings.llm_nlu_required
-                else NLUProcessor(
-                    intent_policy=state_intent_policy,
-                    unknown_as_unresolved=True,
-                )
-            ),
             state_intent_policy=state_intent_policy,
             entity_resolution_coordinator=entity_resolution_coordinator,
             llm_gateway=configured_llm_gateway,
-            llm_nlu_fallback=LLMNLUFallback(
+            llm_nlu=LLMNLU(
                 llm_gateway=configured_llm_gateway,
                 intent_policy=state_intent_policy,
                 min_confidence=settings.llm_nlu_min_confidence,
-                enabled=(
-                    settings.enable_llm_nlu_fallback
-                    and settings.dialog_intent_tool_enabled
-                ),
+                business_timezone=settings.business_timezone,
             ),
-            llm_nlu_required=settings.llm_nlu_required,
             llm_nlg_required=settings.llm_nlg_required,
             faq_manager=FAQManager(
                 knowledge_gateway=configured_knowledge_gateway,
@@ -311,6 +327,8 @@ async def create_application_container(
             _owns_http_client=owns_http_client,
             _qdrant_client=qdrant_client,
         )
+        dialog_controller.bind_runtime(container)
+        return container
     except BaseException:
         if qdrant_client is not None:
             qdrant_client.close()
@@ -329,6 +347,97 @@ async def application_container_lifespan(
         yield container
     finally:
         await container.close()
+
+
+def validate_runtime_flow(
+    flow: FlowDefinition,
+    action_registry: ActionRegistry,
+    instruction_builder: InstructionBuilder,
+    *,
+    change_rules: Mapping[str, ChangeRule] | None = None,
+) -> None:
+    """Fail fast when declarative flow references cannot be served at runtime."""
+    declared_actions: list[str] = []
+    declared_templates: list[str] = []
+    declared_intents: set[str] = set()
+    reachable_edges: dict[BookingState, set[BookingState]] = {state: set() for state in flow.states}
+
+    def include_failure(failure: object) -> None:
+        actions = getattr(failure, "actions", ())
+        template = getattr(failure, "instruction_template", None)
+        target = getattr(failure, "target", None)
+        declared_actions.extend(actions)
+        if isinstance(template, str):
+            declared_templates.append(template)
+        if isinstance(target, BookingState):
+            reachable_edges[current_state].add(target)
+
+    for current_state, definition in flow.states.items():
+        declared_actions.extend(definition.on_enter.actions)
+        if definition.on_enter.instruction_template is not None:
+            declared_templates.append(definition.on_enter.instruction_template)
+        for failure in definition.on_enter.on_fail:
+            include_failure(failure)
+        seen_transitions: list[object] = []
+        for transition in definition.transitions:
+            if transition in seen_transitions:
+                raise RuntimeFlowValidationError(
+                    f"State '{current_state.value}' contains a duplicate transition."
+                )
+            seen_transitions.append(transition)
+            declared_intents.add(transition.intent)
+            declared_actions.extend(transition.actions)
+            reachable_edges[current_state].add(transition.target)
+            for failure in transition.on_fail:
+                include_failure(failure)
+        for auto_transition in definition.auto_transitions:
+            declared_actions.extend(auto_transition.actions)
+            reachable_edges[current_state].add(auto_transition.target)
+            for failure in auto_transition.on_fail:
+                include_failure(failure)
+
+    for rule in (change_rules or {}).values():
+        reset_action = getattr(rule, "reset_action", None)
+        prompt_template = getattr(rule, "prompt_template", None)
+        if isinstance(reset_action, str):
+            declared_actions.append(reset_action)
+        if isinstance(prompt_template, str):
+            declared_templates.append(prompt_template)
+
+    missing_actions = action_registry.find_unregistered_actions(declared_actions)
+    if missing_actions:
+        raise RuntimeFlowValidationError("Unregistered flow actions: " + ", ".join(missing_actions))
+    unknown_intents = (
+        declared_intents
+        - SUPPORTED_NLU_INTENTS
+        - {
+            "*",
+            "booking_failed",
+            "booking_succeeded",
+        }
+    )
+    if unknown_intents:
+        raise RuntimeFlowValidationError(
+            "Unsupported flow intents: " + ", ".join(sorted(unknown_intents))
+        )
+    missing_templates = instruction_builder.find_missing_templates(declared_templates)
+    if missing_templates:
+        raise RuntimeFlowValidationError(
+            "Unregistered instruction templates: " + ", ".join(missing_templates)
+        )
+
+    reachable = {flow.initial_state}
+    pending = [flow.initial_state]
+    while pending:
+        source = pending.pop()
+        for target in reachable_edges[source] - reachable:
+            reachable.add(target)
+            pending.append(target)
+    unreachable = set(flow.states) - reachable
+    if unreachable:
+        raise RuntimeFlowValidationError(
+            "Unreachable flow states: " + ", ".join(sorted(state.value for state in unreachable))
+        )
 
 
 def _validate_conversation_id(conversation_id: str) -> str:
@@ -360,10 +469,6 @@ def _validate_settings(settings: Settings) -> None:
         raise ValueError("Change handlers path must reference an existing file.")
     if type(settings.max_auto_transitions) is not int or settings.max_auto_transitions < 1:
         raise ValueError("Maximum auto transitions must be at least one.")
-    if type(settings.enable_llm_nlu_fallback) is not bool:
-        raise ValueError("LLM NLU fallback enabled flag must be boolean.")
-    if type(settings.llm_nlu_required) is not bool:
-        raise ValueError("LLM NLU required flag must be boolean.")
     if type(settings.llm_nlg_required) is not bool:
         raise ValueError("LLM NLG required flag must be boolean.")
     if (
@@ -377,10 +482,7 @@ def _validate_settings(settings: Settings) -> None:
         raise ValueError("LLM_PROVIDER must be 'gemini'.")
     if not settings.gemini_model.strip():
         raise ValueError("GEMINI_MODEL must not be empty.")
-    if (
-        settings.gemini_fallback_model is not None
-        and not settings.gemini_fallback_model.strip()
-    ):
+    if settings.gemini_fallback_model is not None and not settings.gemini_fallback_model.strip():
         raise ValueError("GEMINI_FALLBACK_MODEL must not be empty when configured.")
     if (
         settings.gemini_fallback_model is not None
@@ -394,11 +496,15 @@ def _validate_settings(settings: Settings) -> None:
     if type(settings.llm_max_retries) is not int or not 0 <= settings.llm_max_retries <= 1:
         raise ValueError("LLM_MAX_RETRIES must be 0 or 1.")
     if settings.llm_max_retries == 1 and settings.gemini_fallback_model is None:
-        raise ValueError(
-            "GEMINI_FALLBACK_MODEL is required when LLM_MAX_RETRIES is 1."
-        )
+        raise ValueError("GEMINI_FALLBACK_MODEL is required when LLM_MAX_RETRIES is 1.")
     if type(settings.dialog_intent_tool_enabled) is not bool:
         raise ValueError("DIALOG_INTENT_TOOL_ENABLED must be boolean.")
+    if not settings.dialog_intent_tool_enabled:
+        raise ValueError("DIALOG_INTENT_TOOL_ENABLED must be true for Gemini NLU.")
+    try:
+        ZoneInfo(settings.business_timezone)
+    except ZoneInfoNotFoundError as error:
+        raise ValueError("BUSINESS_TIMEZONE must be a valid IANA timezone.") from error
     if not settings.embedding_model_name.strip():
         raise ValueError("Embedding model name must not be empty.")
     if type(settings.knowledge_qdrant_enabled) is not bool:

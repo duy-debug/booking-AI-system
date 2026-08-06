@@ -1,7 +1,8 @@
-"""Unit tests for deterministic chat-message orchestration."""
+"""Unit tests for DialogController message orchestration."""
 
 import logging
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from datetime import time
 from typing import cast
 from uuid import UUID
@@ -14,6 +15,7 @@ from app.dialog.dialog_controller import (
     DialogTurnInput,
     DialogTurnResult,
     DialogTurnStatus,
+    _process_serialized_chat_message,
 )
 from app.dialog.instruction_builder import DialogResponse
 from app.dialog.nlu import (
@@ -29,7 +31,7 @@ from app.dialog.nlu import (
 from app.domain.booking_context import BookingContext
 from app.domain.booking_models import Shop
 from app.domain.booking_state import BookingState
-from app.transport.chat_api import _process_chat_message, _to_chat_response
+from app.transport.chat_api import _to_chat_response
 from app.transport.schemas import ChatRequest
 
 SHOP = Shop(
@@ -44,7 +46,15 @@ class FakeStore:
         self.loaded_ids: list[str] = []
         self.saved: list[tuple[str, BookingContext]] = []
 
-    async def get_or_create(self, conversation_id: str) -> BookingContext:
+    @asynccontextmanager
+    async def conversation_lock(
+        self,
+        conversation_id: str,
+    ) -> AsyncIterator[None]:
+        del conversation_id
+        yield
+
+    async def get_copy(self, conversation_id: str) -> BookingContext:
         self.loaded_ids.append(conversation_id)
         return self.context
 
@@ -52,17 +62,7 @@ class FakeStore:
         self.saved.append((conversation_id, context))
 
 
-class FakeNLU:
-    def __init__(self, result: NLUResult) -> None:
-        self.result = result
-        self.calls: list[tuple[str, BookingState]] = []
-
-    def parse(self, *, text: str, state: BookingState) -> NLUResult:
-        self.calls.append((text, state))
-        return self.result
-
-
-class FakeLLMFallback:
+class FakeLLMNLU:
     def __init__(self, result: NLUResult) -> None:
         self.result = result
         self.calls: list[tuple[str, BookingState]] = []
@@ -181,11 +181,7 @@ class FakeBuilder:
         context: BookingContext,
         handled_failure: bool = False,
     ) -> DialogResponse:
-        status = (
-            DialogTurnStatus.FAILURE_HANDLED
-            if handled_failure
-            else DialogTurnStatus.SUCCESS
-        )
+        status = DialogTurnStatus.FAILURE_HANDLED if handled_failure else DialogTurnStatus.SUCCESS
         return DialogResponse(
             text=answer,
             instruction_template=None,
@@ -222,14 +218,10 @@ class FakeContainer:
         context: BookingContext,
         nlu_result: NLUResult,
         resolution: EntityResolutionResult | None = None,
-        llm_result: NLUResult | None = None,
-        llm_nlu_required: bool = False,
         faq_manager: FakeFAQManager | None = None,
     ) -> None:
         self.conversation_context_store = FakeStore(context)
-        self.nlu_processor = FakeNLU(nlu_result)
-        self.llm_nlu_fallback = FakeLLMFallback(llm_result or unresolved_nlu())
-        self.llm_nlu_required = llm_nlu_required
+        self.llm_nlu = FakeLLMNLU(nlu_result)
         self.entity_resolution_coordinator = FakeResolver(
             resolution or failed_resolution(NLUEntityKind.SHOP)
         )
@@ -239,12 +231,8 @@ class FakeContainer:
         self.state_intent_policy = StateIntentPolicy(
             {
                 BookingState.IDLE: frozenset({"start_booking", "ask_question"}),
-                BookingState.SELECTING_SHOP: frozenset(
-                    {"select_store", "ask_question"}
-                ),
-                BookingState.AWAITING_CONFIRMATION: frozenset(
-                    {"change_info", "ask_question"}
-                ),
+                BookingState.SELECTING_SHOP: frozenset({"select_store", "ask_question"}),
+                BookingState.AWAITING_CONFIRMATION: frozenset({"change_info", "ask_question"}),
             },
             frozenset(),
         )
@@ -326,20 +314,34 @@ def as_container(fake: FakeContainer) -> ApplicationContainer:
     return cast(ApplicationContainer, fake)
 
 
+async def _process_controller_pipeline(
+    *,
+    request: ChatRequest,
+    container: ApplicationContainer,
+    correlation_id: str | None = None,
+) -> DialogResponse:
+    return await _process_serialized_chat_message(
+        conversation_id=request.conversation_id,
+        message=request.message,
+        idempotency_key=request.idempotency_key,
+        container=container,
+        correlation_id=correlation_id,
+    )
+
+
 @pytest.mark.asyncio
 async def test_resolved_branch_runs_controller_renderer_and_save_once() -> None:
     context = BookingContext("conversation-a")
     fake = FakeContainer(context=context, nlu_result=resolved_nlu())
 
-    response = await _process_chat_message(
+    response = await _process_controller_pipeline(
         request=request(idempotency_key=" stable-key "),
         container=as_container(fake),
     )
 
     assert fake.conversation_context_store.loaded_ids == ["conversation-a"]
-    assert fake.nlu_processor.calls == [("Tôi muốn đặt lịch", BookingState.IDLE)]
     assert fake.entity_resolution_coordinator.calls == []
-    assert fake.llm_nlu_fallback.calls == []
+    assert fake.llm_nlu.calls == [("Tôi muốn đặt lịch", BookingState.IDLE)]
     assert len(fake.dialog_controller.calls) == 1
     assert fake.dialog_controller.calls[0][1].idempotency_key == " stable-key "
     assert fake.dialog_controller.calls[0][1].raw_message == "Tôi muốn đặt lịch"
@@ -353,8 +355,8 @@ async def test_turn_trace_logs_lifecycle_intent_transition_without_raw_content(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("LOG_RAW_CHAT_MESSAGES", "false")
-    monkeypatch.setenv("LOG_FULL_INSTRUCTIONS", "false")
+    monkeypatch.setenv("LOG_USER_MESSAGES", "false")
+    monkeypatch.setenv("LOG_LLM_PROMPTS", "false")
     fake = FakeContainer(
         context=BookingContext("private-conversation-id"),
         nlu_result=resolved_nlu(),
@@ -364,8 +366,8 @@ async def test_turn_trace_logs_lifecycle_intent_transition_without_raw_content(
         message="private raw user message 0901234567",
     )
 
-    with caplog.at_level(logging.INFO, logger="app.transport.chat_api"):
-        await _process_chat_message(
+    with caplog.at_level(logging.INFO, logger="app.dialog.dialog_controller"):
+        await _process_controller_pipeline(
             request=chat_request,
             container=as_container(fake),
         )
@@ -375,7 +377,7 @@ async def test_turn_trace_logs_lifecycle_intent_transition_without_raw_content(
     assert "[DialogController #1] turn_completed" in output
     assert output.count("turn_completed") == 1
     assert "turn_failed" not in output
-    assert "[NLU #1] resolved intent=start_booking resolver=deterministic" in output
+    assert "[NLU #1] resolved intent=start_booking resolver=llm" in output
     assert "[Router #1] dispatch route=dialog" in output
     assert "[DialogCtrl #1] dispatch" in output
     assert "[DialogCtrl #1] transition" in output
@@ -395,9 +397,9 @@ async def test_turn_trace_sequence_increments_for_same_conversation(
     context = BookingContext("conversation-a")
     fake = FakeContainer(context=context, nlu_result=resolved_nlu())
 
-    with caplog.at_level(logging.INFO, logger="app.transport.chat_api"):
-        await _process_chat_message(request=request(), container=as_container(fake))
-        await _process_chat_message(request=request(), container=as_container(fake))
+    with caplog.at_level(logging.INFO, logger="app.dialog.dialog_controller"):
+        await _process_controller_pipeline(request=request(), container=as_container(fake))
+        await _process_controller_pipeline(request=request(), container=as_container(fake))
 
     assert "[DialogController #1] turn_started" in caplog.text
     assert "[DialogController #2] turn_started" in caplog.text
@@ -409,9 +411,9 @@ async def test_local_raw_turn_text_flags_log_truncated_user_and_assistant(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("ENVIRONMENT", "local")
-    monkeypatch.setenv("LOG_RAW_CHAT_MESSAGES", "true")
-    monkeypatch.setenv("LOG_RAW_CHAT_RESPONSES", "true")
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("LOG_USER_MESSAGES", "true")
+    monkeypatch.setenv("LOG_AI_MESSAGES", "true")
     fake = FakeContainer(
         context=BookingContext("conversation-a"),
         nlu_result=resolved_nlu(),
@@ -419,8 +421,8 @@ async def test_local_raw_turn_text_flags_log_truncated_user_and_assistant(
     fake.dialog_controller = StateChangingController()
     raw_message = "u" * 510
 
-    with caplog.at_level(logging.DEBUG, logger="app.transport.chat_api"):
-        await _process_chat_message(
+    with caplog.at_level(logging.DEBUG, logger="app.dialog.dialog_controller"):
+        await _process_controller_pipeline(
             request=ChatRequest(conversation_id="conversation-a", message=raw_message),
             container=as_container(fake),
             correlation_id="request-correlation-a",
@@ -445,16 +447,16 @@ async def test_production_never_logs_raw_turn_text_when_flags_are_true(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("ENVIRONMENT", "production")
-    monkeypatch.setenv("LOG_RAW_CHAT_MESSAGES", "true")
-    monkeypatch.setenv("LOG_RAW_CHAT_RESPONSES", "true")
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("LOG_USER_MESSAGES", "true")
+    monkeypatch.setenv("LOG_AI_MESSAGES", "true")
     fake = FakeContainer(
         context=BookingContext("conversation-a"),
         nlu_result=resolved_nlu(),
     )
 
-    with caplog.at_level(logging.DEBUG, logger="app.transport.chat_api"):
-        await _process_chat_message(
+    with caplog.at_level(logging.DEBUG, logger="app.dialog.dialog_controller"):
+        await _process_controller_pipeline(
             request=ChatRequest(
                 conversation_id="conversation-a",
                 message="production private message",
@@ -482,13 +484,13 @@ async def test_entity_resolved_branch_runs_resolver_controller_renderer_and_save
         resolution=resolution,
     )
 
-    await _process_chat_message(
+    await _process_controller_pipeline(
         request=request(idempotency_key="key"),
         container=as_container(fake),
     )
 
     assert len(fake.entity_resolution_coordinator.calls) == 1
-    assert fake.llm_nlu_fallback.calls == []
+    assert fake.llm_nlu.calls == [(request().message, BookingState.SELECTING_SHOP)]
     assert len(fake.dialog_controller.calls) == 1
     turn = fake.dialog_controller.calls[0][1]
     assert turn.payload == {"shop": SHOP}
@@ -498,21 +500,19 @@ async def test_entity_resolved_branch_runs_resolver_controller_renderer_and_save
 
 
 @pytest.mark.asyncio
-async def test_unresolved_deterministic_result_uses_one_valid_llm_result() -> None:
+async def test_valid_llm_result_runs_one_controller_turn() -> None:
     context = BookingContext("conversation-a")
     fake = FakeContainer(
         context=context,
-        nlu_result=unresolved_nlu(),
-        llm_result=resolved_nlu(),
+        nlu_result=resolved_nlu(),
     )
 
-    response = await _process_chat_message(
+    response = await _process_controller_pipeline(
         request=request(),
         container=as_container(fake),
     )
 
-    assert len(fake.nlu_processor.calls) == 1
-    assert len(fake.llm_nlu_fallback.calls) == 1
+    assert len(fake.llm_nlu.calls) == 1
     assert len(fake.dialog_controller.calls) == 1
     assert len(fake.instruction_builder.calls) == 1
     assert fake.conversation_context_store.saved == [("conversation-a", context)]
@@ -520,19 +520,16 @@ async def test_unresolved_deterministic_result_uses_one_valid_llm_result() -> No
 
 
 @pytest.mark.asyncio
-async def test_required_llm_nlu_never_calls_deterministic_parser() -> None:
+async def test_every_turn_calls_llm_nlu_once() -> None:
     context = BookingContext("conversation-a")
     fake = FakeContainer(
         context=context,
-        nlu_result=unresolved_nlu(),
-        llm_result=resolved_nlu(),
-        llm_nlu_required=True,
+        nlu_result=resolved_nlu(),
     )
 
-    response = await _process_chat_message(request=request(), container=as_container(fake))
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
-    assert fake.nlu_processor.calls == []
-    assert fake.llm_nlu_fallback.calls == [(request().message, BookingState.IDLE)]
+    assert fake.llm_nlu.calls == [(request().message, BookingState.IDLE)]
     assert response.text == "Safe response"
 
 
@@ -547,7 +544,7 @@ async def test_faq_branch_uses_knowledge_without_controller_resolver_or_save() -
         faq_manager=faq_manager,
     )
 
-    response = await _process_chat_message(request=request(), container=as_container(fake))
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
     assert faq_manager.calls == [(query, context)]
     assert response.text == "Cửa hàng mở cửa từ 09:00."
@@ -555,7 +552,7 @@ async def test_faq_branch_uses_knowledge_without_controller_resolver_or_save() -
     assert response.metadata == {"response_type": "faq", "source_count": 1}
     assert fake.entity_resolution_coordinator.calls == []
     assert fake.dialog_controller.calls == []
-    assert fake.conversation_context_store.saved == []
+    assert fake.conversation_context_store.saved == [("conversation-a", context)]
 
 
 @pytest.mark.asyncio
@@ -582,7 +579,7 @@ async def test_ambiguous_branch_returns_ordered_limited_safe_candidate_names() -
         resolution=resolution,
     )
 
-    response = await _process_chat_message(request=request(), container=as_container(fake))
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
     assert response.quick_replies == (
         "Shop 0",
@@ -596,7 +593,7 @@ async def test_ambiguous_branch_returns_ordered_limited_safe_candidate_names() -
     )
     assert all("shop:" not in value for value in response.quick_replies)
     assert fake.dialog_controller.calls == []
-    assert fake.conversation_context_store.saved == []
+    assert len(fake.conversation_context_store.saved) == 1
 
 
 @pytest.mark.parametrize(
@@ -625,11 +622,11 @@ async def test_not_found_branch_is_kind_specific_without_dispatch(
         resolution=resolution,
     )
 
-    response = await _process_chat_message(request=request(), container=as_container(fake))
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
     assert expected in response.text
     assert fake.dialog_controller.calls == []
-    assert fake.conversation_context_store.saved == []
+    assert len(fake.conversation_context_store.saved) == 1
 
 
 @pytest.mark.asyncio
@@ -647,7 +644,7 @@ async def test_unsupported_therapist_returns_guidance_without_controller() -> No
         resolution=resolution,
     )
 
-    response = await _process_chat_message(request=request(), container=as_container(fake))
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
     assert "Nam, Nữ hoặc Không yêu cầu" in response.text
     assert fake.dialog_controller.calls == []
@@ -661,13 +658,13 @@ async def test_failed_resolution_returns_generic_text_without_retry_or_raw_error
         resolution=failed_resolution(NLUEntityKind.SHOP),
     )
 
-    response = await _process_chat_message(request=request(), container=as_container(fake))
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
     assert response.text == "Hệ thống chưa thể tra cứu thông tin lúc này. Vui lòng thử lại."
     assert "resolution_unavailable" not in response.text
     assert len(fake.entity_resolution_coordinator.calls) == 1
     assert fake.dialog_controller.calls == []
-    assert fake.conversation_context_store.saved == []
+    assert len(fake.conversation_context_store.saved) == 1
 
 
 @pytest.mark.parametrize(
@@ -688,14 +685,14 @@ async def test_unresolved_branch_is_state_aware_and_does_not_dispatch(
         nlu_result=unresolved_nlu(),
     )
 
-    response = await _process_chat_message(request=request(), container=as_container(fake))
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
     assert expected in response.text
     assert response.state is state
-    assert fake.llm_nlu_fallback.calls == [(request().message, state)]
+    assert fake.llm_nlu.calls == [(request().message, state)]
     assert fake.entity_resolution_coordinator.calls == []
     assert fake.dialog_controller.calls == []
-    assert fake.conversation_context_store.saved == []
+    assert len(fake.conversation_context_store.saved) == 1
 
 
 @pytest.mark.parametrize(
@@ -728,7 +725,7 @@ async def test_unresolved_booking_input_suggests_valid_next_actions(
         nlu_result=unresolved_nlu(),
     )
 
-    response = await _process_chat_message(request=request(), container=as_container(fake))
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
     assert response.quick_replies == expected_replies
     assert response.state is state
@@ -743,7 +740,7 @@ async def test_unresolved_time_only_suggests_latest_validated_slots() -> None:
     )
     fake = FakeContainer(context=context, nlu_result=unresolved_nlu())
 
-    response = await _process_chat_message(request=request(), container=as_container(fake))
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
     assert response.quick_replies == ("09:00", "10:30")
 
@@ -758,12 +755,12 @@ async def test_failed_change_is_rendered_without_saving_partial_context() -> Non
     fake = FakeContainer(context=context, nlu_result=change_nlu())
     fake.dialog_controller = FailedChangeController()
 
-    response = await _process_chat_message(request=request(), container=as_container(fake))
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
     assert response.status is DialogTurnStatus.FAILURE_HANDLED
     assert context.num_customer == 1
     assert len(fake.dialog_controller.calls) == 1
-    assert fake.conversation_context_store.saved == []
+    assert fake.conversation_context_store.saved == [("conversation-a", context)]
 
 
 def test_request_validation_trims_only_contract_fields() -> None:
@@ -802,18 +799,13 @@ def test_response_mapping_copies_only_ui_safe_fields() -> None:
         instruction_template="ask_shop",
         state=BookingState.SELECTING_SHOP,
         status=DialogTurnStatus.SUCCESS,
-        quick_replies=("A", "B"),
-        metadata={"can_retry": True, "phone": "0901234567"},
+        quick_replies=("Shibuya",),
+        metadata={"can_retry": True, "private": "must-not-leak"},
     )
 
     mapped = _to_chat_response("conversation-a", response)
 
-    assert mapped.model_dump() == {
-        "conversation_id": "conversation-a",
-        "text": "Safe response",
-        "state": "selecting_shop",
-        "status": "success",
-        "instruction_template": "ask_shop",
-        "quick_replies": ["A", "B"],
-        "metadata": {"can_retry": True},
-    }
+    assert mapped.conversation_id == "conversation-a"
+    assert mapped.text == "Safe response"
+    assert mapped.quick_replies == ["Shibuya"]
+    assert mapped.metadata == {"can_retry": True}

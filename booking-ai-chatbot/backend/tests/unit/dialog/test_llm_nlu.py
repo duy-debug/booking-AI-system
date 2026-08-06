@@ -2,12 +2,12 @@
 
 import asyncio
 import json
-from datetime import date, time
+from datetime import date, datetime, time, timezone
 
 import pytest
 
 from app.dialog.nlu import (
-    LLMNLUFallback,
+    LLMNLU,
     NLUEntityKind,
     NLUResolutionStatus,
     NLUSource,
@@ -49,23 +49,19 @@ class FakeLLMGateway:
 
 def policy() -> StateIntentPolicy:
     allowed = {
-            BookingState.IDLE: frozenset({"start_booking", "unknown"}),
-            BookingState.SELECTING_SHOP: frozenset({"select_store", "unknown"}),
-            BookingState.SELECTING_DATE: frozenset({"select_date", "unknown"}),
-            BookingState.SELECTING_PEOPLE: frozenset({"select_people", "unknown"}),
-            BookingState.SELECTING_DURATION: frozenset(
-                {"select_duration", "unknown"}
-            ),
-            BookingState.SELECTING_SERVICE: frozenset({"select_course", "unknown"}),
-            BookingState.SELECTING_TIME: frozenset({"select_time", "unknown"}),
-            BookingState.SELECTING_THERAPIST: frozenset(
-                {"select_therapist", "deny", "unknown"}
-            ),
-            BookingState.COLLECTING_PHONE: frozenset({"provide_phone", "unknown"}),
-            BookingState.AWAITING_CONFIRMATION: frozenset(
-                {"confirm", "deny", "change_info", "unknown"}
-            ),
-        }
+        BookingState.IDLE: frozenset({"start_booking", "unknown"}),
+        BookingState.SELECTING_SHOP: frozenset({"select_store", "unknown"}),
+        BookingState.SELECTING_DATE: frozenset({"select_date", "unknown"}),
+        BookingState.SELECTING_PEOPLE: frozenset({"select_people", "unknown"}),
+        BookingState.SELECTING_DURATION: frozenset({"select_duration", "unknown"}),
+        BookingState.SELECTING_SERVICE: frozenset({"select_course", "unknown"}),
+        BookingState.SELECTING_TIME: frozenset({"select_time", "unknown"}),
+        BookingState.SELECTING_THERAPIST: frozenset({"select_therapist", "deny", "unknown"}),
+        BookingState.COLLECTING_PHONE: frozenset({"provide_phone", "unknown"}),
+        BookingState.AWAITING_CONFIRMATION: frozenset(
+            {"confirm", "deny", "change_info", "unknown"}
+        ),
+    }
     return StateIntentPolicy(
         {state: intents | {"ask_question"} for state, intents in allowed.items()},
         frozenset(),
@@ -110,10 +106,8 @@ async def test_llm_supports_discovery_intents_without_inventing_entities(
     entities: dict[str, object],
     expected_payload: dict[str, object],
 ) -> None:
-    gateway = FakeLLMGateway(
-        LLMResponse(content=structured(intent=intent, entities=entities))
-    )
-    fallback = LLMNLUFallback(
+    gateway = FakeLLMGateway(LLMResponse(content=structured(intent=intent, entities=entities)))
+    fallback = LLMNLU(
         llm_gateway=gateway,
         intent_policy=StateIntentPolicy(
             {BookingState.IDLE: frozenset({intent})},
@@ -128,13 +122,15 @@ async def test_llm_supports_discovery_intents_without_inventing_entities(
     assert result.resolution_status is NLUResolutionStatus.RESOLVED
 
 
-def fallback_for(content: str, *, min_confidence: float = 0.7) -> tuple[
-    LLMNLUFallback,
+def fallback_for(
+    content: str, *, min_confidence: float = 0.7
+) -> tuple[
+    LLMNLU,
     FakeLLMGateway,
 ]:
     gateway = FakeLLMGateway(LLMResponse(content=content))
     return (
-        LLMNLUFallback(
+        LLMNLU(
             llm_gateway=gateway,
             intent_policy=policy(),
             min_confidence=min_confidence,
@@ -224,6 +220,57 @@ async def test_multiple_known_entities_only_use_the_current_intent_payload() -> 
     )
 
     assert result.payload == {"num_customer": 3}
+    assert result.merged_entities == {
+        "number_of_people": 3,
+        "booking_date": date(2026, 8, 3),
+        "duration_minutes": 60,
+    }
+
+
+@pytest.mark.asyncio
+async def test_state_prioritization_preserves_secondary_candidate_entities() -> None:
+    gateway = FakeLLMGateway(
+        LLMResponse(
+            content=json.dumps(
+                {
+                    "candidates": [
+                        {
+                            "intent": "start_booking",
+                            "confidence": 0.91,
+                            "entities": {
+                                "shop_name": "Komorebi Ba Đình",
+                                "booking_date": "2026-08-07",
+                                "start_time": "10:00",
+                            },
+                            "entity_kind": None,
+                            "entity_query": None,
+                        },
+                        {
+                            "intent": "select_time",
+                            "confidence": 0.99,
+                            "entities": {"start_time": "10:00"},
+                            "entity_kind": None,
+                            "entity_query": None,
+                        },
+                    ]
+                }
+            )
+        )
+    )
+    nlu = LLMNLU(llm_gateway=gateway, intent_policy=policy())
+
+    result = await nlu.parse(
+        text="Đặt Komorebi Ba Đình ngày mai lúc 10 giờ",
+        state=BookingState.IDLE,
+    )
+
+    assert result.intent == "start_booking"
+    assert result.merged_entities == {
+        "shop_name": "Komorebi Ba Đình",
+        "booking_date": date(2026, 8, 7),
+        "start_time": time(10, 0),
+    }
+    assert result.has_unconsumed_entities is True
 
 
 @pytest.mark.asyncio
@@ -366,7 +413,7 @@ async def test_expected_provider_failure_returns_safe_unresolved(
     error: BaseException,
 ) -> None:
     gateway = FakeLLMGateway(error=error)
-    fallback = LLMNLUFallback(llm_gateway=gateway, intent_policy=policy())
+    fallback = LLMNLU(llm_gateway=gateway, intent_policy=policy())
 
     result = await fallback.parse(text="message", state=BookingState.SELECTING_PEOPLE)
 
@@ -377,7 +424,7 @@ async def test_expected_provider_failure_returns_safe_unresolved(
 @pytest.mark.asyncio
 async def test_programmer_error_propagates() -> None:
     gateway = FakeLLMGateway(error=RuntimeError("programmer error"))
-    fallback = LLMNLUFallback(llm_gateway=gateway, intent_policy=policy())
+    fallback = LLMNLU(llm_gateway=gateway, intent_policy=policy())
 
     with pytest.raises(RuntimeError, match="programmer error"):
         await fallback.parse(text="message", state=BookingState.SELECTING_PEOPLE)
@@ -386,25 +433,24 @@ async def test_programmer_error_propagates() -> None:
 @pytest.mark.asyncio
 async def test_cancellation_propagates() -> None:
     gateway = FakeLLMGateway(error=asyncio.CancelledError())
-    fallback = LLMNLUFallback(llm_gateway=gateway, intent_policy=policy())
+    fallback = LLMNLU(llm_gateway=gateway, intent_policy=policy())
 
     with pytest.raises(asyncio.CancelledError):
         await fallback.parse(text="message", state=BookingState.SELECTING_PEOPLE)
 
 
 @pytest.mark.asyncio
-async def test_disabled_fallback_does_not_call_gateway() -> None:
+async def test_llm_nlu_always_calls_gateway() -> None:
     gateway = FakeLLMGateway(LLMResponse(content=structured(intent="start_booking")))
-    fallback = LLMNLUFallback(
+    fallback = LLMNLU(
         llm_gateway=gateway,
         intent_policy=policy(),
-        enabled=False,
     )
 
     result = await fallback.parse(text="message", state=BookingState.IDLE)
 
-    assert result.resolution_status is NLUResolutionStatus.UNRESOLVED
-    assert gateway.calls == 0
+    assert result.resolution_status is NLUResolutionStatus.RESOLVED
+    assert gateway.calls == 1
 
 
 @pytest.mark.asyncio
@@ -423,4 +469,39 @@ async def test_prompt_is_state_aware_short_and_contains_no_context_data() -> Non
     assert "BookingContext" not in prompt
     assert "API key" not in prompt
     assert "UUID" not in prompt
-    assert len(prompt) < 1000
+    assert "Asia/Ho_Chi_Minh" in prompt
+    assert "Locale: vi-VN" in prompt
+    assert len(prompt) < 1300
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("phrase", "resolved_date"),
+    [
+        ("hôm nay", "2026-08-06"),
+        ("ngày mai", "2026-08-07"),
+        ("ngày kia", "2026-08-08"),
+    ],
+)
+async def test_relative_date_prompt_is_grounded_in_fixed_business_date(
+    phrase: str,
+    resolved_date: str,
+) -> None:
+    gateway = FakeLLMGateway(
+        LLMResponse(
+            content=structured(
+                intent="select_date",
+                entities={"booking_date": resolved_date},
+            )
+        )
+    )
+    nlu = LLMNLU(
+        llm_gateway=gateway,
+        intent_policy=policy(),
+        now_provider=lambda: datetime(2026, 8, 5, 17, 0, tzinfo=timezone.utc),
+    )
+
+    result = await nlu.parse(text=phrase, state=BookingState.SELECTING_DATE)
+
+    assert result.payload == {"booking_date": date.fromisoformat(resolved_date)}
+    assert "Current business date: 2026-08-06" in gateway.messages[0].content

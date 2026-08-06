@@ -24,13 +24,9 @@ from app.dialog.nlu import (
 from app.domain.booking_context import BookingContext
 from app.domain.booking_models import Course, CourseSelection, Shop
 from app.domain.booking_state import BookingState
+from app.domain.outcomes import HandlerOutcome, HandlerResult
 
-FLOW_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "app"
-    / "dialog"
-    / "booking_flow.json"
-)
+FLOW_PATH = Path(__file__).resolve().parents[3] / "app" / "dialog" / "booking_flow.json"
 SHOP = Shop(UUID("11111111-1111-1111-1111-111111111111"), "Sen Spa")
 OTHER_SHOP = Shop(UUID("22222222-2222-2222-2222-222222222222"), "Sen Riverside")
 COURSE = Course(
@@ -46,9 +42,17 @@ class ShopHandler:
         self.values = values
         self.calls = 0
 
-    async def execute(self, query: str | None = None) -> list[Shop]:
+    async def execute(self, query: str | None = None) -> HandlerResult:
         self.calls += 1
-        return self.values
+        if not self.values:
+            return HandlerResult(
+                HandlerOutcome.NOT_FOUND,
+                error_code="shop_not_found",
+            )
+        return HandlerResult(
+            HandlerOutcome.SUCCESS,
+            {"shops": tuple(self.values)},
+        )
 
 
 class ServiceHandler:
@@ -61,9 +65,15 @@ class ServiceHandler:
         shop_id: UUID,
         query: str | None = None,
         **kwargs: object,
-    ) -> list[Course]:
+    ) -> HandlerResult:
         self.calls += 1
-        return self.values
+        if not self.values:
+            return HandlerResult(
+                HandlerOutcome.NOT_FOUND,
+                error_code="course_not_found",
+            )
+        outcome = HandlerOutcome.AMBIGUOUS if len(self.values) > 1 else HandlerOutcome.SUCCESS
+        return HandlerResult(outcome, {"courses": tuple(self.values)})
 
 
 def components(

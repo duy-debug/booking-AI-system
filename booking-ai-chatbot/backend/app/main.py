@@ -85,11 +85,9 @@ app = create_app(
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
         gemini_fallback_model=os.getenv("GEMINI_FALLBACK_MODEL") or None,
         llm_max_retries=int(os.getenv("LLM_MAX_RETRIES", "0")),
-        dialog_intent_tool_enabled=_environment_bool(
-            "DIALOG_INTENT_TOOL_ENABLED", default=True
-        ),
-        llm_nlu_required=_environment_bool("LLM_NLU_REQUIRED", default=True),
+        dialog_intent_tool_enabled=_environment_bool("DIALOG_INTENT_TOOL_ENABLED", default=True),
         llm_nlg_required=_environment_bool("LLM_NLG_REQUIRED", default=True),
+        business_timezone=os.getenv("BUSINESS_TIMEZONE", "Asia/Ho_Chi_Minh"),
         embedding_model_name=os.getenv(
             "EMBED_MODEL_NAME",
             "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
@@ -99,8 +97,6 @@ app = create_app(
         qdrant_api_key=os.getenv("QDRANT_API_KEY") or None,
         qdrant_collection=os.getenv("QDRANT_COLLECTION", "kb_chunks"),
         knowledge_qdrant_enabled=_knowledge_qdrant_enabled,
-        rag_hybrid_score_threshold=float(
-            os.getenv("RAG_HYBRID_SCORE_THRESHOLD", "0.45")
-        ),
+        rag_hybrid_score_threshold=float(os.getenv("RAG_HYBRID_SCORE_THRESHOLD", "0.45")),
     )
 )

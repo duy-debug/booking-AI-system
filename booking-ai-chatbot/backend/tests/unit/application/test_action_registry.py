@@ -76,8 +76,7 @@ def execution_context(
     idempotency_key: str | None = None,
 ) -> ActionExecutionContext:
     return ActionExecutionContext(
-        booking_context=booking_context
-        or BookingContext(conversation_id="conversation-1"),
+        booking_context=booking_context or BookingContext(conversation_id="conversation-1"),
         intent="test_intent",
         payload=payload or {},
         idempotency_key=idempotency_key,
@@ -280,8 +279,6 @@ async def test_invalid_action_result_is_wrapped_and_rolled_back() -> None:
     "action_names",
     [
         ("create_booking", "after"),
-        ("retry_booking", "after"),
-        ("create_booking", "retry_booking"),
         ("create_booking", "create_booking"),
     ],
 )
@@ -381,12 +378,15 @@ class FakeCheckAvailabilityHandler(CheckAvailabilityHandler):
         self.slots = (time(10, 30), time(11, 0))
         self.error = error
 
-    async def execute(self, context: BookingContext) -> tuple[time, ...]:
+    async def execute(self, context: BookingContext) -> HandlerResult:
         self.contexts.append(context)
-        context.set_available_slots(self.slots)
         if self.error is not None:
             raise self.error
-        return self.slots
+        return HandlerResult(
+            HandlerOutcome.SUCCESS,
+            {"slots": self.slots},
+            {"available_slots": self.slots},
+        )
 
 
 class FakeSearchShopHandler(SearchShopHandler):
@@ -397,11 +397,14 @@ class FakeSearchShopHandler(SearchShopHandler):
         self.shops = [SHOP]
         self.error = error
 
-    async def execute(self, query: str | None = None) -> list[Shop]:
+    async def execute(self, query: str | None = None) -> HandlerResult:
         self.calls.append(query)
         if self.error is not None:
             raise self.error
-        return self.shops
+        return HandlerResult(
+            HandlerOutcome.SUCCESS,
+            {"shops": tuple(self.shops)},
+        )
 
 
 class FakeCustomerLookup:
@@ -425,8 +428,6 @@ class FakeCustomerLookup:
         name: str | None = None,
     ) -> CustomerVerificationResult:
         self.calls.append((context, phone, name))
-        context.set_phone(phone)
-        context.customer = Customer(phone, name)
         return self.result
 
 
@@ -438,7 +439,6 @@ class FakePhoneConfirmation:
 
     def execute(self, context: BookingContext) -> None:
         self.contexts.append(context)
-        context.confirm_phone()
 
 
 class FakeCheckCustomerHandler:
@@ -461,14 +461,19 @@ class FakeCheckCustomerHandler:
         return HandlerResult(
             HandlerOutcome.SUCCESS,
             {"verification": verification},
+            {
+                "phone": phone,
+                "customer": Customer(phone, name),
+            },
         )
 
     def confirm(self, context: BookingContext) -> HandlerResult:
-        if self.confirmation is None:
-            context.confirm_phone()
-        else:
+        if self.confirmation is not None:
             self.confirmation.execute(context)
-        return HandlerResult(HandlerOutcome.SUCCESS)
+        return HandlerResult(
+            HandlerOutcome.SUCCESS,
+            context_updates={"phone_confirmed": True},
+        )
 
 
 class FakeCreateBookingHandler(CreateBookingHandler):
@@ -482,11 +487,17 @@ class FakeCreateBookingHandler(CreateBookingHandler):
         self,
         context: BookingContext,
         idempotency_key: str,
-    ) -> CreateBookingResult:
+    ) -> HandlerResult:
         self.calls.append((context, idempotency_key))
-        context.booking = BOOKING
-        context.booking_id = BOOKING.booking_id
-        return self.result
+        return HandlerResult(
+            HandlerOutcome.SUCCESS,
+            {"create_result": self.result},
+            {
+                "booking": BOOKING,
+                "booking_id": BOOKING.booking_id,
+                "reservation_code": self.result.reservation_code,
+            },
+        )
 
 
 def production_bridge(
@@ -520,7 +531,7 @@ async def test_search_shop_binding_uses_default_query_without_context_mutation()
     booking_context = BookingContext(
         conversation_id="conversation-1",
         state=BookingState.IDLE,
-        pending_action="keep",
+        last_failure_code="keep",
     )
 
     result = await bridge.execute_action(
@@ -529,10 +540,10 @@ async def test_search_shop_binding_uses_default_query_without_context_mutation()
     )
 
     assert handler.calls == [None]
-    assert result.output is handler.shops
+    assert result.output == tuple(handler.shops)
     assert booking_context.state is BookingState.IDLE
     assert booking_context.shop is None
-    assert booking_context.pending_action == "keep"
+    assert booking_context.last_failure_code == "keep"
 
 
 @pytest.mark.asyncio
@@ -565,7 +576,7 @@ async def test_search_shop_failure_preserves_context() -> None:
     booking_context = BookingContext(
         conversation_id="conversation-1",
         state=BookingState.IDLE,
-        pending_action="keep",
+        last_failure_code="keep",
     )
 
     with pytest.raises(ActionExecutionError):
@@ -577,7 +588,7 @@ async def test_search_shop_failure_preserves_context() -> None:
     assert handler.calls == [None]
     assert booking_context.state is BookingState.IDLE
     assert booking_context.shop is None
-    assert booking_context.pending_action == "keep"
+    assert booking_context.last_failure_code == "keep"
 
 
 @pytest.mark.asyncio
@@ -617,7 +628,6 @@ async def test_clear_phone_confirmation_preserves_booking_fields() -> None:
         phone="0901234567",
         phone_confirmed=True,
         member_rank="gold",
-        visit_count=2,
         ng_list_checked=True,
     )
 
@@ -630,7 +640,6 @@ async def test_clear_phone_confirmation_preserves_booking_fields() -> None:
     assert booking_context.phone is None
     assert booking_context.phone_confirmed is False
     assert booking_context.member_rank is None
-    assert booking_context.visit_count is None
     assert booking_context.ng_list_checked is False
     assert booking_context.shop is SHOP
     assert booking_context.main_course is COURSE
@@ -783,11 +792,8 @@ async def test_phone_confirmation_binding_does_not_change_state() -> None:
     assert booking_context.state is BookingState.VERIFYING_PHONE
 
 
-@pytest.mark.parametrize("action_name", ["create_booking", "retry_booking"])
 @pytest.mark.asyncio
-async def test_create_bindings_preserve_idempotency_and_do_not_commit_state(
-    action_name: str,
-) -> None:
+async def test_create_binding_preserves_idempotency_and_does_not_commit_state() -> None:
     handler = FakeCreateBookingHandler()
     bridge = production_bridge(create=handler)
     booking_context = BookingContext(
@@ -796,7 +802,7 @@ async def test_create_bindings_preserve_idempotency_and_do_not_commit_state(
     )
 
     await bridge.execute_action(
-        action_name,
+        "create_booking",
         execution_context(
             booking_context=booking_context,
             idempotency_key="conversation-1:stable-attempt",
@@ -824,9 +830,7 @@ async def test_group_therapist_skip_uses_domain_api(num_customer: int) -> None:
         execution_context(booking_context=booking_context),
     )
 
-    assert booking_context.therapist_preference == TherapistPreference(
-        TherapistPreferenceType.NONE
-    )
+    assert booking_context.therapist_preference == TherapistPreference(TherapistPreferenceType.NONE)
     assert booking_context.state is BookingState.SELECTING_THERAPIST
 
 
@@ -868,18 +872,20 @@ def test_injected_handlers_register_only_available_bindings() -> None:
         create=FakeCreateBookingHandler(),
     )
 
-    assert bridge.find_unregistered_actions(
-        (
-            "load_time_slots",
-            "reload_time_slots",
-            "search_shop",
-            "clear_phone_confirmation",
-            "handle_phone_collection",
-            "mark_phone_confirmed",
-            "create_booking",
-            "retry_booking",
+    assert (
+        bridge.find_unregistered_actions(
+            (
+                "load_time_slots",
+                "reload_time_slots",
+                "search_shop",
+                "clear_phone_confirmation",
+                "handle_phone_collection",
+                "mark_phone_confirmed",
+                "create_booking",
+            )
         )
-    ) == ()
+        == ()
+    )
 
 
 def wrapped_error(
@@ -976,10 +982,7 @@ def test_custom_failure_code_provider_receives_root_exception() -> None:
     cause = RuntimeError("private details")
     bridge = ActionRegistry(failure_code_provider=provider)
 
-    assert (
-        bridge.get_failure_code(wrapped_error("custom_action", cause))
-        == "custom_failure"
-    )
+    assert bridge.get_failure_code(wrapped_error("custom_action", cause)) == "custom_failure"
     assert received == [cause]
 
 
@@ -998,11 +1001,16 @@ async def test_failure_actions_execute_in_order_without_applying_target() -> Non
         calls.append("suggest_nearest_time")
         return ActionResult("suggest_nearest_time")
 
+    async def prepare(context: ActionExecutionContext) -> ActionResult:
+        context.booking_context.set_booking_date(None)
+        return ActionResult("prepare_recovery")
+
+    bridge.register_action("prepare_recovery", prepare)
     bridge.register_action("suggest_nearest_time", suggest)
     failure = FlowFailure(
         "no_slots_available",
         BookingState.SELECTING_DATE,
-        ("clear_date", "suggest_nearest_time"),
+        ("prepare_recovery", "suggest_nearest_time"),
         "no_slots_available",
     )
 
@@ -1012,7 +1020,7 @@ async def test_failure_actions_execute_in_order_without_applying_target() -> Non
     )
 
     assert report.executed_action_names == (
-        "clear_date",
+        "prepare_recovery",
         "suggest_nearest_time",
     )
     assert calls == ["suggest_nearest_time"]
@@ -1074,11 +1082,8 @@ async def test_empty_failure_actions_return_empty_report() -> None:
     assert report.results == ()
 
 
-@pytest.mark.parametrize("side_effect", ["create_booking", "retry_booking"])
 @pytest.mark.asyncio
-async def test_failure_actions_reject_booking_side_effect_before_execution(
-    side_effect: str,
-) -> None:
+async def test_failure_actions_reject_booking_side_effect_before_execution() -> None:
     calls: list[str] = []
     bridge = ActionRegistry()
 
@@ -1090,7 +1095,7 @@ async def test_failure_actions_reject_booking_side_effect_before_execution(
     failure = FlowFailure(
         "failure",
         BookingState.BOOKING_FAILED,
-        ("first_recovery", side_effect),
+        ("first_recovery", "create_booking"),
     )
 
     with pytest.raises(InvalidActionSequenceError):

@@ -2063,7 +2063,7 @@
                                                                   "intent":  "confirm",
                                                                   "target":  "booking_executing",
                                                                   "actions":  [
-                                                                                  "retry_booking"
+
                                                                               ]
                                                               },
                                                               {

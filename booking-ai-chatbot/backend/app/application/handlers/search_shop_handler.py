@@ -3,6 +3,7 @@
 import unicodedata
 
 from app.domain.booking_models import BookingGateway, Shop
+from app.domain.outcomes import HandlerOutcome, HandlerResult
 
 
 class SearchShopHandler:
@@ -11,13 +12,13 @@ class SearchShopHandler:
     def __init__(self, booking_gateway: BookingGateway) -> None:
         self._booking_gateway = booking_gateway
 
-    async def execute(self, query: str | None = None) -> list[Shop]:
-        """Return the POS shop catalog, optionally filtered locally."""
+    async def execute(self, query: str | None = None) -> HandlerResult:
+        """Return the POS shop catalog through the common handler contract."""
         shops = _unique_named_shops(await self._booking_gateway.search_shops())
         normalized_query = _normalize_search_text(query) if query is not None else ""
         if not normalized_query:
-            return shops
-        return [
+            return HandlerResult(HandlerOutcome.SUCCESS, {"shops": tuple(shops)})
+        matched = [
             shop
             for shop in shops
             if normalized_query in _normalize_search_text(shop.name)
@@ -26,14 +27,15 @@ class SearchShopHandler:
                 and normalized_query in _normalize_search_text(shop.address)
             )
         ]
+        if not matched:
+            return HandlerResult(HandlerOutcome.NOT_FOUND, error_code="shop_not_found")
+        return HandlerResult(HandlerOutcome.SUCCESS, {"shops": tuple(matched)})
 
 
 def _normalize_search_text(value: str) -> str:
     decomposed = unicodedata.normalize("NFD", value.strip().casefold())
     return "".join(
-        character
-        for character in decomposed
-        if unicodedata.category(character) != "Mn"
+        character for character in decomposed if unicodedata.category(character) != "Mn"
     ).replace("đ", "d")
 
 

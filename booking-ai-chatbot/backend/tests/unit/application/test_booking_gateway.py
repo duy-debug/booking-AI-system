@@ -236,9 +236,7 @@ def test_availability_request_accepts_group_gender_preference() -> None:
         therapist_preference=TherapistPreference(TherapistPreferenceType.FEMALE),
     )
 
-    assert request.therapist_preference == TherapistPreference(
-        TherapistPreferenceType.FEMALE
-    )
+    assert request.therapist_preference == TherapistPreference(TherapistPreferenceType.FEMALE)
 
 
 def test_create_result_rejects_duplicate_reservation_codes() -> None:

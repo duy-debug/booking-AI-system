@@ -87,9 +87,7 @@ def test_long_section_splits_by_words_without_empty_chunks() -> None:
     assert all(chunk.content.strip() for chunk in chunks)
     assert all(len(chunk.content) <= 120 for chunk in chunks)
     assert all(chunk.content.startswith("# Long Policy\n\n") for chunk in chunks)
-    reconstructed = " ".join(
-        chunk.content.removeprefix("# Long Policy\n\n") for chunk in chunks
-    )
+    reconstructed = " ".join(chunk.content.removeprefix("# Long Policy\n\n") for chunk in chunks)
     assert reconstructed == body
 
 

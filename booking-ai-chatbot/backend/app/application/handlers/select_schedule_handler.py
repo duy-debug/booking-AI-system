@@ -17,7 +17,6 @@ class SelectScheduleHandler:
                 {"available_slots": context.available_slots or ()},
                 error_code="slot_unavailable",
             )
-        context.set_start_time(value)
         return HandlerResult(
             HandlerOutcome.SUCCESS,
             context_updates={"start_time": value},
@@ -53,9 +52,10 @@ class SelectScheduleHandler:
             )
         if context.num_customer >= 2:
             preference = TherapistPreference(TherapistPreferenceType.NONE)
-        context.set_therapist_preference(preference)
-        context.set_therapist_verified(True)
         return HandlerResult(
             HandlerOutcome.SUCCESS,
-            context_updates={"therapist_preference": preference},
+            context_updates={
+                "therapist_preference": preference,
+                "therapist_verified": True,
+            },
         )

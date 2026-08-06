@@ -195,9 +195,7 @@ def test_validate_create_context_rejects_ng_customer() -> None:
 def test_validate_create_context_accepts_group_gender_but_rejects_personal() -> None:
     context = make_valid_context()
     context.num_customer = 2
-    context.therapist_preference = TherapistPreference(
-        TherapistPreferenceType.FEMALE
-    )
+    context.therapist_preference = TherapistPreference(TherapistPreferenceType.FEMALE)
 
     BookingRules.validate_create_context(context)
 
@@ -227,7 +225,7 @@ def test_validate_create_context_does_not_mutate_context() -> None:
         context.ng_list_checked,
         context.is_ng_customer,
         context.booking_id,
-        context.pending_action,
+        context.last_failure_code,
     )
 
     BookingRules.validate_create_context(context)
@@ -247,5 +245,5 @@ def test_validate_create_context_does_not_mutate_context() -> None:
         context.ng_list_checked,
         context.is_ng_customer,
         context.booking_id,
-        context.pending_action,
+        context.last_failure_code,
     ) == original_values

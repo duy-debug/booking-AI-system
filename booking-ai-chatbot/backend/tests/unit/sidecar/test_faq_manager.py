@@ -57,9 +57,7 @@ class RecordingInstructionBuilder:
             instruction_template=None,
             state=context.state,
             status=(
-                DialogTurnStatus.FAILURE_HANDLED
-                if handled_failure
-                else DialogTurnStatus.SUCCESS
+                DialogTurnStatus.FAILURE_HANDLED if handled_failure else DialogTurnStatus.SUCCESS
             ),
             metadata={"response_type": "faq", "source_count": source_count},
         )
@@ -92,9 +90,7 @@ async def test_missing_gateway_renders_safe_unavailable_response() -> None:
 
 @pytest.mark.asyncio
 async def test_empty_and_blank_documents_render_safe_no_result() -> None:
-    gateway = FakeKnowledgeGateway(
-        [KnowledgeDocument("  \n\t ", 0.9, "private")]
-    )
+    gateway = FakeKnowledgeGateway([KnowledgeDocument("  \n\t ", 0.9, "private")])
     manager, builder = manager_for(gateway)
     context = BookingContext("faq-empty")
 
@@ -108,9 +104,7 @@ async def test_empty_and_blank_documents_render_safe_no_result() -> None:
 
 @pytest.mark.asyncio
 async def test_documents_below_relevance_threshold_are_not_rendered() -> None:
-    gateway = FakeKnowledgeGateway(
-        [KnowledgeDocument("Unrelated content", 0.64, "private")]
-    )
+    gateway = FakeKnowledgeGateway([KnowledgeDocument("Unrelated content", 0.64, "private")])
     builder = RecordingInstructionBuilder()
     manager = FAQManager(
         knowledge_gateway=gateway,
@@ -130,9 +124,7 @@ async def test_documents_below_relevance_threshold_are_not_rendered() -> None:
 
 @pytest.mark.asyncio
 async def test_document_at_relevance_threshold_is_rendered() -> None:
-    gateway = FakeKnowledgeGateway(
-        [KnowledgeDocument("Grounded answer", 0.65, "private")]
-    )
+    gateway = FakeKnowledgeGateway([KnowledgeDocument("Grounded answer", 0.65, "private")])
     builder = RecordingInstructionBuilder()
     manager = FAQManager(
         knowledge_gateway=gateway,
@@ -192,9 +184,7 @@ async def test_answer_is_capped_at_two_thousand_characters() -> None:
 
 @pytest.mark.asyncio
 async def test_typed_gateway_failure_renders_safe_unavailable_response() -> None:
-    gateway = FakeKnowledgeGateway(
-        error=KnowledgeGatewayUnavailableError("private failure")
-    )
+    gateway = FakeKnowledgeGateway(error=KnowledgeGatewayUnavailableError("private failure"))
     manager, _ = manager_for(gateway)
 
     response = await manager.answer(

@@ -8,7 +8,6 @@ import pytest
 
 from app.domain.booking_context import BookingContext
 from app.domain.booking_models import (
-    BookingOption,
     Course,
     CourseSelection,
     CourseType,
@@ -69,11 +68,39 @@ def make_ready_context() -> BookingContext:
 def make_change_context() -> BookingContext:
     context = make_ready_context()
     context.addons = (ADDON,)
-    context.options = (BookingOption("option-1", "Hot towel"),)
     context.available_slots = (time(10, 30), time(11, 0))
     context.therapist_preference = THERAPIST
     context.therapist_verified = True
     return context
+
+
+def test_booking_attempt_id_is_server_generated_and_reused() -> None:
+    context = make_ready_context()
+
+    first = context.ensure_booking_attempt_id()
+    second = context.ensure_booking_attempt_id()
+
+    assert UUID(first)
+    assert second == first
+
+
+def test_booking_data_change_invalidates_attempt_id() -> None:
+    context = make_ready_context()
+    previous = context.ensure_booking_attempt_id()
+
+    context.change_start_time(time(11, 0))
+
+    assert context.booking_attempt_id is None
+    assert context.ensure_booking_attempt_id() != previous
+
+
+def test_reset_clears_booking_attempt_id() -> None:
+    context = make_ready_context()
+    context.ensure_booking_attempt_id()
+
+    context.reset()
+
+    assert context.booking_attempt_id is None
 
 
 def test_change_shop_clears_shop_dependencies_only() -> None:
@@ -206,20 +233,16 @@ def test_booking_fields_default_to_none() -> None:
     assert context.duration_minutes is None
     assert context.therapist_preference is None
     assert context.therapist_verified is False
-    assert context.options == ()
     assert context.addons == ()
     assert context.available_slots is None
     assert context.phone is None
     assert context.phone_confirmed is False
     assert context.member_rank is None
-    assert context.visit_count is None
     assert context.ng_list_checked is False
     assert context.is_ng_customer is False
     assert context.booking is None
     assert context.reservation_code is None
-    assert context.reservation_codes == ()
-    assert context.child_reservation_ids == ()
-    assert context.pending_action is None
+    assert context.last_failure_code is None
 
 
 def test_context_is_not_ready_when_data_is_missing() -> None:
@@ -236,10 +259,7 @@ def test_context_is_ready_when_required_data_is_present() -> None:
 def test_reset_clears_temporary_booking_data() -> None:
     context = make_ready_context()
     context.booking_id = BOOKING_ID
-    context.visit_count = 7
-    context.reservation_codes = ("RSV-1",)
-    context.child_reservation_ids = (BOOKING_ID,)
-    context.pending_action = "create_booking"
+    context.last_failure_code = "create_booking"
     context.requested_booking_date = date(2099, 8, 1)
     context.requested_start_time = time(7, 0)
 
@@ -258,20 +278,16 @@ def test_reset_clears_temporary_booking_data() -> None:
     assert context.duration_minutes is None
     assert context.therapist_preference is None
     assert context.therapist_verified is False
-    assert context.options == ()
     assert context.addons == ()
     assert context.available_slots is None
     assert context.phone is None
     assert context.phone_confirmed is False
     assert context.member_rank is None
-    assert context.visit_count is None
     assert context.ng_list_checked is False
     assert context.is_ng_customer is False
     assert context.booking is None
     assert context.reservation_code is None
-    assert context.reservation_codes == ()
-    assert context.child_reservation_ids == ()
-    assert context.pending_action is None
+    assert context.last_failure_code is None
 
 
 def test_reset_preserves_conversation_id() -> None:
@@ -351,31 +367,6 @@ def test_confirm_phone_requires_phone() -> None:
         context.confirm_phone()
 
 
-def test_context_sets_immutable_options_and_invalidates_therapist() -> None:
-    context = BookingContext(conversation_id="conversation-1")
-    preference = TherapistPreference(TherapistPreferenceType.FEMALE)
-    option = BookingOption(option_id="oil", name="Essential oil")
-
-    context.set_therapist_preference(preference)
-    context.set_options((option,))
-
-    assert context.therapist_preference is None
-    assert context.options == (option,)
-    assert isinstance(context.options, tuple)
-
-
-def test_context_rejects_duplicate_options() -> None:
-    context = BookingContext(conversation_id="conversation-1")
-
-    with pytest.raises(InvalidBookingDataError):
-        context.set_options(
-            (
-                BookingOption(option_id="oil", name="Oil"),
-                BookingOption(option_id="oil", name="Duplicate"),
-            )
-        )
-
-
 @pytest.mark.parametrize("value", [1, 2, 3])
 def test_set_num_customer_accepts_supported_values(value: int) -> None:
     context = BookingContext(conversation_id="conversation-1")
@@ -407,13 +398,9 @@ def test_changing_to_group_clears_therapist_time_and_slots() -> None:
 def test_group_accepts_gender_but_rejects_personal_therapist() -> None:
     context = BookingContext(conversation_id="conversation-1", num_customer=2)
 
-    context.set_therapist_preference(
-        TherapistPreference(TherapistPreferenceType.FEMALE)
-    )
+    context.set_therapist_preference(TherapistPreference(TherapistPreferenceType.FEMALE))
 
-    assert context.therapist_preference == TherapistPreference(
-        TherapistPreferenceType.FEMALE
-    )
+    assert context.therapist_preference == TherapistPreference(TherapistPreferenceType.FEMALE)
 
     with pytest.raises(TherapistNotAllowedForGroupError):
         context.set_therapist_preference(
@@ -452,12 +439,10 @@ def test_set_customer_verification_stores_external_result() -> None:
 
     context.set_customer_verification(
         member_rank="gold",
-        visit_count=7,
         is_ng_customer=False,
     )
 
     assert context.member_rank == "gold"
-    assert context.visit_count == 7
     assert context.ng_list_checked is True
     assert context.is_ng_customer is False
 
@@ -473,11 +458,8 @@ def test_changing_shop_keeps_date_and_clears_dependent_data() -> None:
     context = make_ready_context()
     context.addons = (ADDON,)
     context.available_slots = (time(10, 30),)
-    context.therapist_preference = TherapistPreference(
-        TherapistPreferenceType.FEMALE
-    )
+    context.therapist_preference = TherapistPreference(TherapistPreferenceType.FEMALE)
     context.member_rank = "gold"
-    context.visit_count = 7
     context.ng_list_checked = True
 
     context.set_shop(OTHER_SHOP)
@@ -485,7 +467,6 @@ def test_changing_shop_keeps_date_and_clears_dependent_data() -> None:
     assert context.shop is OTHER_SHOP
     assert context.booking_date == date(2026, 8, 1)
     assert context.member_rank is None
-    assert context.visit_count is None
     assert context.ng_list_checked is False
     assert_course_and_availability_cleared(context)
 
@@ -494,9 +475,7 @@ def test_changing_date_clears_course_and_availability() -> None:
     context = make_ready_context()
     context.addons = (ADDON,)
     context.available_slots = (time(10, 30),)
-    context.therapist_preference = TherapistPreference(
-        TherapistPreferenceType.FEMALE
-    )
+    context.therapist_preference = TherapistPreference(TherapistPreferenceType.FEMALE)
 
     context.set_booking_date(date(2026, 8, 2))
 
@@ -508,9 +487,7 @@ def test_changing_duration_clears_course_and_availability() -> None:
     context = make_ready_context()
     context.addons = (ADDON,)
     context.available_slots = (time(10, 30),)
-    context.therapist_preference = TherapistPreference(
-        TherapistPreferenceType.FEMALE
-    )
+    context.therapist_preference = TherapistPreference(TherapistPreferenceType.FEMALE)
 
     context.set_duration(75)
 
@@ -521,9 +498,7 @@ def test_changing_duration_clears_course_and_availability() -> None:
 def test_changing_course_clears_slots_time_and_therapist() -> None:
     context = make_ready_context()
     context.available_slots = (time(10, 30),)
-    context.therapist_preference = TherapistPreference(
-        TherapistPreferenceType.FEMALE
-    )
+    context.therapist_preference = TherapistPreference(TherapistPreferenceType.FEMALE)
 
     context.set_course_selection(CourseSelection(COURSE, (ADDON,)))
 
@@ -599,9 +574,7 @@ def test_group_without_therapist_is_ready(group_size: int) -> None:
 def test_group_with_therapist_is_not_ready() -> None:
     context = make_ready_context()
     context.num_customer = 2
-    context.therapist_preference = TherapistPreference(
-        TherapistPreferenceType.FEMALE
-    )
+    context.therapist_preference = TherapistPreference(TherapistPreferenceType.FEMALE)
 
     assert context.is_ready_to_create() is False
 
@@ -609,7 +582,6 @@ def test_group_with_therapist_is_not_ready() -> None:
 def assert_course_and_availability_cleared(context: BookingContext) -> None:
     assert context.main_course is None
     assert context.addons == ()
-    assert context.options == ()
     assert context.available_slots is None
     assert context.start_time is None
     assert context.therapist_preference is None

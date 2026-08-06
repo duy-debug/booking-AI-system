@@ -23,12 +23,7 @@ from app.domain.booking_context import BookingContext
 from app.domain.booking_models import Booking
 from app.domain.booking_state import BookingState
 
-FLOW_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "app"
-    / "dialog"
-    / "booking_flow.json"
-)
+FLOW_PATH = Path(__file__).resolve().parents[3] / "app" / "dialog" / "booking_flow.json"
 CHANGE_HANDLERS_PATH = FLOW_PATH
 CONVERSATIONAL_STATES = (
     BookingState.SELECTING_SHOP,
@@ -143,10 +138,10 @@ def test_flow_loads_all_booking_states(flow: FlowDefinition) -> None:
             "select_duration",
             BookingState.SELECTING_SERVICE,
         ),
-            (
-                BookingState.SELECTING_SERVICE,
-                "select_course",
-                BookingState.SELECTING_SERVICE,
+        (
+            BookingState.SELECTING_SERVICE,
+            "select_course",
+            BookingState.SELECTING_SERVICE,
         ),
         (
             BookingState.SELECTING_TIME,
@@ -310,9 +305,7 @@ def test_service_failure_contract_is_complete(flow: FlowDefinition) -> None:
         "slot_api_error",
     }
     assert failures["combo_not_bookable"].actions == ("clear_course_for_reselect",)
-    assert failures["course_duration_mismatch"].target is (
-        BookingState.SELECTING_DURATION
-    )
+    assert failures["course_duration_mismatch"].target is (BookingState.SELECTING_DURATION)
     assert failures["no_slots_available"].target is BookingState.SELECTING_SERVICE
     assert failures["no_slots_available"].actions == ()
 
@@ -444,7 +437,7 @@ def test_booking_failure_and_retry_paths(flow: FlowDefinition) -> None:
 
     assert failure.target is BookingState.BOOKING_FAILED
     assert retry.target is BookingState.BOOKING_EXECUTING
-    assert retry.actions == ("retry_booking",)
+    assert retry.actions == ()
 
 
 @pytest.mark.parametrize(
@@ -574,7 +567,7 @@ def test_action_registry_audits_declared_actions_without_reading_json(
     declared_actions = _all_declared_actions(flow)
     unregistered = bridge.find_unregistered_actions(declared_actions)
 
-    assert len(set(declared_actions)) == 30
+    assert len(set(declared_actions)) == 29
     assert {
         "search_shop",
         "load_time_slots",
@@ -639,27 +632,19 @@ def test_flow_failure_metadata_is_safe_and_resolvable(
     assert failures
     assert all(failure.target in flow.states for failure in failures)
     assert all(
-        failure.instruction_template is None
-        or bool(failure.instruction_template.strip())
+        failure.instruction_template is None or bool(failure.instruction_template.strip())
         for failure in failures
     )
-    assert all(
-        not {"create_booking", "retry_booking"}.intersection(failure.actions)
-        for failure in failures
-    )
+    assert all("create_booking" not in failure.actions for failure in failures)
 
     for state in flow.states.values():
-        on_enter_codes = tuple(
-            failure.condition for failure in state.on_enter.on_fail
-        )
+        on_enter_codes = tuple(failure.condition for failure in state.on_enter.on_fail)
         assert len(on_enter_codes) == len(set(on_enter_codes))
         for transition in state.transitions:
             codes = tuple(failure.condition for failure in transition.on_fail)
             assert len(codes) == len(set(codes))
         for auto_transition in state.auto_transitions:
-            codes = tuple(
-                failure.condition for failure in auto_transition.on_fail
-            )
+            codes = tuple(failure.condition for failure in auto_transition.on_fail)
             assert len(codes) == len(set(codes))
 
 
@@ -712,15 +697,11 @@ def test_booking_on_enter_failure_routing_is_declared(
     flow: FlowDefinition,
 ) -> None:
     executing = flow.states[BookingState.BOOKING_EXECUTING]
-    failures = {
-        failure.condition: failure for failure in executing.on_enter.on_fail
-    }
+    failures = {failure.condition: failure for failure in executing.on_enter.on_fail}
 
     assert executing.on_enter.actions == ("create_booking",)
     assert failures["booking_conflict"].target is BookingState.SELECTING_TIME
     assert failures["booking_api_error"].target is BookingState.BOOKING_FAILED
-    assert failures["booking_data_incomplete"].target is (
-        BookingState.AWAITING_CONFIRMATION
-    )
+    assert failures["booking_data_incomplete"].target is (BookingState.AWAITING_CONFIRMATION)
     assert failures["*"].target is BookingState.BOOKING_FAILED
     assert all(failure.actions == () for failure in failures.values())

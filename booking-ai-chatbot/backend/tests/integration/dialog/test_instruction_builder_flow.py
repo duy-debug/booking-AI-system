@@ -12,12 +12,7 @@ from app.domain.booking_context import BookingContext
 from app.domain.booking_models import Booking, Course, Customer, Shop
 from app.domain.booking_state import BookingState
 
-FLOW_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "app"
-    / "dialog"
-    / "booking_flow.json"
-)
+FLOW_PATH = Path(__file__).resolve().parents[3] / "app" / "dialog" / "booking_flow.json"
 CHANGE_HANDLERS_PATH = FLOW_PATH
 SHOP = Shop(UUID("11111111-1111-1111-1111-111111111111"), "Sen Spa")
 COURSE = Course(
@@ -93,9 +88,11 @@ def test_real_flow_template_audit_has_no_missing_or_unused_renderer() -> None:
     flow = FlowLoader.load(FLOW_PATH)
     builder = InstructionBuilder()
     rules = FlowLoader.load_change_handlers(CHANGE_HANDLERS_PATH)
-    declared = declared_templates(flow) + tuple(
-        rule.prompt_template for rule in rules.values()
-    ) + ("change_invalid",)
+    declared = (
+        declared_templates(flow)
+        + tuple(rule.prompt_template for rule in rules.values())
+        + ("change_invalid",)
+    )
 
     assert len(declared) == 39
     assert builder.find_missing_templates(declared) == ()
@@ -132,8 +129,6 @@ def test_real_group_completed_template_without_code_hides_internal_ids() -> None
         num_customer=2,
     )
     second_child_id = UUID("55555555-5555-5555-5555-555555555555")
-    context.child_reservation_ids = (CHILD_ID, second_child_id)
-    context.reservation_codes = ()
 
     response = InstructionBuilder().build_response(
         result=result(template, BookingState.COMPLETED),
@@ -161,9 +156,7 @@ def test_slot_failure_instruction_uses_safe_renderer() -> None:
         context=BookingContext("conversation-1"),
     )
 
-    assert response.text == (
-        "Khung giờ vừa chọn không còn trống. Vui lòng chọn khung giờ khác."
-    )
+    assert response.text == ("Khung giờ vừa chọn không còn trống. Vui lòng chọn khung giờ khác.")
 
 
 def test_unhandled_result_uses_safe_fallback_even_with_unknown_template() -> None:

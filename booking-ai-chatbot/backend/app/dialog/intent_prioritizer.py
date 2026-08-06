@@ -84,9 +84,7 @@ class IntentPrioritizer:
             selected_intent=_canonical_intent(selected.intent),
             selected_score=selected.confidence,
             secondary_intents=[
-                _canonical_intent(item.intent)
-                for item in compatible
-                if item is not selected
+                _canonical_intent(item.intent) for item in compatible if item is not selected
             ],
             reason="state_compatible_and_entity_complete",
         )

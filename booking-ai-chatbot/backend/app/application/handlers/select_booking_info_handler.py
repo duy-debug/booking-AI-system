@@ -12,7 +12,6 @@ class SelectBookingInfoHandler:
     def select_date(self, context: BookingContext, value: date) -> HandlerResult:
         if value < date.today():
             return HandlerResult(HandlerOutcome.INVALID_INPUT, error_code="date_in_past")
-        context.set_booking_date(value)
         return HandlerResult(
             HandlerOutcome.SUCCESS,
             context_updates={"booking_date": value},
@@ -24,7 +23,6 @@ class SelectBookingInfoHandler:
                 HandlerOutcome.INVALID_INPUT,
                 error_code="num_customer_invalid",
             )
-        context.set_num_customer(value)
         return HandlerResult(
             HandlerOutcome.SUCCESS,
             context_updates={"num_customer": value},
@@ -36,7 +34,6 @@ class SelectBookingInfoHandler:
                 HandlerOutcome.INVALID_INPUT,
                 error_code="duration_not_multiple_15",
             )
-        context.set_duration(value)
         return HandlerResult(
             HandlerOutcome.SUCCESS,
             context_updates={"duration_minutes": value},
