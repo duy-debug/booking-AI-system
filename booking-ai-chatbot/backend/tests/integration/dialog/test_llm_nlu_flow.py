@@ -348,7 +348,7 @@ async def test_state_disallowed_llm_intent_returns_clarification_without_control
 
 
 @pytest.mark.asyncio
-async def test_multiple_llm_entities_apply_only_current_state_entity(
+async def test_multiple_llm_entities_apply_current_and_future_state_entities(
     runtime: tuple[ApplicationContainer, FakeLLMGateway, list[httpx.Request]],
 ) -> None:
     container, gateway, external_requests = runtime
@@ -371,10 +371,13 @@ async def test_multiple_llm_entities_apply_only_current_state_entity(
     )
 
     assert gateway.calls == 1
-    assert len(controller.calls) == 1
+    assert len(controller.calls) == 2
     assert controller.calls[0].payload == {"num_customer": 3}
-    assert context.booking_date is None
-    assert context.duration_minutes is None
+    assert controller.calls[1].payload == {"duration_minutes": 60}
+    saved = await container.conversation_context_store.get_copy("conversation-a")
+    assert saved.booking_date is None
+    assert saved.duration_minutes == 60
+    assert saved.state is BookingState.SELECTING_SERVICE
     assert external_requests == []
 
 

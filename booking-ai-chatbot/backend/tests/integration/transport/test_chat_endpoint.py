@@ -28,7 +28,14 @@ from app.dialog.nlu import (
     NLUResult,
 )
 from app.domain.booking_context import BookingContext
-from app.domain.booking_models import Course, CourseSelection, CourseType, Shop
+from app.domain.booking_models import (
+    Course,
+    CourseSelection,
+    CourseType,
+    Shop,
+    TherapistPreference,
+    TherapistPreferenceType,
+)
 from app.domain.booking_state import BookingState
 from app.domain.outcomes import HandlerOutcome, HandlerResult
 from app.infrastructure.context_store import Settings
@@ -128,6 +135,22 @@ class StaticResolver:
     ) -> EntityResolutionResult:
         self.calls += 1
         return self.result
+
+
+class SequencedResolver:
+    def __init__(self, *results: EntityResolutionResult) -> None:
+        self.results = iter(results)
+        self.calls = 0
+
+    async def resolve(
+        self,
+        *,
+        nlu_result: NLUResult,
+        state: BookingState,
+        context: BookingContext,
+    ) -> EntityResolutionResult:
+        self.calls += 1
+        return next(self.results)
 
 
 class StaticLLMGateway:
@@ -513,6 +536,167 @@ def test_booking_request_prefills_date_and_skips_redundant_date_question(
     assert context.requested_booking_date is None
     assert context.requested_start_time == time(7, 0)
     assert context.start_time is None
+    assert outbound_requests == []
+
+
+def test_booking_request_consumes_date_and_people_then_asks_only_for_duration(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    requested_date = date.today() + timedelta(days=1)
+    container.llm_nlu = LLMNLU(
+        llm_gateway=StaticLLMGateway(
+            json.dumps(
+                {
+                    "intent": "start_booking",
+                    "confidence": 0.99,
+                    "entities": {
+                        "booking_date": requested_date.isoformat(),
+                        "number_of_people": 1,
+                        "start_time": "07:00",
+                    },
+                    "entity_kind": None,
+                    "entity_query": None,
+                }
+            )
+        ),
+        intent_policy=container.state_intent_policy,
+    )
+    started = post_message(
+        client,
+        conversation_id="conversation-all-basic-slots",
+        message="Tôi muốn đặt booking ngày mai 1 người vào lúc 7 giờ",
+    )
+    assert started.json()["state"] == "selecting_shop"
+
+    container.llm_nlu = LLMNLU(
+        llm_gateway=StructuredNLUGateway(),
+        intent_policy=container.state_intent_policy,
+    )
+    container.entity_resolution_coordinator = cast(
+        EntityResolutionCoordinator,
+        StaticResolver(
+            EntityResolutionResult(
+                status=EntityResolutionStatus.RESOLVED,
+                entity_kind=NLUEntityKind.SHOP,
+                dispatch_intent="select_store",
+                dispatch_payload={"shop": SHOP},
+                matched_count=1,
+            )
+        ),
+    )
+    selected_shop = post_message(
+        client,
+        conversation_id="conversation-all-basic-slots",
+        message="Shibuya",
+    )
+    context = container.memory_cache._contexts["conversation-all-basic-slots"]
+
+    assert selected_shop.json()["state"] == "selecting_duration"
+    assert "thời lượng" in selected_shop.json()["text"].casefold()
+    assert context.booking_date == requested_date
+    assert context.num_customer == 1
+    assert context.requested_booking_date is None
+    assert context.requested_num_customer is None
+    assert context.requested_start_time == time(7, 0)
+    assert context.start_time is None
+    assert outbound_requests == []
+
+
+def test_booking_request_consumes_shop_course_addon_and_time_in_workflow_order(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    availability = RecordingAvailabilityHandler()
+    container.action_registry._check_availability_handler = availability
+    container.entity_resolution_coordinator = cast(
+        EntityResolutionCoordinator,
+        SequencedResolver(
+            EntityResolutionResult(
+                status=EntityResolutionStatus.RESOLVED,
+                entity_kind=NLUEntityKind.SHOP,
+                dispatch_intent="select_store",
+                dispatch_payload={"shop": SHOP},
+                matched_count=1,
+            ),
+            EntityResolutionResult(
+                status=EntityResolutionStatus.RESOLVED,
+                entity_kind=NLUEntityKind.COURSE,
+                dispatch_intent="select_course",
+                dispatch_payload={"course_selection": CourseSelection(main_course=COURSE)},
+                matched_count=1,
+            ),
+            EntityResolutionResult(
+                status=EntityResolutionStatus.RESOLVED,
+                entity_kind=NLUEntityKind.COURSE,
+                dispatch_intent="select_course",
+                dispatch_payload={
+                    "course_selection": CourseSelection(
+                        main_course=COURSE,
+                        addons=(ADDON,),
+                    )
+                },
+                matched_count=1,
+            ),
+            EntityResolutionResult(
+                status=EntityResolutionStatus.RESOLVED,
+                entity_kind=NLUEntityKind.THERAPIST,
+                dispatch_intent="select_therapist",
+                dispatch_payload={
+                    "therapist_preference": TherapistPreference(
+                        TherapistPreferenceType.PERSONAL,
+                        therapist_id="therapist-an",
+                        therapist_name="An",
+                    )
+                },
+                matched_count=1,
+            ),
+        ),
+    )
+    container.llm_nlu = LLMNLU(
+        llm_gateway=StaticLLMGateway(
+            json.dumps(
+                {
+                    "intent": "start_booking",
+                    "confidence": 0.99,
+                    "entities": {
+                        "shop_name": SHOP.name,
+                        "booking_date": "2099-08-15",
+                        "number_of_people": 1,
+                        "duration_minutes": 60,
+                        "main_course_name": COURSE.name,
+                        "addon_name": ADDON.name,
+                        "start_time": "10:30",
+                        "therapist_name": "An",
+                    },
+                    "entity_kind": None,
+                    "entity_query": None,
+                }
+            )
+        ),
+        intent_policy=container.state_intent_policy,
+    )
+
+    response = post_message(
+        client,
+        conversation_id="conversation-all-course-slots",
+        message="Đặt Shibuya ngày 15/08/2099 một người 60 phút Aromatherapy "
+        "thêm chăm sóc da đầu lúc 10:30",
+    )
+    context = container.memory_cache._contexts["conversation-all-course-slots"]
+
+    assert response.json()["state"] == "collecting_phone"
+    assert context.shop == SHOP
+    assert context.booking_date == date(2099, 8, 15)
+    assert context.num_customer == 1
+    assert context.duration_minutes == 60
+    assert context.main_course == COURSE
+    assert context.addons == (ADDON,)
+    assert context.start_time == time(10, 30)
+    assert context.therapist_name == "An"
+    assert len(availability.calls) == 1
     assert outbound_requests == []
 
 

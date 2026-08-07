@@ -1549,6 +1549,8 @@ def _validate_dispatch_payload(
         expected_keys, expected_type = frozenset({"start_time"}), time
     elif intent == "provide_phone":
         expected_keys, expected_type = frozenset({"phone"}), str
+    elif intent == "provide_name":
+        expected_keys, expected_type = frozenset({"name"}), str
     elif intent == "ask_question":
         expected_keys, expected_type = frozenset({"query"}), str
     elif intent in {
@@ -1636,7 +1638,7 @@ class LLMNLUEntities(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    number_of_people: StrictInt | None = Field(default=None, ge=1, le=3)
+    number_of_people: StrictInt | None = None
     duration_minutes: StrictInt | None = Field(default=None, ge=1)
     booking_date: StrictStr | None = None
     start_time: StrictStr | None = None
@@ -1647,6 +1649,11 @@ class LLMNLUEntities(BaseModel):
     query: StrictStr | None = None
     shop_name: StrictStr | None = None
     service_name: StrictStr | None = None
+    main_course_name: StrictStr | None = None
+    addon_name: StrictStr | None = None
+    skip_addon: StrictBool | None = None
+    therapist_name: StrictStr | None = None
+    customer_name: StrictStr | None = None
 
 
 class LLMNLUOutput(BaseModel):
@@ -1831,7 +1838,21 @@ class LLMNLU:
                 return _llm_unresolved("state_incompatible_change_info")
             return _llm_unresolved("invalid_nlu_output")
         merged_entities = _merge_candidate_entities(candidates)
-        output = LLMNLUOutput.model_validate(selected.model_dump())
+        try:
+            output = LLMNLUOutput.model_validate(selected.model_dump())
+        except ValidationError as error:
+            trace_log(
+                logging.getLogger(__name__),
+                logging.WARNING,
+                "NLUSchema",
+                "selected_candidate_validation_failed",
+                invalid_fields=[
+                    ".".join(str(part) for part in item["loc"])
+                    for item in error.errors()
+                ],
+                error_code="invalid_nlu_output",
+            )
+            return _llm_unresolved("invalid_nlu_output")
         return self._to_nlu_result(output, state, merged_entities)
 
     def _to_nlu_result(
@@ -1916,15 +1937,15 @@ def _build_llm_messages(
         f"Timezone: {business_timezone}. Locale: vi-VN. "
         "Resolve hôm nay from current business date, ngày mai as +1 day, and "
         "ngày kia as +2 days. Return booking_date as YYYY-MM-DD. "
-        "Entities may only contain number_of_people, duration_minutes, booking_date "
-        "(YYYY-MM-DD), start_time (HH:MM), phone, confirmation, therapist_gender, "
-        "change_target, query, shop_name, service_name. Use intent change_info for "
-        "an in-progress booking "
-        "change and ask_question for an FAQ query. Use list_shops, search_shops, "
-        "list_services, list_addons, list_available_times, or list_therapists only "
-        "for discovery requests; search_shops must put the location in entities.query. "
-        "For shop/course/therapist return only entity_kind and entity_query; never infer "
-        "IDs or return domain objects. Example: "
+        "Extract every explicit entity, including secondary ones. Allowed entity keys: "
+        "number_of_people, duration_minutes, booking_date, start_time, phone, confirmation, "
+        "therapist_gender, therapist_name, customer_name, change_target, query, shop_name, "
+        "service_name, main_course_name, addon_name, skip_addon. main_course_name is the "
+        "primary course; addon_name is optional; service_name means type unclear. Set "
+        "skip_addon=true only for an explicit decline. Use change_info for booking edits, "
+        "ask_question for FAQ, and list/search intents only for discovery. search_shops "
+        "stores location in query. Shop/course/therapist selections use entity_kind and "
+        "entity_query; never invent IDs. Example: "
         '{"intent":"select_people","confidence":0.9,'
         '"entities":{"number_of_people":2},"entity_kind":null,'
         '"entity_query":null}.'
@@ -1956,7 +1977,28 @@ _INTENT_TOOL: dict[str, object] = {
                         "properties": {
                             "intent": {"type": "string"},
                             "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                            "entities": {"type": "object"},
+                            "entities": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "number_of_people": {"type": ["integer", "null"]},
+                                    "duration_minutes": {"type": ["integer", "null"]},
+                                    "booking_date": {"type": ["string", "null"]},
+                                    "start_time": {"type": ["string", "null"]},
+                                    "phone": {"type": ["string", "null"]},
+                                    "confirmation": {"type": ["boolean", "null"]},
+                                    "therapist_gender": {"type": ["string", "null"]},
+                                    "therapist_name": {"type": ["string", "null"]},
+                                    "customer_name": {"type": ["string", "null"]},
+                                    "change_target": {"type": ["string", "null"]},
+                                    "query": {"type": ["string", "null"]},
+                                    "shop_name": {"type": ["string", "null"]},
+                                    "service_name": {"type": ["string", "null"]},
+                                    "main_course_name": {"type": ["string", "null"]},
+                                    "addon_name": {"type": ["string", "null"]},
+                                    "skip_addon": {"type": ["boolean", "null"]},
+                                },
+                            },
                             "entity_kind": {
                                 "type": ["string", "null"],
                                 "enum": ["shop", "course", "therapist", None],
@@ -2022,6 +2064,9 @@ def _llm_direct_payload(
         return _llm_time_payload(entities.start_time)
     if intent == "provide_phone" and entities.phone is not None:
         return {"phone": entities.phone}
+    if intent == "provide_name" and entities.customer_name is not None:
+        name = entities.customer_name.strip()
+        return {"name": name} if name else None
     return None
 
 
@@ -2100,11 +2145,20 @@ def _typed_llm_entity(key: str, value: object) -> object | None:
     if key == "start_time" and isinstance(value, str):
         payload = _llm_time_payload(value)
         return payload["start_time"] if payload is not None else None
-    if key in {"shop_name", "service_name", "query", "phone"}:
+    if key in {
+        "shop_name",
+        "service_name",
+        "main_course_name",
+        "addon_name",
+        "therapist_name",
+        "customer_name",
+        "query",
+        "phone",
+    }:
         return value.strip() if isinstance(value, str) and value.strip() else None
     if key in {"number_of_people", "duration_minutes"}:
         return value if type(value) is int else None
-    if key == "confirmation":
+    if key in {"confirmation", "skip_addon"}:
         return value if type(value) is bool else None
     if key in {"therapist_gender", "change_target"}:
         return value if isinstance(value, str) else None

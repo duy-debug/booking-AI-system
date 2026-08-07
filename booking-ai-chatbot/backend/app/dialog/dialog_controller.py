@@ -6,7 +6,7 @@ import logging
 import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from datetime import time as clock_time
 from enum import StrEnum
 from time import perf_counter
@@ -37,6 +37,7 @@ from app.dialog.nlu import (
     NLUEntityKind,
     NLUResolutionStatus,
     NLUResult,
+    NLUSource,
     entity_resolution_to_dialog_turn_input,
     to_dialog_turn_input,
 )
@@ -781,6 +782,8 @@ async def _process_bound_chat_message(
     )
     resolver = "llm"
 
+    _stage_requested_entities(nlu_result, context)
+
     if context.state in {
         BookingState.COMPLETED,
         BookingState.CANCELLED,
@@ -1024,46 +1027,289 @@ async def _consume_requested_entities(
     result: DialogTurnResult,
     idempotency_key: str | None,
 ) -> DialogTurnResult:
-    """Apply previously extracted fields only when their workflow step is reached."""
-    follow_up: DialogTurnInput | None = None
-    if (
-        result.status is DialogTurnStatus.SUCCESS
-        and context.state is BookingState.SELECTING_DATE
-        and context.requested_booking_date is not None
-    ):
-        booking_date = context.requested_booking_date
-        context.requested_booking_date = None
-        follow_up = DialogTurnInput(
-            "select_date",
-            {"booking_date": booking_date},
+    """Consume validated pending slots in workflow order through production actions."""
+    consumed = result
+    for _ in range(12):
+        if consumed.status is not DialogTurnStatus.SUCCESS:
+            break
+        follow_up = await _next_requested_turn(
+            container=container,
+            context=context,
             idempotency_key=idempotency_key,
         )
-    elif (
-        result.status is DialogTurnStatus.SUCCESS
-        and context.state is BookingState.SELECTING_TIME
-        and context.requested_start_time is not None
-    ):
-        start_time = context.requested_start_time
-        context.requested_start_time = None
-        follow_up = DialogTurnInput(
-            "select_time",
-            {"start_time": start_time},
-            idempotency_key=idempotency_key,
+        if follow_up is None:
+            break
+        consumed = await container.dialog_controller.handle_turn(context, follow_up)
+        trace_log(
+            logger,
+            logging.INFO,
+            "DialogCtrl",
+            "prefilled_entity_consumed",
+            intent=follow_up.intent,
+            from_state=consumed.initial_state.value,
+            to_state=consumed.final_state.value,
+            status=consumed.status.value,
         )
-    if follow_up is None:
-        return result
-    consumed = await container.dialog_controller.handle_turn(context, follow_up)
-    trace_log(
-        logger,
-        logging.INFO,
-        "DialogCtrl",
-        "prefilled_entity_consumed",
-        intent=follow_up.intent,
-        from_state=consumed.initial_state.value,
-        to_state=consumed.final_state.value,
-        status=consumed.status.value,
-    )
     return consumed
+
+
+def _stage_requested_entities(result: NLUResult, context: BookingContext) -> None:
+    """Store safe secondary LLM entities until their workflow state is reached."""
+    if result.intent not in {
+        "start_booking",
+        "select_store",
+        "select_date",
+        "select_people",
+        "select_duration",
+        "select_course",
+        "select_time",
+        "select_therapist",
+        "provide_phone",
+        "provide_name",
+        "change_info",
+    } and result.resolution_status is not NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED:
+        return
+
+    entities = result.merged_entities
+    primary = _primary_entity_keys(result, context)
+
+    def requested_text(key: str) -> str | None:
+        value = entities.get(key)
+        if (
+            key in primary
+            or not _can_stage_requested_slot(key, context.state)
+            or not isinstance(value, str)
+        ):
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    shop_name = requested_text("shop_name")
+    if shop_name is not None:
+        context.requested_shop_name = shop_name
+    booking_date = entities.get("booking_date")
+    if (
+        "booking_date" not in primary
+        and _can_stage_requested_slot("booking_date", context.state)
+        and type(booking_date) is date
+    ):
+        context.requested_booking_date = booking_date
+    people = entities.get("number_of_people")
+    if (
+        "number_of_people" not in primary
+        and _can_stage_requested_slot("number_of_people", context.state)
+        and type(people) is int
+    ):
+        context.requested_num_customer = people
+    duration = entities.get("duration_minutes")
+    if (
+        "duration_minutes" not in primary
+        and _can_stage_requested_slot("duration_minutes", context.state)
+        and type(duration) is int
+    ):
+        context.requested_duration_minutes = duration
+
+    main_course = requested_text("main_course_name")
+    generic_course = requested_text("service_name")
+    addon = requested_text("addon_name")
+    if main_course is not None:
+        context.requested_main_course_name = main_course
+    elif generic_course is not None:
+        if context.course_selection_mode is CourseSelectionMode.ADDON:
+            context.requested_addon_name = generic_course
+        else:
+            context.requested_main_course_name = generic_course
+    if addon is not None:
+        context.requested_addon_name = addon
+        context.requested_skip_addon = False
+    skip_addon = entities.get("skip_addon")
+    if (
+        addon is None
+        and "skip_addon" not in primary
+        and _can_stage_requested_slot("skip_addon", context.state)
+        and type(skip_addon) is bool
+    ):
+        context.requested_skip_addon = skip_addon
+
+    therapist_name = requested_text("therapist_name")
+    if therapist_name is not None:
+        context.requested_therapist_name = therapist_name
+    therapist_gender = requested_text("therapist_gender")
+    if therapist_gender is not None:
+        context.requested_therapist_gender = therapist_gender
+    phone = requested_text("phone")
+    if phone is not None:
+        context.requested_phone = phone
+    customer_name = requested_text("customer_name")
+    if customer_name is not None:
+        context.requested_customer_name = customer_name
+
+
+def _can_stage_requested_slot(key: str, state: BookingState) -> bool:
+    state_order = {
+        BookingState.IDLE: 0,
+        BookingState.SELECTING_SHOP: 1,
+        BookingState.SELECTING_DATE: 2,
+        BookingState.SELECTING_PEOPLE: 3,
+        BookingState.SELECTING_DURATION: 4,
+        BookingState.SELECTING_SERVICE: 5,
+        BookingState.SELECTING_TIME: 6,
+        BookingState.SELECTING_THERAPIST: 7,
+        BookingState.COLLECTING_PHONE: 8,
+        BookingState.VERIFYING_PHONE: 9,
+        BookingState.COLLECTING_NAME: 10,
+        BookingState.AWAITING_CONFIRMATION: 11,
+        BookingState.BOOKING_EXECUTING: 12,
+        BookingState.COMPLETED: 13,
+        BookingState.BOOKING_FAILED: 13,
+        BookingState.CANCELLED: 13,
+    }
+    slot_order = {
+        "shop_name": 1,
+        "booking_date": 2,
+        "number_of_people": 3,
+        "duration_minutes": 4,
+        "service_name": 5,
+        "main_course_name": 5,
+        "addon_name": 5,
+        "skip_addon": 5,
+        "start_time": 6,
+        "therapist_name": 7,
+        "therapist_gender": 7,
+        "phone": 8,
+        "customer_name": 10,
+    }
+    return slot_order.get(key, 99) >= state_order[state]
+
+
+def _primary_entity_keys(result: NLUResult, context: BookingContext) -> frozenset[str]:
+    if result.intent == "start_booking":
+        return frozenset()
+    keys = {
+        "select_store": {"shop_name"},
+        "select_date": {"booking_date"},
+        "select_people": {"number_of_people"},
+        "select_duration": {"duration_minutes"},
+        "select_time": {"start_time"},
+        "select_therapist": {"therapist_name", "therapist_gender"},
+        "provide_phone": {"phone"},
+        "provide_name": {"customer_name"},
+    }.get(result.intent or "", set())
+    if result.entity_kind is NLUEntityKind.SHOP:
+        keys.add("shop_name")
+    elif result.entity_kind is NLUEntityKind.COURSE:
+        keys.update(
+            {"addon_name", "service_name"}
+            if context.course_selection_mode is CourseSelectionMode.ADDON
+            else {"main_course_name", "service_name"}
+        )
+    elif result.entity_kind is NLUEntityKind.THERAPIST:
+        keys.update({"therapist_name", "therapist_gender"})
+    return frozenset(keys)
+
+
+async def _next_requested_turn(
+    *,
+    container: ApplicationContainer,
+    context: BookingContext,
+    idempotency_key: str | None,
+) -> DialogTurnInput | None:
+    direct: tuple[str, str, Mapping[str, object]] | None = None
+    entity: tuple[str, NLUEntityKind] | None = None
+    if context.state is BookingState.SELECTING_SHOP and context.requested_shop_name:
+        shop_query, context.requested_shop_name = context.requested_shop_name, None
+        entity = (shop_query, NLUEntityKind.SHOP)
+    elif context.state is BookingState.SELECTING_DATE and context.requested_booking_date:
+        requested_date, context.requested_booking_date = context.requested_booking_date, None
+        direct = ("select_date", "booking_date", {"booking_date": requested_date})
+    elif context.state is BookingState.SELECTING_PEOPLE and context.requested_num_customer:
+        requested_people, context.requested_num_customer = context.requested_num_customer, None
+        direct = ("select_people", "num_customer", {"num_customer": requested_people})
+    elif context.state is BookingState.SELECTING_DURATION:
+        if context.requested_duration_minutes is not None:
+            requested_duration, context.requested_duration_minutes = (
+                context.requested_duration_minutes,
+                None,
+            )
+            direct = (
+                "select_duration",
+                "duration_minutes",
+                {"duration_minutes": requested_duration},
+            )
+        elif context.requested_main_course_name:
+            course_query, context.requested_main_course_name = (
+                context.requested_main_course_name,
+                None,
+            )
+            entity = (course_query, NLUEntityKind.COURSE)
+    elif context.state is BookingState.SELECTING_SERVICE:
+        if context.main_course is None and context.requested_main_course_name:
+            main_query, context.requested_main_course_name = (
+                context.requested_main_course_name,
+                None,
+            )
+            entity = (main_query, NLUEntityKind.COURSE)
+        elif context.main_course is not None and context.requested_addon_name:
+            addon_query, context.requested_addon_name = context.requested_addon_name, None
+            entity = (addon_query, NLUEntityKind.COURSE)
+        elif context.main_course is not None and context.requested_skip_addon:
+            context.requested_skip_addon = False
+            direct = ("deny", "skip_addon", {})
+    elif context.state is BookingState.SELECTING_TIME and context.requested_start_time:
+        requested_time, context.requested_start_time = context.requested_start_time, None
+        direct = ("select_time", "start_time", {"start_time": requested_time})
+    elif context.state is BookingState.SELECTING_THERAPIST:
+        therapist_query = context.requested_therapist_name or context.requested_therapist_gender
+        context.requested_therapist_name = None
+        context.requested_therapist_gender = None
+        if therapist_query:
+            entity = (therapist_query, NLUEntityKind.THERAPIST)
+    elif context.state is BookingState.COLLECTING_PHONE and context.requested_phone:
+        requested_phone, context.requested_phone = context.requested_phone, None
+        direct = ("provide_phone", "phone", {"phone": requested_phone})
+    elif context.state is BookingState.COLLECTING_NAME and context.requested_customer_name:
+        requested_name, context.requested_customer_name = context.requested_customer_name, None
+        direct = ("provide_name", "name", {"name": requested_name})
+
+    if direct is not None:
+        intent, _field, payload = direct
+        return DialogTurnInput(intent, payload, idempotency_key=idempotency_key)
+    if entity is None:
+        return None
+    query, kind = entity
+    request = NLUResult(
+        intent=None,
+        payload={},
+        confidence=1.0,
+        source=NLUSource.FALLBACK,
+        resolution_status=NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED,
+        matched_rule="prefilled_entity",
+        entity_query=query,
+        entity_kind=kind,
+    )
+    resolution = await container.entity_resolution_coordinator.resolve(
+        nlu_result=request,
+        state=context.state,
+        context=context,
+    )
+    if resolution.status is not EntityResolutionStatus.RESOLVED:
+        trace_log(
+            logger,
+            logging.INFO,
+            "EntityResolver",
+            "prefilled_entity_not_consumed",
+            entity=kind.value,
+            resolution_status=resolution.status.value,
+            candidate_count=len(resolution.candidates),
+            error_code=resolution.failure_code or "none",
+        )
+        return None
+    return entity_resolution_to_dialog_turn_input(
+        resolution,
+        state=context.state,
+        intent_policy=container.state_intent_policy,
+        idempotency_key=idempotency_key,
+    )
 
 
 def _trace_route(

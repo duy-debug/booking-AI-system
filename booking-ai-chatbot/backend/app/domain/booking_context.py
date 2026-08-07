@@ -38,6 +38,7 @@ class BookingContext:
     state: BookingState = BookingState.IDLE
     turn_sequence: int = field(default=0, compare=False)
     shop: Shop | None = None
+    requested_shop_name: str | None = None
     suggested_shops: tuple[Shop, ...] = ()
     suggested_shops_loaded: bool = False
     main_course: Course | None = None
@@ -49,7 +50,16 @@ class BookingContext:
     start_time: time | None = None
     requested_start_time: time | None = None
     num_customer: int | None = None
+    requested_num_customer: int | None = None
     duration_minutes: int | None = None
+    requested_duration_minutes: int | None = None
+    requested_main_course_name: str | None = None
+    requested_addon_name: str | None = None
+    requested_skip_addon: bool = False
+    requested_therapist_name: str | None = None
+    requested_therapist_gender: str | None = None
+    requested_phone: str | None = None
+    requested_customer_name: str | None = None
     therapist_preference: TherapistPreference | None = None
     therapist_verified: bool = False
     addons: tuple[Course, ...] = ()
@@ -440,6 +450,7 @@ class BookingContext:
         turn_sequence = self.turn_sequence
         self.state = BookingState.IDLE
         self.shop = None
+        self.requested_shop_name = None
         self.main_course = None
         self.customer = None
         self.booking_date = None
@@ -447,7 +458,16 @@ class BookingContext:
         self.start_time = None
         self.requested_start_time = None
         self.num_customer = None
+        self.requested_num_customer = None
         self.duration_minutes = None
+        self.requested_duration_minutes = None
+        self.requested_main_course_name = None
+        self.requested_addon_name = None
+        self.requested_skip_addon = False
+        self.requested_therapist_name = None
+        self.requested_therapist_gender = None
+        self.requested_phone = None
+        self.requested_customer_name = None
         self.therapist_preference = None
         self.therapist_verified = False
         self.addons = ()

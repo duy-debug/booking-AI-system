@@ -58,6 +58,7 @@ def policy() -> StateIntentPolicy:
         BookingState.SELECTING_TIME: frozenset({"select_time", "unknown"}),
         BookingState.SELECTING_THERAPIST: frozenset({"select_therapist", "deny", "unknown"}),
         BookingState.COLLECTING_PHONE: frozenset({"provide_phone", "unknown"}),
+        BookingState.COLLECTING_NAME: frozenset({"provide_name", "unknown"}),
         BookingState.AWAITING_CONFIRMATION: frozenset(
             {"confirm", "deny", "change_info", "unknown"}
         ),
@@ -185,6 +186,12 @@ async def test_valid_people_output_maps_to_typed_nlu_result() -> None:
             {"start_time": "19:00"},
             {"start_time": time(19, 0)},
         ),
+        (
+            BookingState.COLLECTING_NAME,
+            "provide_name",
+            {"customer_name": "Nguyễn An"},
+            {"name": "Nguyễn An"},
+        ),
     ],
 )
 async def test_supported_primitive_entities_map_to_domain_neutral_payload_types(
@@ -224,6 +231,47 @@ async def test_multiple_known_entities_only_use_the_current_intent_payload() -> 
         "number_of_people": 3,
         "booking_date": date(2026, 8, 3),
         "duration_minutes": 60,
+    }
+
+
+@pytest.mark.asyncio
+async def test_start_booking_preserves_all_supported_secondary_booking_entities() -> None:
+    fallback, _ = fallback_for(
+        structured(
+            intent="start_booking",
+            entities={
+                "shop_name": "Komorebi Bình Thạnh",
+                "booking_date": "2026-08-07",
+                "number_of_people": 1,
+                "duration_minutes": 60,
+                "main_course_name": "Massage đá nóng 60 phút",
+                "addon_name": "Ngâm chân thảo dược",
+                "skip_addon": False,
+                "start_time": "19:00",
+                "therapist_name": "An",
+                "therapist_gender": "female",
+                "phone": "0901234567",
+                "customer_name": "Nguyễn Bình",
+            },
+        )
+    )
+
+    result = await fallback.parse(text="booking đầy đủ", state=BookingState.IDLE)
+
+    assert result.intent == "start_booking"
+    assert result.merged_entities == {
+        "shop_name": "Komorebi Bình Thạnh",
+        "booking_date": date(2026, 8, 7),
+        "number_of_people": 1,
+        "duration_minutes": 60,
+        "main_course_name": "Massage đá nóng 60 phút",
+        "addon_name": "Ngâm chân thảo dược",
+        "skip_addon": False,
+        "start_time": time(19, 0),
+        "therapist_name": "An",
+        "therapist_gender": "female",
+        "phone": "0901234567",
+        "customer_name": "Nguyễn Bình",
     }
 
 

@@ -262,6 +262,9 @@ def test_reset_clears_temporary_booking_data() -> None:
     context.last_failure_code = "create_booking"
     context.requested_booking_date = date(2099, 8, 1)
     context.requested_start_time = time(7, 0)
+    context.requested_num_customer = 2
+    context.requested_main_course_name = "Massage đá nóng"
+    context.requested_addon_name = "Ngâm chân"
 
     context.reset()
 
@@ -273,6 +276,9 @@ def test_reset_clears_temporary_booking_data() -> None:
     assert context.requested_booking_date is None
     assert context.start_time is None
     assert context.requested_start_time is None
+    assert context.requested_num_customer is None
+    assert context.requested_main_course_name is None
+    assert context.requested_addon_name is None
     assert context.booking_id is None
     assert context.num_customer is None
     assert context.duration_minutes is None

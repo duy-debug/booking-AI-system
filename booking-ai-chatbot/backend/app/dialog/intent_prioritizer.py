@@ -36,6 +36,7 @@ class IntentPrioritizer:
         "select_date": "booking_date",
         "select_time": "start_time",
         "provide_phone": "phone",
+        "provide_name": "customer_name",
         "ask_question": "query",
         "search_shops": "query",
     }
