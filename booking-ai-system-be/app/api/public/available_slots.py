@@ -59,6 +59,7 @@ def list_available_slots(
         therapist_id=therapist_id,
         therapist_gender=therapist_gender,
     )
+    validated_result = AvailableSlotListResponse.model_validate(result)
     log_event(
         logging.INFO,
         "SlotService",
@@ -71,9 +72,9 @@ def list_available_slots(
             "therapist_rule_valid",
         ],
         status="passed",
-        slot_count=len(result.data),
+        slot_count=len(validated_result.data),
     )
-    return result
+    return validated_result
 
 
 # Tra cứu therapist còn trống trong khung giờ — lọc theo giới tính
@@ -110,6 +111,9 @@ def list_available_therapists(
         end_time=et,
         gender=gender,
     )
+    validated_result = CollectionResponse[AvailableTherapistResponse].model_validate(
+        result
+    )
     log_event(
         logging.INFO,
         "SlotService",
@@ -117,6 +121,6 @@ def list_available_therapists(
         operation="search_available_therapists",
         rules=["shop_is_active", "shift_available", "no_reservation_overlap"],
         status="passed",
-        result_count=len(result.data),
+        result_count=len(validated_result.data),
     )
-    return result
+    return validated_result
