@@ -13,6 +13,7 @@ import httpx
 
 from app.domain.booking_models import (
     AvailabilityRequest,
+    AvailabilityWindowResult,
     AvailableTherapistRequest,
     Booking,
     ChildReservationReference,
@@ -59,6 +60,15 @@ class _ParsedSlot:
     available: bool
     reason_code: str | None
     message: str | None
+
+
+def _availability_status(root: Mapping[str, object], slots: list["_ParsedSlot"]) -> str:
+    raw = root.get("availability_status")
+    if raw is None:
+        return "available" if any(slot.available for slot in slots) else "no_slots_available"
+    if raw not in {"available", "no_working_shift", "no_slots_available"}:
+        raise POSResponseMappingError("POS field 'availability_status' contains an unknown value.")
+    return cast(str, raw)
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,7 +142,7 @@ class PosApiClient:
     async def get_available_slots(
         self,
         request: AvailabilityRequest,
-    ) -> tuple[time, ...]:
+    ) -> AvailabilityWindowResult:
         """Return available start times while preserving their POS order."""
         params = _availability_params(request)
         payload = await self._request_json(
@@ -141,14 +151,17 @@ class PosApiClient:
             path=f"/api/shops/{request.shop_id}/available-slots",
             params=params,
         )
-        slots = _parse_slots(
+        slots, status = _parse_slots(
             payload,
             shop_id=request.shop_id,
             booking_date=request.booking_date,
             num_customer=request.num_customer,
             duration_minutes=request.duration_minutes,
         )
-        return tuple(slot.start_time for slot in slots if slot.available)
+        return AvailabilityWindowResult(
+            slots=tuple(slot.start_time for slot in slots if slot.available),
+            status=status,
+        )
 
     # Tìm therapist còn trống tại slot đã chọn để hỗ trợ chọn tên hoặc giới tính.
     async def search_available_therapists(
@@ -218,7 +231,7 @@ class PosApiClient:
             path=f"/api/shops/{request.shop_id}/available-slots",
             params=params,
         )
-        slots = _parse_slots(
+        slots, _ = _parse_slots(
             payload,
             shop_id=request.shop_id,
             booking_date=request.booking_date,
@@ -730,7 +743,7 @@ def _parse_slots(
     booking_date: date,
     num_customer: int,
     duration_minutes: int,
-) -> list[_ParsedSlot]:
+) -> tuple[list[_ParsedSlot], str]:
     root = _mapping(payload, "availability response")
     meta = _mapping(_required(root, "meta"), "availability meta")
     if _uuid(meta, "shop_id") != shop_id:
@@ -762,7 +775,7 @@ def _parse_slots(
                 message=_optional_string(slot, "message"),
             )
         )
-    return parsed
+    return parsed, _availability_status(root, parsed)
 
 
 # Parse shop item từ POS thành Shop domain object.

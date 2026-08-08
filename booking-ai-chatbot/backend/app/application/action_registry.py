@@ -381,6 +381,11 @@ class ActionRegistry:
             return "flow_configuration_error"
         if isinstance(error, SlotConflictError | BookingConflictError):
             if action_name == "load_time_slots":
+                if isinstance(error, SlotConflictError) and error.reason in {
+                    "no_slots_available",
+                    "no_working_shift",
+                }:
+                    return error.reason
                 return "no_slots_available"
             if action_name == "handle_time_selection":
                 return "slot_unavailable"

@@ -10,6 +10,7 @@ from app.application.handlers.create_booking_handler import CreateBookingHandler
 from app.domain.booking_context import BookingContext
 from app.domain.booking_models import (
     AvailabilityRequest,
+    AvailabilityWindowResult,
     Booking,
     BookingGateway,
     ChildReservationReference,
@@ -105,7 +106,7 @@ class FakeBookingGateway:
     async def get_available_slots(
         self,
         request: AvailabilityRequest,
-    ) -> tuple[time, ...]:
+    ) -> AvailabilityWindowResult:
         raise AssertionError("Unexpected get_available_slots call.")
 
     async def verify_customer(

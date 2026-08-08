@@ -13,6 +13,7 @@ import pytest
 
 from app.domain.booking_models import (
     AvailabilityRequest,
+    AvailabilityWindowResult,
     AvailableTherapistRequest,
     BookingGateway,
     CourseSearchRequest,
@@ -352,7 +353,10 @@ async def test_availability_sends_complete_none_preference_query_and_preserves_o
     finally:
         await client.aclose()
 
-    assert result == (time(10, 0), time(10, 30))
+    assert result == AvailabilityWindowResult(
+        slots=(time(10, 0), time(10, 30)),
+        status="available",
+    )
     assert len(requests) == 1
     request = requests[0]
     assert request.method == "GET"
@@ -486,11 +490,33 @@ async def test_empty_availability_is_distinct_from_malformed_response() -> None:
 
     client, gateway = _gateway(handler)
     try:
-        assert await gateway.get_available_slots(_availability_request()) == ()
+        assert await gateway.get_available_slots(
+            _availability_request()
+        ) == AvailabilityWindowResult(slots=(), status="no_slots_available")
         with pytest.raises(POSResponseMappingError, match="ISO time"):
             await gateway.get_available_slots(_availability_request())
     finally:
         await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_availability_preserves_no_working_shift_semantic() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                **_availability_payload([]),
+                "availability_status": "no_working_shift",
+            },
+        )
+
+    client, gateway = _gateway(handler)
+    try:
+        result = await gateway.get_available_slots(_availability_request())
+    finally:
+        await client.aclose()
+
+    assert result == AvailabilityWindowResult(slots=(), status="no_working_shift")
 
 
 @pytest.mark.asyncio

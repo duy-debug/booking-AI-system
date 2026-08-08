@@ -42,11 +42,12 @@ class CheckAvailabilityHandler:
             addon_ids=tuple(addon.course_id for addon in course_selection.addons),
             therapist_preference=context.therapist_preference,
         )
-        slots = await self._booking_gateway.get_available_slots(request)
+        availability = await self._booking_gateway.get_available_slots(request)
+        slots = availability.slots
         if not slots:
             return HandlerResult(
                 HandlerOutcome.NO_SLOTS,
-                error_code="no_slots_available",
+                error_code=availability.status,
             )
         normalized_slots = tuple(slots)
         return HandlerResult(

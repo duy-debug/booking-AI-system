@@ -297,6 +297,7 @@ class InstructionBuilder:
             ("main_course_required", self._main_course_required),
             ("combo_not_bookable_retry", self._combo_not_bookable_retry),
             ("duration_invalid", self._duration_invalid),
+            ("no_working_shift", self._no_working_shift),
             ("no_slots_available", self._no_slots_available),
             ("slot_api_error", self._slot_api_error),
             ("suggest_time_slots", self._suggest_time_slots),
@@ -522,6 +523,22 @@ class InstructionBuilder:
     ) -> DialogResponseDraft:
         return DialogResponseDraft(
             "Ngày đã chọn hiện không còn khung giờ trống. Vui lòng chọn ngày khác."
+        )
+
+    @staticmethod
+    def _no_working_shift(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        shop_name = context.shop.name if context.shop is not None else "Cửa hàng đã chọn"
+        if context.booking_date is not None:
+            return DialogResponseDraft(
+                f"{shop_name} hiện chưa phục vụ đặt lịch vào ngày "
+                f"{_format_date(context.booking_date)}. "
+                "Vui lòng chọn ngày khác."
+            )
+        return DialogResponseDraft(
+            f"{shop_name} hiện chưa có lịch phục vụ cho ngày này. Vui lòng chọn ngày khác."
         )
 
     @staticmethod

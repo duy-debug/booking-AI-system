@@ -301,12 +301,14 @@ def test_service_failure_contract_is_complete(flow: FlowDefinition) -> None:
         "addon_without_main_course",
         "combo_not_bookable",
         "course_duration_mismatch",
+        "no_working_shift",
         "no_slots_available",
         "slot_api_error",
     }
     assert failures["combo_not_bookable"].actions == ("clear_course_for_reselect",)
     assert failures["course_duration_mismatch"].target is (BookingState.SELECTING_DURATION)
-    assert failures["no_slots_available"].target is BookingState.SELECTING_SERVICE
+    assert failures["no_working_shift"].target is BookingState.SELECTING_DATE
+    assert failures["no_slots_available"].target is BookingState.SELECTING_DATE
     assert failures["no_slots_available"].actions == ()
 
 

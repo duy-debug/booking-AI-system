@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from datetime import date, time
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -66,3 +67,6 @@ class AvailableTherapistResponse(BaseModel):
 class AvailableSlotListResponse(BaseModel):
     data: list[AvailableSlotResponse]
     meta: AvailableSlotMeta
+    availability_status: Literal["available", "no_working_shift", "no_slots_available"] = (
+        "available"
+    )

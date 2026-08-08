@@ -18,6 +18,7 @@ from app.dialog.instruction_builder import DialogResponseDraft
 from app.domain.booking_context import BookingContext
 from app.domain.booking_models import (
     AvailabilityRequest,
+    AvailabilityWindowResult,
     Booking,
     BookingGateway,
     ChildReservationReference,
@@ -125,8 +126,9 @@ class RecordingBookingGateway:
     async def get_available_slots(
         self,
         request: AvailabilityRequest,
-    ) -> tuple[time, ...]:
-        return self.available_slots
+    ) -> AvailabilityWindowResult:
+        status = "available" if self.available_slots else "no_slots_available"
+        return AvailabilityWindowResult(slots=self.available_slots, status=status)
 
     async def verify_customer(
         self,
@@ -718,17 +720,15 @@ async def test_empty_availability_returns_to_date_without_selecting_a_slot(
         ),
     )
 
-    assert selected.status is DialogTurnStatus.SUCCESS
-    assert context.state is BookingState.SELECTING_SERVICE
-
     result = await container.dialog_controller.handle_turn(
         context,
         DialogTurnInput(intent="deny", payload={}),
     )
 
+    assert selected.status is DialogTurnStatus.SUCCESS
     assert result.status is DialogTurnStatus.FAILURE_HANDLED
     assert result.failure_code == "no_slots_available"
-    assert context.state is BookingState.SELECTING_SERVICE
+    assert context.state is BookingState.SELECTING_DATE
     assert context.booking_date == date(2099, 8, 5)
     assert context.main_course == COURSE
     assert context.start_time is None

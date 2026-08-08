@@ -121,6 +121,16 @@ class RecordingAvailabilityHandler(CheckAvailabilityHandler):
         )
 
 
+class EmptyAvailabilityHandler(CheckAvailabilityHandler):
+    def __init__(self, *, code: str = "no_slots_available") -> None:
+        self.calls: list[BookingContext] = []
+        self.code = code
+
+    async def execute(self, context: BookingContext) -> HandlerResult:
+        self.calls.append(context)
+        return HandlerResult(HandlerOutcome.NO_SLOTS, error_code=self.code)
+
+
 class StaticResolver:
     def __init__(self, result: EntityResolutionResult) -> None:
         self.result = result
@@ -828,6 +838,67 @@ def test_booking_proactively_suggests_main_course_then_addon_then_slots(
     assert slot_response.json()["quick_replies"] == ["10:30", "11:00"]
     assert len(availability.calls) == 1
     assert availability.calls[0].conversation_id == context.conversation_id
+    assert outbound_requests == []
+
+
+def test_empty_availability_moves_ui_back_to_date_step(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    service_handler = RecordingDiscoveryCourseHandler()
+    container._handlers = tuple(
+        service_handler if isinstance(item, SearchCourseHandler) else item
+        for item in container._handlers
+    )
+    container.action_registry._check_availability_handler = EmptyAvailabilityHandler()
+    context = BookingContext(
+        "conversation-empty-availability",
+        state=BookingState.SELECTING_DURATION,
+        shop=SHOP,
+        booking_date=date(2099, 8, 15),
+        num_customer=1,
+        requested_start_time=time(7, 0),
+    )
+    container.memory_cache._contexts[context.conversation_id] = context
+
+    post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message="60 phút",
+    )
+    container.entity_resolution_coordinator = cast(
+        EntityResolutionCoordinator,
+        StaticResolver(
+            EntityResolutionResult(
+                status=EntityResolutionStatus.RESOLVED,
+                entity_kind=NLUEntityKind.COURSE,
+                dispatch_intent="select_course",
+                dispatch_payload={"course_selection": CourseSelection(main_course=COURSE)},
+                matched_count=1,
+            )
+        ),
+    )
+    post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message=COURSE.name,
+    )
+    response = post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message="Không chọn add-on",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "selecting_date"
+    assert response.json()["status"] == "failure_handled"
+    assert response.json()["quick_replies"] == ["Hôm nay", "Ngày mai"]
+    assert "chọn ngày khác" in response.json()["text"].casefold()
+    saved = container.memory_cache._contexts[context.conversation_id]
+    assert saved.booking_date == date(2099, 8, 15)
+    assert saved.main_course == COURSE
+    assert saved.requested_start_time == time(7, 0)
     assert outbound_requests == []
 
 

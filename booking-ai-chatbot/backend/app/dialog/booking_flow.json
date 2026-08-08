@@ -448,11 +448,16 @@
                                                                                                      ],
                                                                                          "instruction_template":  "duration_invalid"
                                                                                      },
-                                                                                     {
-                                                                                         "condition":  "no_slots_available",
-                                                                                         "target":  "selecting_service",
-                                                                                         "instruction_template":  "no_slots_available"
-                                                                                     },
+                                                                                    {
+                                                                                        "condition":  "no_working_shift",
+                                                                                        "target":  "selecting_date",
+                                                                                        "instruction_template":  "no_working_shift"
+                                                                                    },
+                                                                                    {
+                                                                                        "condition":  "no_slots_available",
+                                                                                        "target":  "selecting_date",
+                                                                                        "instruction_template":  "no_slots_available"
+                                                                                    },
                                                                                      {
                                                                                          "condition":  "slot_api_error",
                                                                                          "target":  "selecting_service",
@@ -474,11 +479,16 @@
                                                                                      "load_time_slots"
                                                                                  ],
                                                                      "on_fail":  [
-                                                                                     {
-                                                                                         "condition":  "no_slots_available",
-                                                                                         "target":  "selecting_service",
-                                                                                         "instruction_template":  "no_slots_available"
-                                                                                     },
+                                                                                    {
+                                                                                        "condition":  "no_working_shift",
+                                                                                        "target":  "selecting_date",
+                                                                                        "instruction_template":  "no_working_shift"
+                                                                                    },
+                                                                                    {
+                                                                                        "condition":  "no_slots_available",
+                                                                                        "target":  "selecting_date",
+                                                                                        "instruction_template":  "no_slots_available"
+                                                                                    },
                                                                                      {
                                                                                          "condition":  "slot_api_error",
                                                                                          "target":  "selecting_service",

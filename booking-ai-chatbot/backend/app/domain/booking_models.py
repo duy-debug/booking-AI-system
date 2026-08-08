@@ -447,6 +447,14 @@ class FinalAvailabilityResult:
 
 
 @dataclass(frozen=True, slots=True)
+class AvailabilityWindowResult:
+    """Contains display slots plus the business semantic for empty availability."""
+
+    slots: tuple[time, ...]
+    status: str = "available"
+
+
+@dataclass(frozen=True, slots=True)
 class CreateBookingRequest:
     """Contains the immutable payload required to create a booking."""
 
@@ -519,7 +527,7 @@ class BookingGateway(Protocol):
     async def get_available_slots(
         self,
         request: AvailabilityRequest,
-    ) -> tuple[time, ...]:
+    ) -> AvailabilityWindowResult:
         """Return display availability for the complete booking shape."""
         ...
 

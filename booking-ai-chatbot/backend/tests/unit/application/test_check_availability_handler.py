@@ -12,6 +12,7 @@ from app.application.handlers.check_availability_handler import (
 from app.domain.booking_context import BookingContext
 from app.domain.booking_models import (
     AvailabilityRequest,
+    AvailabilityWindowResult,
     Booking,
     BookingContextNotReadyError,
     BookingGateway,
@@ -76,11 +77,12 @@ class FakeBookingGateway:
     async def get_available_slots(
         self,
         request: AvailabilityRequest,
-    ) -> tuple[time, ...]:
+    ) -> AvailabilityWindowResult:
         self.availability_requests.append(request)
         if self.error is not None:
             raise self.error
-        return self.slots
+        status = "available" if self.slots else "no_slots_available"
+        return AvailabilityWindowResult(slots=self.slots, status=status)
 
     async def verify_customer(
         self,
@@ -178,6 +180,23 @@ async def test_empty_availability_is_a_typed_conflict_and_stores_no_slots() -> N
     assert context.available_slots is None
     assert context.start_time is None
     assert len(fake.availability_requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_empty_no_working_shift_maps_to_business_failure_code() -> None:
+    context = make_context()
+    fake = FakeBookingGateway(slots=())
+
+    async def no_shift(request: AvailabilityRequest) -> AvailabilityWindowResult:
+        fake.availability_requests.append(request)
+        return AvailabilityWindowResult(slots=(), status="no_working_shift")
+
+    fake.get_available_slots = no_shift  # type: ignore[method-assign]
+
+    result = await make_handler(fake).execute(context)
+
+    assert result.outcome is HandlerOutcome.NO_SLOTS
+    assert result.error_code == "no_working_shift"
 
 
 @pytest.mark.parametrize("group_size", [2, 3])

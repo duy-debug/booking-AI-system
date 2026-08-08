@@ -65,7 +65,10 @@ class SlotService:
         ]
         if not shifts:
             return self._empty_slots_response(
-                booking_date, shop_id, number_of_people
+                booking_date,
+                shop_id,
+                number_of_people,
+                availability_status="no_working_shift",
             )
 
         step = 15
@@ -137,6 +140,7 @@ class SlotService:
                 break
             cursor += step
 
+        available_slots = [slot for slot in slots if slot["available"]]
         return {
             "data": slots,
             "meta": AvailableSlotMeta(
@@ -144,6 +148,9 @@ class SlotService:
                 shop_id=shop_id,
                 number_of_people=number_of_people,
             ).model_dump(mode="json"),
+            "availability_status": (
+                "available" if available_slots else "no_slots_available"
+            ),
         }
 
     # Dự đoán yêu cầu specific có thể thay thế một reservation auto mà không làm thay đổi dữ liệu hiện tại.
@@ -302,7 +309,13 @@ class SlotService:
 
     # Tạo response rỗng nhưng vẫn giữ metadata ngày, shop và số người khi không có ca phù hợp.
     @staticmethod
-    def _empty_slots_response(booking_date: date, shop_id, number_of_people: int) -> dict:
+    def _empty_slots_response(
+        booking_date: date,
+        shop_id,
+        number_of_people: int,
+        *,
+        availability_status: str = "no_working_shift",
+    ) -> dict:
         return {
             "data": [],
             "meta": AvailableSlotMeta(
@@ -310,6 +323,7 @@ class SlotService:
                 shop_id=shop_id,
                 number_of_people=number_of_people,
             ).model_dump(mode="json"),
+            "availability_status": availability_status,
         }
 
     # Quy đổi đối tượng time sang tổng số phút tính từ đầu ngày để thuận tiện duyệt slot.

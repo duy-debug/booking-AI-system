@@ -43,6 +43,7 @@ def test_available_slots_endpoint_accepts_service_dict(monkeypatch, client: Test
                     "shop_id": str(kwargs["shop_id"]),
                     "number_of_people": 1,
                 },
+                "availability_status": "available",
             }
 
     monkeypatch.setattr(available_slots_api, "SlotService", FakeSlotService)
@@ -60,6 +61,7 @@ def test_available_slots_endpoint_accepts_service_dict(monkeypatch, client: Test
     assert response.status_code == 200
     assert response.json()["data"][0]["start_time"] == "10:00:00"
     assert response.json()["meta"]["shop_id"] == str(shop_id)
+    assert response.json()["availability_status"] == "available"
 
 
 def test_available_slots_endpoint_allows_empty_data(monkeypatch, client: TestClient):
@@ -78,6 +80,7 @@ def test_available_slots_endpoint_allows_empty_data(monkeypatch, client: TestCli
                     "shop_id": str(kwargs["shop_id"]),
                     "number_of_people": 1,
                 },
+                "availability_status": "no_working_shift",
             }
 
     monkeypatch.setattr(available_slots_api, "SlotService", FakeSlotService)
@@ -95,3 +98,42 @@ def test_available_slots_endpoint_allows_empty_data(monkeypatch, client: TestCli
     assert response.status_code == 200
     assert response.json()["data"] == []
     assert response.json()["meta"]["number_of_people"] == 1
+    assert response.json()["availability_status"] == "no_working_shift"
+
+
+def test_available_slots_endpoint_accepts_empty_fully_booked_semantic(
+    monkeypatch, client: TestClient
+):
+    shop_id = uuid4()
+    course_id = uuid4()
+
+    class FakeSlotService:
+        def __init__(self, session) -> None:
+            self.session = session
+
+        def list_available_slots(self, **kwargs):
+            return {
+                "data": [],
+                "meta": {
+                    "booking_date": "2026-08-10",
+                    "shop_id": str(kwargs["shop_id"]),
+                    "number_of_people": 1,
+                },
+                "availability_status": "no_slots_available",
+            }
+
+    monkeypatch.setattr(available_slots_api, "SlotService", FakeSlotService)
+
+    response = client.get(
+        f"/api/shops/{shop_id}/available-slots",
+        params={
+            "booking_date": "2026-08-10",
+            "number_of_people": 1,
+            "main_course_id": str(course_id),
+            "therapist_request_type": "none",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == []
+    assert response.json()["availability_status"] == "no_slots_available"

@@ -9,6 +9,7 @@ import pytest
 from app.application.handlers.search_course_handler import SearchCourseHandler
 from app.domain.booking_models import (
     AvailabilityRequest,
+    AvailabilityWindowResult,
     Booking,
     BookingGateway,
     Course,
@@ -64,7 +65,7 @@ class FakeBookingGateway:
     async def get_available_slots(
         self,
         request: AvailabilityRequest,
-    ) -> tuple[time, ...]:
+    ) -> AvailabilityWindowResult:
         raise AssertionError("Unexpected get_available_slots call.")
 
     async def verify_customer(

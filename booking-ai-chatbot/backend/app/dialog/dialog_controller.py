@@ -832,6 +832,7 @@ async def _process_bound_chat_message(
         if nlu_result.intent == "repeat_last_question" and context.last_failure_code in {
             "slot_api_error",
             "no_slots_available",
+            "no_working_shift",
         }:
             return await _retry_availability(container=container, context=context)
         return _global_intent_response(nlu_result.intent, context)
@@ -1614,6 +1615,29 @@ async def _handle_discovery(
                 container.handler(CheckAvailabilityHandler),
             )
             result = await availability_handler.execute(context)
+            if result.outcome is HandlerOutcome.NO_SLOTS:
+                context.last_failure_code = result.error_code
+                context.change_booking_date(context.booking_date)
+                if result.error_code == "no_working_shift":
+                    if context.shop is not None and context.booking_date is not None:
+                        return _handled_response(
+                            context,
+                            (
+                                f"{context.shop.name} hiện chưa phục vụ đặt lịch vào ngày "
+                                f"{context.booking_date.strftime('%d/%m/%Y')}."
+                                " Vui lòng chọn ngày khác."
+                            ),
+                        )
+                    return _handled_response(
+                        context,
+                        "Ngày đã chọn hiện chưa có lịch phục vụ. Vui lòng chọn ngày khác.",
+                    )
+                if result.error_code == "no_slots_available":
+                    return _handled_response(
+                        context,
+                        "Ngày đã chọn hiện không còn khung giờ trống. Vui lòng chọn ngày khác.",
+                    )
+                raise RuntimeError(result.error_code or result.outcome.value)
             slots = _handler_items(result, "slots", clock_time)
             context.set_available_slots(tuple(slots))
             context.enter_time_selection()
@@ -1852,6 +1876,29 @@ async def _retry_availability(
             container.handler(CheckAvailabilityHandler),
         )
         result = await handler.execute(context)
+        if result.outcome is HandlerOutcome.NO_SLOTS:
+            context.last_failure_code = result.error_code
+            context.change_booking_date(context.booking_date)
+            if result.error_code == "no_working_shift":
+                if context.shop is not None and context.booking_date is not None:
+                    return _handled_response(
+                        context,
+                        (
+                            f"{context.shop.name} hiện chưa phục vụ đặt lịch vào ngày "
+                            f"{context.booking_date.strftime('%d/%m/%Y')}. "
+                            "Vui lòng chọn ngày khác."
+                        ),
+                    )
+                return _handled_response(
+                    context,
+                    "Ngày đã chọn hiện chưa có lịch phục vụ. Vui lòng chọn ngày khác.",
+                )
+            if result.error_code == "no_slots_available":
+                return _handled_response(
+                    context,
+                    "Ngày đã chọn hiện không còn khung giờ trống. Vui lòng chọn ngày khác.",
+                )
+            raise RuntimeError(result.error_code or result.outcome.value)
         slots = _handler_items(result, "slots", clock_time)
         context.set_available_slots(tuple(slots))
         context.enter_time_selection()
@@ -1885,7 +1932,11 @@ def _global_intent_response(intent: str, context: BookingContext) -> DialogRespo
         text = "Mình đã bắt đầu lại. Bạn hãy chọn cửa hàng."
     else:
         prompt = _UNRESOLVED_TEXT.get(context.state, _DEFAULT_UNRESOLVED_TEXT)
-        if context.last_failure_code in {"slot_api_error", "no_slots_available"}:
+        if context.last_failure_code in {
+            "slot_api_error",
+            "no_slots_available",
+            "no_working_shift",
+        }:
             text = (
                 "Hiện tại tôi chưa tải được khung giờ từ POS. Thông tin cửa hàng, ngày, "
                 "số người và liệu trình vẫn được giữ. Bạn có thể thử lại hoặc chọn liệu trình khác."

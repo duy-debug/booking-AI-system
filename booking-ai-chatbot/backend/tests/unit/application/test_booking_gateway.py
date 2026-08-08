@@ -10,6 +10,7 @@ import pytest
 
 from app.domain.booking_models import (
     AvailabilityRequest,
+    AvailabilityWindowResult,
     Booking,
     BookingGateway,
     ChildReservationReference,
@@ -113,9 +114,9 @@ class FakeBookingGateway:
     async def get_available_slots(
         self,
         request: AvailabilityRequest,
-    ) -> tuple[time, ...]:
+    ) -> AvailabilityWindowResult:
         self.availability_requests.append(request)
-        return (START_TIME,)
+        return AvailabilityWindowResult(slots=(START_TIME,), status="available")
 
     async def verify_customer(
         self,
@@ -282,7 +283,7 @@ async def test_fake_gateway_supports_complete_contract_and_records_dtos() -> Non
     cancelled = await gateway.cancel_booking(BOOKING_ID)
 
     assert courses == [COURSE]
-    assert slots == (START_TIME,)
+    assert slots == AvailabilityWindowResult(slots=(START_TIME,), status="available")
     assert verification.member_rank == "gold"
     assert final.available is True
     assert created.booking is BOOKING
