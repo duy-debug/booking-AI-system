@@ -68,7 +68,12 @@ class RecordingSearchShopHandler(SearchShopHandler):
     def __init__(self) -> None:
         self.calls: list[str | None] = []
 
-    async def execute(self, query: str | None = None) -> HandlerResult:
+    async def execute(
+        self,
+        query: str | None = None,
+        *,
+        criteria: object | None = None,
+    ) -> HandlerResult:
         self.calls.append(query)
         return HandlerResult(HandlerOutcome.SUCCESS, {"shops": (SHOP,)})
 
@@ -77,7 +82,12 @@ class RecordingDiscoveryShopHandler(SearchShopHandler):
     def __init__(self) -> None:
         self.calls: list[str | None] = []
 
-    async def execute(self, query: str | None = None) -> HandlerResult:
+    async def execute(
+        self,
+        query: str | None = None,
+        *,
+        criteria: object | None = None,
+    ) -> HandlerResult:
         self.calls.append(query)
         shops = [
             SHOP,
@@ -344,6 +354,54 @@ def test_shop_discovery_enters_shop_selection_without_selecting_a_candidate(
     assert "Komorebi Huế" in body["text"]
     assert handler.calls == [None]
     assert context.shop is None
+    assert outbound_requests == []
+
+
+def test_shop_discovery_does_not_truncate_shop_list(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+
+    class NineShopHandler(SearchShopHandler):
+        def __init__(self) -> None:
+            self.calls: list[str | None] = []
+
+        async def execute(
+            self,
+            query: str | None = None,
+            *,
+            criteria: object | None = None,
+        ) -> HandlerResult:
+            self.calls.append(query)
+            shops = tuple(
+                Shop(
+                    shop_id=UUID(f"00000000-0000-0000-0000-00000000000{index}"),
+                    name=f"Komorebi Shop {index}",
+                    address=f"Khu vực {index}",
+                )
+                for index in range(1, 10)
+            )
+            return HandlerResult(HandlerOutcome.SUCCESS, {"shops": shops})
+
+    handler = NineShopHandler()
+    container._handlers = tuple(
+        handler if isinstance(item, SearchShopHandler) else item for item in container._handlers
+    )
+
+    response = post_message(
+        client,
+        conversation_id="conversation-list-many-shops",
+        message="cho tôi xem danh sách cửa hàng",
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["state"] == "selecting_shop"
+    assert body["metadata"] == {"item_count": 9}
+    assert body["quick_replies"] == [f"Komorebi Shop {index}" for index in range(1, 10)]
+    assert "8/9" not in body["text"]
+    assert "Komorebi Shop 9" in body["text"]
     assert outbound_requests == []
 
 

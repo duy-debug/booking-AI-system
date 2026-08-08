@@ -49,6 +49,17 @@ class TherapistBrief(BaseModel):
     name: str
 
 
+class PublicTherapistResponse(BaseModel):
+
+    model_config = ConfigDict(from_attributes=True)
+
+    therapist_id: UUID
+    shop_id: UUID
+    name: str
+    gender: str
+    is_active: bool
+
+
 # Ca làm việc rút gọn trong lịch cá nhân của therapist.
 class TherapistScheduleShiftResponse(BaseModel):
     start_time: time | None

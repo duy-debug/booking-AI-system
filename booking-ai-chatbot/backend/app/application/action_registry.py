@@ -38,6 +38,7 @@ from app.domain.booking_models import (
     InvalidIdempotencyKeyError,
     PhoneNotConfirmedError,
     Shop,
+    ShopSearchCriteria,
     SlotConflictError,
     TherapistNotAllowedForGroupError,
     TherapistPreference,
@@ -644,11 +645,19 @@ class ActionRegistry:
             raise InvalidActionInputError("Requested start time is invalid.")
         context.booking_context.requested_booking_date = requested_date
         context.booking_context.requested_start_time = requested_time
-        result = await self._search_shop_handler.execute()
+        result = await self._search_shop_handler.execute(
+            criteria=_shop_search_criteria(context.booking_context)
+        )
+        if result.outcome is HandlerOutcome.NOT_FOUND:
+            context.booking_context.last_failure_code = result.error_code
+            context.booking_context.suggested_shops = ()
+            context.booking_context.suggested_shops_loaded = True
+            return ActionResult("search_shop", [])
         _ensure_success(result)
         shops = _typed_result_items(result, "shops", Shop)
         context.booking_context.suggested_shops = tuple(shops)
         context.booking_context.suggested_shops_loaded = True
+        context.booking_context.last_failure_code = None
         return ActionResult("search_shop", shops)
 
     # Áp dụng shop đã resolve vào context và clear các dữ liệu phụ thuộc.
@@ -993,6 +1002,19 @@ def _typed_result_items(
 
 
 # Áp dụng context_updates từ handler sau khi đã xác thực field thuộc BookingContext.
+def _shop_search_criteria(context: BookingContext) -> ShopSearchCriteria:
+    return ShopSearchCriteria(
+        booking_date=context.requested_booking_date or context.booking_date,
+        requested_start_time=context.requested_start_time or context.start_time,
+        num_customer=context.requested_num_customer or context.num_customer,
+        duration_minutes=context.requested_duration_minutes or context.duration_minutes,
+        requested_main_course_name=context.requested_main_course_name,
+        requested_addon_name=context.requested_addon_name,
+        requested_therapist_name=context.requested_therapist_name,
+        requested_therapist_gender=context.requested_therapist_gender,
+    )
+
+
 def _apply_context_updates(
     context: BookingContext,
     result: HandlerResult,

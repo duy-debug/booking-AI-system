@@ -23,6 +23,12 @@ class TestPublicShop:
         ids = [c["course_id"] for c in r.json()["data"]]
         assert test_data["course_id"] in ids
 
+    def test_list_public_therapists(self, client: TestClient, test_data: dict):
+        r = client.get(f"/api/shops/{test_data['shop_id']}/therapists")
+        assert r.status_code == 200
+        ids = [t["therapist_id"] for t in r.json()["data"]]
+        assert test_data["therapist_id"] in ids
+
     def test_available_slots(self, client: TestClient, test_data: dict):
         r = client.get(
             f"/api/shops/{test_data['shop_id']}/available-slots",

@@ -35,7 +35,11 @@ from app.dialog.nlu import (
 from app.dialog.response_generator import ResponseGenerator
 from app.dialog.state_machine import StateMachine
 from app.domain.booking_context import BookingContext
-from app.domain.booking_models import BookingGateway, TherapistAvailabilityGateway
+from app.domain.booking_models import (
+    BookingGateway,
+    TherapistAvailabilityGateway,
+    TherapistCatalogGateway,
+)
 from app.domain.booking_state import BookingState
 from app.infrastructure.context_store import ContextStore, Settings
 from app.infrastructure.gemini_client import GeminiClient, LLMGateway
@@ -233,7 +237,11 @@ async def create_application_container(
             base_url=settings.pos_base_url,
             timeout_seconds=settings.pos_timeout_seconds,
         )
-        search_shop_handler = SearchShopHandler(booking_gateway)
+        search_shop_handler = SearchShopHandler(
+            booking_gateway,
+            therapist_catalog_gateway=cast(TherapistCatalogGateway, booking_gateway),
+            therapist_availability_gateway=cast(TherapistAvailabilityGateway, booking_gateway),
+        )
         search_course_handler = SearchCourseHandler(booking_gateway)
         check_availability_handler = CheckAvailabilityHandler(booking_gateway)
         check_customer_handler = CheckCustomerHandler(booking_gateway)

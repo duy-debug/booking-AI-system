@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from uuid import UUID
 
 # Service cho Therapist — tạo, sửa, xem danh sách therapist trong shop; kiểm tra shop tồn tại
@@ -7,7 +9,7 @@ from app.core.exceptions import AppError
 from app.db.models.therapist import Therapist
 from app.repositories.therapist_repository import TherapistRepository
 from app.repositories.shop_repository import ShopRepository
-from app.schemas.therapist import TherapistCreate, TherapistUpdate
+from app.schemas.therapist import PublicTherapistResponse, TherapistCreate, TherapistUpdate
 
 
 class TherapistService:
@@ -22,6 +24,22 @@ class TherapistService:
         if not self.shop_repo.find_by_id(shop_id):
             raise AppError(404, code="SHOP_NOT_FOUND", detail="Không tìm thấy shop")
         return self.repo.find_by_shop(shop_id, is_active=is_active)
+
+    # Trả therapist public tối thiểu để chatbot filter shop theo therapist ownership.
+    def list_public(self, shop_id: UUID, is_active: bool = True) -> list[PublicTherapistResponse]:
+        therapists = self.list(shop_id, is_active=is_active)
+        return [
+            PublicTherapistResponse.model_validate(
+                {
+                    "therapist_id": therapist.therapist_id,
+                    "shop_id": therapist.shop_id,
+                    "name": therapist.name,
+                    "gender": therapist.gender,
+                    "is_active": therapist.is_active,
+                }
+            )
+            for therapist in therapists
+        ]
 
     # Chi tiết therapist theo ID — báo lỗi 404 nếu không tìm thấy
     def get(self, therapist_id: UUID) -> Therapist:

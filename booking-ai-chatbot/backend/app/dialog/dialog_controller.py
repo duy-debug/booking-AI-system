@@ -48,6 +48,7 @@ from app.domain.booking_models import (
     Course,
     CourseType,
     Shop,
+    ShopSearchCriteria,
     TherapistAvailabilityGateway,
     TherapistPreference,
 )
@@ -1421,7 +1422,14 @@ async def _with_proactive_suggestions(
             shops = list(context.suggested_shops)
             if not context.suggested_shops_loaded:
                 shop_handler = cast(SearchShopHandler, container.handler(SearchShopHandler))
-                result = await shop_handler.execute()
+                result = await shop_handler.execute(criteria=_shop_search_criteria(context))
+                if result.outcome is HandlerOutcome.NOT_FOUND:
+                    context.last_failure_code = result.error_code
+                    return _shop_not_found_response(
+                        context,
+                        result.error_code,
+                        filtered=False,
+                    )
                 shops = _handler_items(result, "shops", Shop)
             return _shop_catalog_response(context, shops, filtered=False)
 
@@ -1568,8 +1576,18 @@ async def _handle_discovery(
             if query is not None and not isinstance(query, str):
                 return _handled_response(context, "Vui lòng nhập lại khu vực cần tìm.")
             shop_handler = cast(SearchShopHandler, container.handler(SearchShopHandler))
-            result = await shop_handler.execute(query)
+            result = await shop_handler.execute(
+                query,
+                criteria=_shop_search_criteria(context),
+            )
             shops = _handler_items(result, "shops", Shop, allow_not_found=True)
+            if not shops and result.outcome is HandlerOutcome.NOT_FOUND:
+                context.last_failure_code = result.error_code
+                return _shop_not_found_response(
+                    context,
+                    result.error_code,
+                    filtered=query is not None,
+                )
             if shops and context.state is BookingState.IDLE:
                 context.enter_shop_selection()
             return _shop_catalog_response(context, shops, filtered=query is not None)
@@ -1692,15 +1710,84 @@ def _shop_catalog_response(
         )
         return _handled_response(context, message)
     names = tuple(shop.name for shop in shops)
-    visible = names[:8]
-    lines = "\n".join(f"{index}. {name}" for index, name in enumerate(visible, 1))
+    lines = "\n".join(f"{index}. {name}" for index, name in enumerate(names, 1))
     suffix = (
         f"\nĐang hiển thị 8/{len(names)} kết quả; bạn có thể nhập tên hoặc khu vực."
         if len(names) > 8
         else ""
     )
     text = f"Komorebi hiện có các cửa hàng:\n{lines}{suffix}\nBạn muốn chọn cửa hàng nào?"
-    return _catalog_response(context, text, visible, len(names))
+    text = text.replace(suffix, "")
+    return _catalog_response(context, text, names, len(names))
+
+
+# Gom requested/confirmed field an toàn để filter shop mà không tự commit booking data.
+def _shop_search_criteria(context: BookingContext) -> ShopSearchCriteria:
+    return ShopSearchCriteria(
+        booking_date=context.requested_booking_date or context.booking_date,
+        requested_start_time=context.requested_start_time or context.start_time,
+        num_customer=context.requested_num_customer or context.num_customer,
+        duration_minutes=context.requested_duration_minutes or context.duration_minutes,
+        requested_main_course_name=context.requested_main_course_name,
+        requested_addon_name=context.requested_addon_name,
+        requested_therapist_name=context.requested_therapist_name,
+        requested_therapist_gender=context.requested_therapist_gender,
+    )
+
+
+# Trả thông báo business khi không còn shop phù hợp với constraint đã biết.
+def _shop_not_found_response(
+    context: BookingContext,
+    error_code: str | None,
+    *,
+    filtered: bool,
+) -> DialogResponse:
+    if error_code == "service_not_supported_in_any_shop" and context.requested_main_course_name:
+        return _handled_response(
+            context,
+            f"Hiện chưa có cửa hàng nào cung cấp liệu trình {context.requested_main_course_name}.",
+        )
+    if error_code == "addon_not_supported_in_any_shop" and context.requested_addon_name:
+        return _handled_response(
+            context,
+            f"Hiện chưa có cửa hàng nào hỗ trợ add-on {context.requested_addon_name}.",
+        )
+    if error_code == "therapist_not_supported_in_any_shop" and context.requested_therapist_name:
+        return _handled_response(
+            context,
+            (
+                "Hiện chưa tìm thấy cửa hàng nào có kỹ thuật viên "
+                f"{context.requested_therapist_name}. "
+                "Bạn có muốn đổi kỹ thuật viên hoặc xem toàn bộ cửa hàng không?"
+            ),
+        )
+    if (
+        error_code == "therapist_gender_not_supported_in_any_shop"
+        and context.requested_therapist_gender
+    ):
+        return _handled_response(
+            context,
+            "Hiện chưa tìm thấy cửa hàng nào có kỹ thuật viên đúng giới tính bạn yêu cầu.",
+        )
+    if (
+        error_code == "requested_shop_time_not_available"
+        and context.requested_start_time is not None
+    ):
+        return _handled_response(
+            context,
+            (
+                f"Hiện chưa có cửa hàng nào còn đúng khung giờ "
+                f"{context.requested_start_time.strftime('%H:%M')} "
+                "với các điều kiện bạn đã cung cấp. "
+                "Bạn muốn đổi thời gian hoặc bớt điều kiện trước không?"
+            ),
+        )
+    message = (
+        "Không tìm thấy cửa hàng trong khu vực này. Vui lòng thử tên hoặc khu vực khác."
+        if filtered
+        else "POS hiện không trả về cửa hàng nào."
+    )
+    return _handled_response(context, message)
 
 
 # Render danh sách course/add-on đọc từ POS cho intent discovery.
@@ -1794,7 +1881,7 @@ def _catalog_response(
         state=context.state,
         status=DialogTurnStatus.SUCCESS,
         quick_replies=quick_replies,
-        metadata={"item_count": item_count},
+        metadata={"item_count": item_count, "quick_reply_limit": len(quick_replies)},
     )
 
 
@@ -2003,7 +2090,7 @@ def _with_state_recovery_suggestions(
 def _state_recovery_quick_replies(context: BookingContext) -> tuple[str, ...]:
     """Return safe choices derived from the current state and validated context."""
     if context.state is BookingState.SELECTING_SHOP:
-        names = tuple(shop.name for shop in context.suggested_shops[:8])
+        names = tuple(shop.name for shop in context.suggested_shops)
         return names or ("Xem danh sách cửa hàng",)
     if context.state is BookingState.SELECTING_SERVICE:
         if context.main_course is not None:

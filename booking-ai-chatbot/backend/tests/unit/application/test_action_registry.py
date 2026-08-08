@@ -397,7 +397,12 @@ class FakeSearchShopHandler(SearchShopHandler):
         self.shops = [SHOP]
         self.error = error
 
-    async def execute(self, query: str | None = None) -> HandlerResult:
+    async def execute(
+        self,
+        query: str | None = None,
+        *,
+        criteria: object | None = None,
+    ) -> HandlerResult:
         self.calls.append(query)
         if self.error is not None:
             raise self.error
@@ -543,7 +548,7 @@ async def test_search_shop_binding_uses_default_query_without_context_mutation()
     assert result.output == tuple(handler.shops)
     assert booking_context.state is BookingState.IDLE
     assert booking_context.shop is None
-    assert booking_context.last_failure_code == "keep"
+    assert booking_context.last_failure_code is None
 
 
 @pytest.mark.asyncio

@@ -23,6 +23,7 @@ _SAFE_METADATA_KEYS = frozenset(
         "response_type",
         "source_count",
         "item_count",
+        "quick_reply_limit",
     }
 )
 _UNHANDLED_FAILURE_TEXT = "Đã có lỗi xảy ra. Vui lòng thử lại hoặc liên hệ cửa hàng."
@@ -77,10 +78,13 @@ class DialogResponse:
     def __post_init__(self) -> None:
         if not isinstance(self.text, str) or not self.text.strip():
             raise ValueError("Dialog response text must not be empty.")
+        limit = self.metadata.get("quick_reply_limit", 8)
+        if type(limit) is not int:
+            raise TypeError("Dialog response quick_reply_limit metadata must be an integer.")
         object.__setattr__(
             self,
             "quick_replies",
-            _normalize_quick_replies(self.quick_replies),
+            _normalize_quick_replies(self.quick_replies, limit=limit),
         )
         object.__setattr__(self, "metadata", _allowlisted_metadata(self.metadata))
 

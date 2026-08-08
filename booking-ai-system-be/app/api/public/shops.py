@@ -15,6 +15,8 @@ from app.schemas.course import PublicCourseResponse
 from app.schemas.shop import PublicShopListResponse, PublicShopResponse
 from app.services.course_service import CourseService
 from app.services.shop_service import ShopService
+from app.services.therapist_service import TherapistService
+from app.schemas.therapist import PublicTherapistResponse
 
 router = APIRouter(prefix="/api/shops", tags=["public-shops"])
 
@@ -75,3 +77,28 @@ def list_courses(
         result_count=len(courses),
     )
     return CollectionResponse(data=courses)
+
+
+# Danh sách therapist công khai trong shop — chỉ phục vụ matching an toàn ở bước chọn shop.
+@router.get(
+    "/{shop_id}/therapists",
+    response_model=CollectionResponse[PublicTherapistResponse],
+)
+def list_therapists(
+    shop_id: str,
+    is_active: bool | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    uid = parse_uuid(shop_id, "shop")
+    effective_active = is_active if is_active is not None else True
+    service = TherapistService(db)
+    therapists = service.list_public(uid, is_active=effective_active)
+    log_event(
+        logging.INFO,
+        "TherapistAPI",
+        "pos_request_validated",
+        operation="search_shop_therapists",
+        validated_fields=["shop_id", "is_active"],
+        result_count=len(therapists),
+    )
+    return CollectionResponse(data=therapists)

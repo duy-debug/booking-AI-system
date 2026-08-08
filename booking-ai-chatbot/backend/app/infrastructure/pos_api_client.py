@@ -42,6 +42,7 @@ from app.domain.booking_models import (
     POSUnexpectedStatusError,
     POSValidationError,
     Shop,
+    ShopTherapist,
     SlotConflictError,
     TherapistPreference,
     TherapistPreferenceType,
@@ -115,6 +116,26 @@ class PosApiClient:
         items = _list(root, "data")
         _validate_shop_meta(root)
         return [_parse_shop(item, index) for index, item in enumerate(items)]
+
+    # Tải therapist active của một shop để hỗ trợ deterministic matching ở bước chọn shop.
+    async def search_shop_therapists(
+        self,
+        shop_id: UUID,
+        *,
+        is_active: bool = True,
+    ) -> list[ShopTherapist]:
+        payload = await self._request_json(
+            operation="search_shop_therapists",
+            method="GET",
+            path=f"/api/shops/{shop_id}/therapists",
+            params={"is_active": str(is_active).lower()},
+            expected_status=200,
+        )
+        items = _list(_mapping(payload, "therapist response"), "data")
+        return [
+            _parse_shop_therapist(item, index, expected_shop_id=shop_id)
+            for index, item in enumerate(items)
+        ]
 
     # Lấy danh sách course/add-on của một shop từ POS theo loại và trạng thái active.
     async def search_courses(
@@ -790,6 +811,26 @@ def _parse_shop(value: object, index: int) -> Shop:
 
 
 # Parse service/course item từ POS thành Course domain object.
+def _parse_shop_therapist(
+    value: object,
+    index: int,
+    *,
+    expected_shop_id: UUID,
+) -> ShopTherapist:
+    item = _mapping(value, f"therapist data[{index}]")
+    shop_id = _uuid(item, "shop_id")
+    if shop_id != expected_shop_id:
+        raise POSResponseMappingError(
+            f"POS therapist data[{index}] contains a different shop_id."
+        )
+    return ShopTherapist(
+        therapist_id=_uuid(item, "therapist_id"),
+        shop_id=shop_id,
+        name=_string(item, "name"),
+        gender=_string(item, "gender"),
+    )
+
+
 def _parse_service(
     value: object,
     index: int,

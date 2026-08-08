@@ -89,7 +89,12 @@ class FakeSearchShopHandler(SearchShopHandler):
     def __init__(self) -> None:
         self.calls = 0
 
-    async def execute(self, query: str | None = None) -> HandlerResult:
+    async def execute(
+        self,
+        query: str | None = None,
+        *,
+        criteria: object | None = None,
+    ) -> HandlerResult:
         self.calls += 1
         return HandlerResult(HandlerOutcome.SUCCESS, {"shops": ()})
 

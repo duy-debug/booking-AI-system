@@ -71,7 +71,12 @@ class RecordingSearchShopHandler(SearchShopHandler):
     def __init__(self) -> None:
         self.calls: list[str | None] = []
 
-    async def execute(self, query: str | None = None) -> HandlerResult:
+    async def execute(
+        self,
+        query: str | None = None,
+        *,
+        criteria: object | None = None,
+    ) -> HandlerResult:
         self.calls.append(query)
         return HandlerResult(HandlerOutcome.SUCCESS, {"shops": (SHOP,)})
 

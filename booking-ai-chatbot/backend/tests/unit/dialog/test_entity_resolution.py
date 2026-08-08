@@ -79,7 +79,12 @@ class FakeSearchShopHandler:
         self.calls = 0
         self.received_query: str | None = None
 
-    async def execute(self, query: str | None = None) -> HandlerResult:
+    async def execute(
+        self,
+        query: str | None = None,
+        *,
+        criteria: object | None = None,
+    ) -> HandlerResult:
         self.calls += 1
         self.received_query = query
         if self.error is not None:

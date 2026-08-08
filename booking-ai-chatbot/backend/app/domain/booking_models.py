@@ -118,6 +118,16 @@ class Shop:
 
 
 @dataclass(frozen=True, slots=True)
+class ShopTherapist:
+    """Represents one therapist owned by a shop for deterministic matching."""
+
+    therapist_id: UUID
+    shop_id: UUID
+    name: str
+    gender: str
+
+
+@dataclass(frozen=True, slots=True)
 class Course:
     """Represents a POS course offered by a shop."""
 
@@ -321,6 +331,20 @@ class CourseSearchRequest:
     shop_id: UUID
     course_type: CourseType | None = None
     is_active: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class ShopSearchCriteria:
+    """Contains safely-evaluable constraints for the shop selection step."""
+
+    booking_date: date | None = None
+    requested_start_time: time | None = None
+    num_customer: int | None = None
+    duration_minutes: int | None = None
+    requested_main_course_name: str | None = None
+    requested_addon_name: str | None = None
+    requested_therapist_name: str | None = None
+    requested_therapist_gender: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -578,6 +602,19 @@ class TherapistAvailabilityGateway(Protocol):
         request: AvailableTherapistRequest,
     ) -> list[TherapistPreference]:
         """Return POS-authoritative therapists available for one selected window."""
+        ...
+
+
+class TherapistCatalogGateway(Protocol):
+    """Optional POS capability for deterministic shop filtering by therapist ownership."""
+
+    async def search_shop_therapists(
+        self,
+        shop_id: UUID,
+        *,
+        is_active: bool = True,
+    ) -> list[ShopTherapist]:
+        """Return active therapists belonging to one shop."""
         ...
 
 
