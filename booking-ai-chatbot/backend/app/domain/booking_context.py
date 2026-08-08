@@ -47,6 +47,7 @@ class BookingContext:
     customer_id: str | None = None
     booking_date: date | None = None
     requested_booking_date: date | None = None
+    last_unavailable_date: date | None = None
     start_time: time | None = None
     requested_start_time: time | None = None
     num_customer: int | None = None
@@ -208,6 +209,7 @@ class BookingContext:
             return
         self.clear_booking_attempt()
         self.shop = shop
+        self.last_unavailable_date = None
         self.suggested_shops = ()
         self.suggested_shops_loaded = False
         self._clear_course_and_availability()
@@ -233,6 +235,7 @@ class BookingContext:
             return
         self.clear_booking_attempt()
         self.num_customer = value
+        self.last_unavailable_date = None
         self.available_slots = None
         self.start_time = None
         self.therapist_verified = False
@@ -248,6 +251,7 @@ class BookingContext:
             return
         self.clear_booking_attempt()
         self.duration_minutes = value
+        self.last_unavailable_date = None
         self._clear_course_and_availability()
         self.course_selection_mode = CourseSelectionMode.MAIN
 
@@ -258,6 +262,7 @@ class BookingContext:
             self.clear_booking_attempt()
         self.main_course = selection.main_course
         self.addons = selection.addons
+        self.last_unavailable_date = None
         self._clear_availability_and_therapist()
         self.course_selection_mode = (
             CourseSelectionMode.ADDON if not selection.addons else CourseSelectionMode.NONE
@@ -358,6 +363,7 @@ class BookingContext:
     def change_shop(self, shop: Shop | None) -> None:
         """Replace the shop and clear only shop-dependent booking data."""
         self.shop = shop
+        self.last_unavailable_date = None
         self.main_course = None
         self.addons = ()
         self._clear_availability_and_therapist()
@@ -379,6 +385,7 @@ class BookingContext:
         if value is not None and not 1 <= value <= 3:
             raise InvalidCustomerCountError("Number of customers must be between one and three.")
         self.num_customer = value
+        self.last_unavailable_date = None
         self._clear_availability_and_therapist()
         self._clear_booking_result()
 
@@ -388,6 +395,7 @@ class BookingContext:
         if value is not None and (value <= 0 or value % 15 != 0):
             raise InvalidDurationError("Booking duration must be positive and divisible by 15.")
         self.duration_minutes = value
+        self.last_unavailable_date = None
         self.main_course = None
         self.addons = ()
         self._clear_availability_and_therapist()
@@ -402,6 +410,7 @@ class BookingContext:
         selection: CourseSelection | None,
     ) -> None:
         """Replace the course selection while preserving its selected shop."""
+        self.last_unavailable_date = None
         if selection is None:
             self.main_course = None
             self.addons = ()
@@ -484,6 +493,7 @@ class BookingContext:
         self.customer = None
         self.booking_date = None
         self.requested_booking_date = None
+        self.last_unavailable_date = None
         self.start_time = None
         self.requested_start_time = None
         self.num_customer = None

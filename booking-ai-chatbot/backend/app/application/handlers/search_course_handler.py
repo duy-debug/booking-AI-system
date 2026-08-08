@@ -45,6 +45,7 @@ class SearchCourseHandler:
 # Chuẩn hóa text tiếng Việt để matching course không phụ thuộc dấu/case.
 def _normalize(value: str) -> str:
     decomposed = unicodedata.normalize("NFD", value.strip().casefold())
-    return "".join(
+    normalized = "".join(
         character for character in decomposed if unicodedata.category(character) != "Mn"
-    ).replace("đ", "d")
+    )
+    return normalized.replace("đ", "d")

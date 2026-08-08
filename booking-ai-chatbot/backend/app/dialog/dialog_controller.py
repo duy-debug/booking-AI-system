@@ -512,6 +512,8 @@ class DialogController:
 
         self._state_machine.apply_failure(booking_context, failure)
         booking_context.last_failure_code = failure_code
+        if failure_code in {"no_slots_available", "no_working_shift"}:
+            booking_context.last_unavailable_date = booking_context.booking_date
         return DialogTurnResult(
             status=DialogTurnStatus.FAILURE_HANDLED,
             initial_state=initial_state,
@@ -1243,6 +1245,12 @@ async def _next_requested_turn(
     elif context.state is BookingState.SELECTING_PEOPLE and context.requested_num_customer:
         requested_people, context.requested_num_customer = context.requested_num_customer, None
         direct = ("select_people", "num_customer", {"num_customer": requested_people})
+    elif (
+        context.state is BookingState.SELECTING_PEOPLE
+        and _should_resume_recovery(context)
+        and context.num_customer is not None
+    ):
+        direct = ("select_people", "num_customer", {"num_customer": context.num_customer})
     elif context.state is BookingState.SELECTING_DURATION:
         if context.requested_duration_minutes is not None:
             requested_duration, context.requested_duration_minutes = (
@@ -1253,6 +1261,12 @@ async def _next_requested_turn(
                 "select_duration",
                 "duration_minutes",
                 {"duration_minutes": requested_duration},
+            )
+        elif _should_resume_recovery(context) and context.duration_minutes is not None:
+            direct = (
+                "select_duration",
+                "duration_minutes",
+                {"duration_minutes": context.duration_minutes},
             )
         elif context.requested_main_course_name:
             course_query, context.requested_main_course_name = (
@@ -1272,6 +1286,12 @@ async def _next_requested_turn(
             entity = (addon_query, NLUEntityKind.COURSE)
         elif context.main_course is not None and context.requested_skip_addon:
             context.requested_skip_addon = False
+            direct = ("deny", "skip_addon", {})
+        elif (
+            _should_resume_recovery(context)
+            and context.main_course is not None
+            and context.course_selection_mode is CourseSelectionMode.NONE
+        ):
             direct = ("deny", "skip_addon", {})
     elif context.state is BookingState.SELECTING_TIME and context.requested_start_time:
         requested_time, context.requested_start_time = context.requested_start_time, None
@@ -1635,6 +1655,7 @@ async def _handle_discovery(
             result = await availability_handler.execute(context)
             if result.outcome is HandlerOutcome.NO_SLOTS:
                 context.last_failure_code = result.error_code
+                context.last_unavailable_date = context.booking_date
                 context.change_booking_date(context.booking_date)
                 if result.error_code == "no_working_shift":
                     if context.shop is not None and context.booking_date is not None:
@@ -1660,6 +1681,7 @@ async def _handle_discovery(
             context.set_available_slots(tuple(slots))
             context.enter_time_selection()
             context.last_failure_code = None
+            context.last_unavailable_date = None
             labels = tuple(slot.strftime("%H:%M") for slot in slots)
             return _catalog_response(
                 context,
@@ -1965,6 +1987,7 @@ async def _retry_availability(
         result = await handler.execute(context)
         if result.outcome is HandlerOutcome.NO_SLOTS:
             context.last_failure_code = result.error_code
+            context.last_unavailable_date = context.booking_date
             context.change_booking_date(context.booking_date)
             if result.error_code == "no_working_shift":
                 if context.shop is not None and context.booking_date is not None:
@@ -1990,6 +2013,7 @@ async def _retry_availability(
         context.set_available_slots(tuple(slots))
         context.enter_time_selection()
         context.last_failure_code = None
+        context.last_unavailable_date = None
         labels = tuple(slot.strftime("%H:%M") for slot in slots)
         return _catalog_response(
             context,
@@ -2092,6 +2116,8 @@ def _state_recovery_quick_replies(context: BookingContext) -> tuple[str, ...]:
     if context.state is BookingState.SELECTING_SHOP:
         names = tuple(shop.name for shop in context.suggested_shops)
         return names or ("Xem danh sách cửa hàng",)
+    if context.state is BookingState.SELECTING_DATE:
+        return _date_recovery_quick_replies(context)
     if context.state is BookingState.SELECTING_SERVICE:
         if context.main_course is not None:
             return ("Không chọn add-on", "Xem danh sách add-on")
@@ -2099,6 +2125,32 @@ def _state_recovery_quick_replies(context: BookingContext) -> tuple[str, ...]:
     if context.state is BookingState.SELECTING_TIME:
         return tuple(slot.strftime("%H:%M") for slot in (context.available_slots or ()))
     return _RECOVERY_QUICK_REPLIES.get(context.state, ())
+
+
+def _date_recovery_quick_replies(context: BookingContext) -> tuple[str, ...]:
+    failed_date = context.last_unavailable_date
+    if failed_date is None:
+        return _RECOVERY_QUICK_REPLIES[BookingState.SELECTING_DATE]
+    anchor = max(date.today(), failed_date)
+    suggestions: list[str] = []
+    offset = 1
+    while len(suggestions) < 2 and offset <= 14:
+        candidate = anchor + timedelta(days=offset)
+        if candidate != failed_date:
+            suggestions.append(candidate.strftime("%d/%m/%Y"))
+        offset += 1
+    suggestions.append("Chọn ngày khác")
+    return tuple(suggestions)
+
+
+def _should_resume_recovery(context: BookingContext) -> bool:
+    return (
+        context.last_unavailable_date is not None
+        and context.shop is not None
+        and context.num_customer is not None
+        and context.duration_minutes is not None
+        and context.main_course is not None
+    )
 
 
 # Nhận diện câu "chỉnh sửa" chung để mở menu change thay vì bắt LLM đoán target.

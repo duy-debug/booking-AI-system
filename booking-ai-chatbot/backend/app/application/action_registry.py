@@ -418,6 +418,17 @@ class ActionRegistry:
         if isinstance(error, TherapistNotAllowedForGroupError):
             return "therapist_unavailable"
         if isinstance(error, InvalidBookingDataError):
+            error_code = str(error)
+            if action_name == "handle_people_selection" and error_code in {
+                "num_customer_invalid",
+                "num_customer_too_many",
+            }:
+                return error_code
+            if action_name == "handle_date_selection" and error_code in {
+                "date_in_past",
+                "date_still_unavailable",
+            }:
+                return error_code
             if action_name in {"handle_phone_collection", "validate_phone"}:
                 return "invalid_phone"
             return "booking_data_incomplete"
@@ -677,11 +688,17 @@ class ActionRegistry:
         booking_date = _require_payload_value(context, "booking_date", date)
         handler = self._select_booking_info_handler
         if handler is None:
-            context.booking_context.set_booking_date(booking_date)
+            if _should_preserve_recovery_selection(context.booking_context):
+                context.booking_context.change_booking_date(booking_date)
+            else:
+                context.booking_context.set_booking_date(booking_date)
         else:
             result = handler.select_date(context.booking_context, booking_date)
             _ensure_success(result)
-            context.booking_context.set_booking_date(booking_date)
+            if _should_preserve_recovery_selection(context.booking_context):
+                context.booking_context.change_booking_date(booking_date)
+            else:
+                context.booking_context.set_booking_date(booking_date)
         return ActionResult("handle_date_selection", booking_date)
 
     # Validate và lưu số người, để domain tự clear therapist/slot khi cần.
@@ -907,10 +924,12 @@ class ActionRegistry:
         assert self._check_availability_handler is not None
         result = await self._check_availability_handler.execute(context.booking_context)
         if result.outcome is HandlerOutcome.NO_SLOTS:
+            context.booking_context.last_unavailable_date = context.booking_context.booking_date
             raise SlotConflictError(reason=result.error_code)
         _ensure_success(result)
         slots = _typed_result_items(result, "slots", time)
         context.booking_context.set_available_slots(slots)
+        context.booking_context.last_unavailable_date = None
         return ActionResult(
             action_name,
             slots,
@@ -1012,6 +1031,12 @@ def _shop_search_criteria(context: BookingContext) -> ShopSearchCriteria:
         requested_addon_name=context.requested_addon_name,
         requested_therapist_name=context.requested_therapist_name,
         requested_therapist_gender=context.requested_therapist_gender,
+    )
+
+
+def _should_preserve_recovery_selection(context: BookingContext) -> bool:
+    return context.last_failure_code in {"no_slots_available", "no_working_shift"} and (
+        context.main_course is not None or context.duration_minutes is not None
     )
 
 

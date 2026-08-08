@@ -177,6 +177,11 @@
                                                                                                   ]
                                                                                   },
                                                                                   {
+                                                                                      "condition":  "date_still_unavailable",
+                                                                                      "target":  "selecting_date",
+                                                                                      "instruction_template":  "date_still_unavailable"
+                                                                                  },
+                                                                                  {
                                                                                       "condition":  "no_slots_on_date",
                                                                                       "target":  "selecting_date",
                                                                                       "actions":  [
@@ -239,9 +244,7 @@
                                                                                     {
                                                                                         "condition":  "num_customer_too_many",
                                                                                         "target":  "selecting_people",
-                                                                                        "actions":  [
-                                                                                                        "people_too_many"
-                                                                                                    ]
+                                                                                        "instruction_template":  "people_too_many"
                                                                                     }
                                                                                 ]
                                                                 },

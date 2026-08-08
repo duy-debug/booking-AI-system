@@ -34,6 +34,13 @@ COURSE = Course(
     duration_minutes=60,
     price=Decimal("500000.00"),
 )
+ADDON = Course(
+    course_id=UUID("55555555-5555-5555-5555-555555555555"),
+    name="Massage chuyên sâu cổ vai gáy",
+    duration_minutes=15,
+    price=Decimal("100000.00"),
+    course_type=CourseType.ADDON,
+)
 
 
 class FakeBookingGateway:
@@ -147,6 +154,20 @@ async def test_execute_prefers_exact_name_over_broader_substring_matches() -> No
     result = await make_handler(fake).execute(SHOP_ID, COURSE.name)
 
     assert result.data["courses"] == (COURSE,)
+
+
+@pytest.mark.asyncio
+async def test_execute_resolves_exact_vietnamese_addon_name_after_normalization() -> None:
+    fake = FakeBookingGateway([ADDON])
+
+    result = await make_handler(fake).execute(
+        SHOP_ID,
+        "Massage chuyên sâu cổ vai gáy",
+        course_type=CourseType.ADDON,
+    )
+
+    assert result.outcome is HandlerOutcome.SUCCESS
+    assert result.data["courses"] == (ADDON,)
 
 
 @pytest.mark.asyncio

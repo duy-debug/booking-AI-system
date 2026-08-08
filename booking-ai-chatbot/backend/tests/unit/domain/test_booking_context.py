@@ -260,6 +260,7 @@ def test_reset_clears_temporary_booking_data() -> None:
     context = make_ready_context()
     context.booking_id = BOOKING_ID
     context.last_failure_code = "create_booking"
+    context.last_unavailable_date = date(2026, 8, 2)
     context.requested_booking_date = date(2099, 8, 1)
     context.requested_start_time = time(7, 0)
     context.requested_num_customer = 2
@@ -274,6 +275,7 @@ def test_reset_clears_temporary_booking_data() -> None:
     assert context.customer is None
     assert context.booking_date is None
     assert context.requested_booking_date is None
+    assert context.last_unavailable_date is None
     assert context.start_time is None
     assert context.requested_start_time is None
     assert context.requested_num_customer is None

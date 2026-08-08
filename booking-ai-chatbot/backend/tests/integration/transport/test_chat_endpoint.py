@@ -120,7 +120,7 @@ class RecordingDiscoveryCourseHandler(SearchCourseHandler):
 class RecordingAvailabilityHandler(CheckAvailabilityHandler):
     def __init__(self) -> None:
         self.calls: list[BookingContext] = []
-        self.slots = (time(10, 30), time(11, 0))
+        self.slots: tuple[time, ...] = (time(10, 30), time(11, 0))
 
     async def execute(self, context: BookingContext) -> HandlerResult:
         self.calls.append(context)
@@ -951,12 +951,159 @@ def test_empty_availability_moves_ui_back_to_date_step(
     assert response.status_code == 200
     assert response.json()["state"] == "selecting_date"
     assert response.json()["status"] == "failure_handled"
-    assert response.json()["quick_replies"] == ["Hôm nay", "Ngày mai"]
+    assert response.json()["quick_replies"] == ["16/08/2099", "17/08/2099", "Chọn ngày khác"]
     assert "chọn ngày khác" in response.json()["text"].casefold()
     saved = container.memory_cache._contexts[context.conversation_id]
     assert saved.booking_date == date(2099, 8, 15)
+    assert saved.last_unavailable_date == date(2099, 8, 15)
     assert saved.main_course == COURSE
     assert saved.requested_start_time == time(7, 0)
+    assert outbound_requests == []
+
+
+def test_reselecting_same_failed_date_stays_on_date_step(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    context = BookingContext(
+        "conversation-same-failed-date",
+        state=BookingState.SELECTING_DATE,
+        shop=SHOP,
+        booking_date=date(2099, 8, 15),
+        last_unavailable_date=date(2099, 8, 15),
+        last_failure_code="no_working_shift",
+        num_customer=1,
+        duration_minutes=60,
+        main_course=COURSE,
+        requested_start_time=time(9, 30),
+    )
+    container.memory_cache._contexts[context.conversation_id] = context
+
+    response = post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message="15/08/2099",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "selecting_date"
+    assert response.json()["status"] == "failure_handled"
+    assert "15/08/2099" in response.json()["text"]
+    assert response.json()["quick_replies"] == ["16/08/2099", "17/08/2099", "Chọn ngày khác"]
+    saved = container.memory_cache._contexts[context.conversation_id]
+    assert saved.num_customer == 1
+    assert saved.duration_minutes == 60
+    assert saved.main_course == COURSE
+    assert outbound_requests == []
+
+
+def test_new_date_reuses_context_and_auto_consumes_requested_time(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    availability = RecordingAvailabilityHandler()
+    availability.slots = (time(9, 0), time(9, 30), time(10, 0))
+    container.action_registry._check_availability_handler = availability
+    context = BookingContext(
+        "conversation-recovery-auto-time",
+        state=BookingState.SELECTING_DATE,
+        shop=SHOP,
+        booking_date=date(2099, 8, 15),
+        last_unavailable_date=date(2099, 8, 15),
+        last_failure_code="no_working_shift",
+        num_customer=1,
+        duration_minutes=60,
+        main_course=COURSE,
+        requested_start_time=time(9, 30),
+    )
+    container.memory_cache._contexts[context.conversation_id] = context
+
+    response = post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message="16/08/2099",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "selecting_therapist"
+    assert len(availability.calls) == 1
+    saved = container.memory_cache._contexts[context.conversation_id]
+    assert saved.booking_date == date(2099, 8, 16)
+    assert saved.num_customer == 1
+    assert saved.duration_minutes == 60
+    assert saved.main_course == COURSE
+    assert saved.start_time == time(9, 30)
+    assert saved.last_unavailable_date is None
+    assert len(outbound_requests) == 1
+    assert outbound_requests[0].url.path.endswith("/available-therapists")
+
+
+def test_new_date_reuses_context_and_returns_actual_slots_when_requested_time_missing(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    availability = RecordingAvailabilityHandler()
+    availability.slots = (time(9, 0), time(10, 0))
+    container.action_registry._check_availability_handler = availability
+    context = BookingContext(
+        "conversation-recovery-missing-time",
+        state=BookingState.SELECTING_DATE,
+        shop=SHOP,
+        booking_date=date(2099, 8, 15),
+        last_unavailable_date=date(2099, 8, 15),
+        last_failure_code="no_working_shift",
+        num_customer=1,
+        duration_minutes=60,
+        main_course=COURSE,
+        requested_start_time=time(9, 30),
+    )
+    container.memory_cache._contexts[context.conversation_id] = context
+
+    response = post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message="16/08/2099",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "selecting_time"
+    assert response.json()["quick_replies"] == ["09:00", "10:00"]
+    saved = container.memory_cache._contexts[context.conversation_id]
+    assert saved.booking_date == date(2099, 8, 16)
+    assert saved.num_customer == 1
+    assert saved.duration_minutes == 60
+    assert saved.main_course == COURSE
+    assert saved.start_time is None
+    assert outbound_requests == []
+
+
+def test_invalid_people_count_returns_business_validation_message(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    context = BookingContext(
+        "conversation-too-many-people",
+        state=BookingState.SELECTING_PEOPLE,
+        shop=SHOP,
+        booking_date=date(2099, 8, 15),
+    )
+    container.memory_cache._contexts[context.conversation_id] = context
+
+    response = post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message="5 người",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "selecting_people"
+    assert response.json()["status"] == "failure_handled"
+    assert "tối đa 3 người" in response.json()["text"].casefold()
+    assert response.json()["quick_replies"] == ["1 người", "2 người", "3 người"]
     assert outbound_requests == []
 
 

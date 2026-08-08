@@ -13,6 +13,11 @@ class SelectBookingInfoHandler:
     def select_date(self, context: BookingContext, value: date) -> HandlerResult:
         if value < date.today():
             return HandlerResult(HandlerOutcome.INVALID_INPUT, error_code="date_in_past")
+        if context.last_unavailable_date is not None and value == context.last_unavailable_date:
+            return HandlerResult(
+                HandlerOutcome.INVALID_INPUT,
+                error_code="date_still_unavailable",
+            )
         return HandlerResult(
             HandlerOutcome.SUCCESS,
             context_updates={"booking_date": value},
@@ -20,10 +25,15 @@ class SelectBookingInfoHandler:
 
     # Validate số người trong phạm vi business hỗ trợ trước khi cập nhật context.
     def select_people(self, context: BookingContext, value: int) -> HandlerResult:
-        if type(value) is not int or not 1 <= value <= 3:
+        if type(value) is not int or value <= 0:
             return HandlerResult(
                 HandlerOutcome.INVALID_INPUT,
                 error_code="num_customer_invalid",
+            )
+        if value > 3:
+            return HandlerResult(
+                HandlerOutcome.INVALID_INPUT,
+                error_code="num_customer_too_many",
             )
         return HandlerResult(
             HandlerOutcome.SUCCESS,

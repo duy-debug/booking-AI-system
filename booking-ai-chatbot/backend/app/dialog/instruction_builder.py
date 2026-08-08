@@ -294,7 +294,9 @@ class InstructionBuilder:
             ("greeting", self._greeting),
             ("ask_shop", self._ask_shop),
             ("ask_date", self._ask_date),
+            ("date_still_unavailable", self._date_still_unavailable),
             ("ask_people", self._ask_people),
+            ("people_too_many", self._people_too_many),
             ("ask_duration", self._ask_duration),
             ("ask_course", self._ask_course),
             ("addon_needs_main", self._addon_needs_main),
@@ -456,12 +458,37 @@ class InstructionBuilder:
         return DialogResponseDraft(text)
 
     @staticmethod
+    def _date_still_unavailable(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        if context.last_unavailable_date is not None:
+            return DialogResponseDraft(
+                f"Ngày {_format_date(context.last_unavailable_date)} hiện vẫn chưa thể đặt lịch. "
+                "Bạn vui lòng chọn một ngày khác."
+            )
+        return DialogResponseDraft(
+            "Ngày này hiện vẫn chưa thể đặt lịch. Bạn vui lòng chọn ngày khác."
+        )
+
+    @staticmethod
     def _ask_people(
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
         return DialogResponseDraft(
             "Bạn muốn đặt lịch cho bao nhiêu người?",
+            ("1 người", "2 người", "3 người"),
+        )
+
+    @staticmethod
+    def _people_too_many(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        return DialogResponseDraft(
+            "Hệ thống hiện hỗ trợ tối đa 3 người cho một booking. "
+            "Bạn vui lòng chọn từ 1 đến 3 người.",
             ("1 người", "2 người", "3 người"),
         )
 
