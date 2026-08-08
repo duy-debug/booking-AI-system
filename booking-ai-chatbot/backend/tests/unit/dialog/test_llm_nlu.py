@@ -123,6 +123,25 @@ async def test_llm_supports_discovery_intents_without_inventing_entities(
     assert result.resolution_status is NLUResolutionStatus.RESOLVED
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("intent", ["greeting", "thanks", "ask_why", "repeat_last_question"])
+async def test_global_intents_accept_empty_entities(intent: str) -> None:
+    gateway = FakeLLMGateway(LLMResponse(content=structured(intent=intent, entities={})))
+    fallback = LLMNLU(
+        llm_gateway=gateway,
+        intent_policy=StateIntentPolicy(
+            {BookingState.IDLE: frozenset({intent})},
+            frozenset(),
+        ),
+    )
+
+    result = await fallback.parse(text="social message", state=BookingState.IDLE)
+
+    assert result.intent == intent
+    assert result.payload == {}
+    assert result.resolution_status is NLUResolutionStatus.RESOLVED
+
+
 def fallback_for(
     content: str, *, min_confidence: float = 0.7
 ) -> tuple[

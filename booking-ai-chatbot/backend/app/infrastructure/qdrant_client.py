@@ -714,6 +714,7 @@ def index_knowledge_document(
     collection_name: str,
     recreate: bool = False,
 ) -> IndexingSummary:
+    # Chỉ dùng cho quy trình indexing offline, không nằm trong runtime xử lý chat.
     """Load, embed, source-replace, and upsert one Markdown document."""
     normalized_collection = _validate_collection_name(collection_name)
     source_path = source.resolve()

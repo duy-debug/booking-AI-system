@@ -250,6 +250,30 @@ def container_of(client: TestClient) -> ApplicationContainer:
     return cast(ApplicationContainer, application.state.application_container)
 
 
+def use_static_llm_output(
+    container: ApplicationContainer,
+    *,
+    intent: str,
+    entities: dict[str, object] | None = None,
+    entity_kind: str | None = None,
+    entity_query: str | None = None,
+) -> None:
+    container.llm_nlu = LLMNLU(
+        llm_gateway=StaticLLMGateway(
+            json.dumps(
+                {
+                    "intent": intent,
+                    "confidence": 0.99,
+                    "entities": entities or {},
+                    "entity_kind": entity_kind,
+                    "entity_query": entity_query,
+                }
+            )
+        ),
+        intent_policy=container.state_intent_policy,
+    )
+
+
 def test_json_endpoint_calls_dialog_controller_once(
     chat_client: tuple[TestClient, list[httpx.Request]],
 ) -> None:
@@ -956,6 +980,152 @@ def test_in_progress_change_returns_200_and_persists_atomic_result(
     assert saved.booking_date is None
     assert saved.start_time is None
     assert saved.shop == SHOP
+    assert outbound_requests == []
+
+
+def test_change_date_with_value_applies_in_one_runtime_turn(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    use_static_llm_output(
+        container,
+        intent="change_booking_field",
+        entities={"change_target": "date", "booking_date": "2026-08-07"},
+    )
+    context = BookingContext(
+        "conversation-change-date-value",
+        state=BookingState.AWAITING_CONFIRMATION,
+        shop=SHOP,
+        main_course=COURSE,
+        booking_date=date(2026, 8, 5),
+        start_time=time(10, 0),
+        num_customer=1,
+        duration_minutes=60,
+        therapist_preference=TherapistPreference(TherapistPreferenceType.FEMALE),
+        therapist_verified=True,
+        available_slots=(time(10, 0), time(11, 0)),
+    )
+    container.memory_cache._contexts[context.conversation_id] = context
+
+    response = post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message="đổi sang ngày 07/08/2026",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "selecting_people"
+    saved = container.memory_cache._contexts[context.conversation_id]
+    assert saved.booking_date == date(2026, 8, 7)
+    assert saved.start_time is None
+    assert saved.therapist_preference is None
+    assert saved.shop == SHOP
+    assert saved.main_course == COURSE
+    assert outbound_requests == []
+
+
+def test_change_shop_resolves_before_committing_new_shop(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    use_static_llm_output(
+        container,
+        intent="change_booking_field",
+        entities={"change_target": "shop"},
+        entity_kind="shop",
+        entity_query="District 1",
+    )
+    search = RecordingSearchShopHandler()
+    container.entity_resolution_coordinator = EntityResolutionCoordinator(
+        search_shop_handler=search,
+        search_course_handler=RecordingDiscoveryCourseHandler(),
+    )
+    context = BookingContext(
+        "conversation-change-shop",
+        state=BookingState.AWAITING_CONFIRMATION,
+        shop=Shop(UUID("33333333-3333-3333-3333-333333333333"), "Old Shop"),
+        main_course=COURSE,
+        booking_date=date(2026, 8, 5),
+        start_time=time(10, 0),
+    )
+    container.memory_cache._contexts[context.conversation_id] = context
+
+    response = post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message="đổi sang chi nhánh District 1",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "selecting_date"
+    saved = container.memory_cache._contexts[context.conversation_id]
+    assert search.calls == ["District 1"]
+    assert saved.shop == SHOP
+    assert saved.main_course is None
+    assert saved.booking_date == date(2026, 8, 5)
+    assert outbound_requests == []
+
+
+def test_ambiguous_shop_change_does_not_mutate_existing_booking(
+    chat_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, outbound_requests = chat_client
+    container = container_of(client)
+    use_static_llm_output(
+        container,
+        intent="change_booking_field",
+        entities={"change_target": "shop"},
+        entity_kind="shop",
+        entity_query="Tokyo",
+    )
+    old_shop = Shop(UUID("33333333-3333-3333-3333-333333333333"), "Old Shop")
+    context = BookingContext(
+        "conversation-ambiguous-change-shop",
+        state=BookingState.AWAITING_CONFIRMATION,
+        shop=old_shop,
+        main_course=COURSE,
+        booking_date=date(2026, 8, 5),
+        start_time=time(10, 0),
+    )
+    container.memory_cache._contexts[context.conversation_id] = context
+    candidates = tuple(
+        EntityCandidate(
+            kind=NLUEntityKind.SHOP,
+            display_name=name,
+            selection_key=f"shop:{index}",
+        )
+        for index, name in enumerate(("District 1", "District 3"))
+    )
+    container.entity_resolution_coordinator = cast(
+        EntityResolutionCoordinator,
+        StaticResolver(
+            EntityResolutionResult(
+                status=EntityResolutionStatus.AMBIGUOUS,
+                entity_kind=NLUEntityKind.SHOP,
+                dispatch_intent=None,
+                dispatch_payload={},
+                candidates=candidates,
+                matched_count=2,
+            )
+        ),
+    )
+
+    response = post_message(
+        client,
+        conversation_id=context.conversation_id,
+        message="đổi sang chi nhánh Tokyo",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "awaiting_confirmation"
+    assert response.json()["quick_replies"] == ["District 1", "District 3"]
+    saved = container.memory_cache._contexts[context.conversation_id]
+    assert saved.shop == old_shop
+    assert saved.main_course == COURSE
+    assert saved.booking_date == date(2026, 8, 5)
+    assert saved.start_time == time(10, 0)
     assert outbound_requests == []
 
 

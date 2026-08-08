@@ -230,6 +230,7 @@ class StateMachine:
         context: BookingContext,
         transition: FlowTransition | FlowAutoTransition,
     ) -> None:
+        # State Machine là nguồn duy nhất commit state transition của booking flow.
         """Commit only the resolved target state."""
         previous_state = context.state
         context.state = transition.target

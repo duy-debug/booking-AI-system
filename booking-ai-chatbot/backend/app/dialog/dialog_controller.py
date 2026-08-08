@@ -698,6 +698,7 @@ async def _process_serialized_chat_message(
                 context=context,
             )
         if response.status is not DialogTurnStatus.FAILURE_UNHANDLED:
+            # Chỉ commit context sau khi toàn bộ handler/state pipeline đã thành công.
             await container.conversation_context_store.save(
                 conversation_id,
                 context,
@@ -1806,6 +1807,8 @@ async def _entity_response(
 async def _retry_availability(
     *, container: ApplicationContainer, context: BookingContext
 ) -> DialogResponse:
+    # Recovery fallback: tải lại availability khi state đã có đủ dữ liệu,
+    # chưa phải transition chính của flow.
     try:
         missing = _missing_availability_field(context)
         if missing is not None:
