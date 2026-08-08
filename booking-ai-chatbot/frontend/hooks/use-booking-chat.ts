@@ -7,7 +7,7 @@ import {
   resetConversationId,
   saveConversationSession,
 } from "@/services/chat-session";
-import type { BookingState, ChatMessage, DialogStatus } from "@/types/chat";
+import type { ChatMessage } from "@/types/chat";
 
 const WELCOME_TEXT = "Xin chào! Mình là Kori, trợ lý wellness của Komorebi. Mình có thể giúp bạn đặt lịch và giải đáp thông tin dịch vụ. Hôm nay bạn cần mình hỗ trợ gì?";
 
@@ -23,9 +23,6 @@ function welcomeMessage(): ChatMessage {
 export function useBookingChat() {
   const [conversationId, setConversationId] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [backendState, setBackendState] = useState<BookingState | null>(null);
-  const [backendStatus, setBackendStatus] = useState<DialogStatus | null>(null);
-  const [quickReplies, setQuickReplies] = useState<string[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [streamingStarted, setStreamingStarted] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +53,6 @@ export function useBookingChat() {
     setStreamingStarted(false);
     setError(null);
     setRetryText(null);
-    setQuickReplies([]);
     saveConversationSession(sessionStorage, conversationId);
     setMessages((current) => [
       ...current,
@@ -76,14 +72,11 @@ export function useBookingChat() {
     ]);
 
     try {
-      const response = await streamChat(
+      await streamChat(
         { conversation_id: conversationId, message: text, signal: controller.signal },
         {
           onStarted: () => setStreamingStarted(true),
           onMessage: (result) => {
-            setBackendState(result.state);
-            setBackendStatus(result.status);
-            setQuickReplies(result.quick_replies);
             setMessages((current) => current.map((message) => {
               if (message.id === assistantId) return { ...message, text: result.text, response: result };
               if (message.role === "user" && message.status === "sending") {
@@ -94,8 +87,6 @@ export function useBookingChat() {
           },
         },
       );
-      setBackendState(response.state);
-      setBackendStatus(response.status);
     } catch (cause) {
       const problem = cause instanceof ChatApiError ? cause.problem : null;
       if (problem?.code === "cancelled") {
@@ -133,9 +124,6 @@ export function useBookingChat() {
     const id = resetConversationId(sessionStorage);
     setConversationId(id);
     setMessages([welcomeMessage()]);
-    setBackendState(null);
-    setBackendStatus(null);
-    setQuickReplies([]);
     setIsSending(false);
     setStreamingStarted(false);
     setError(null);
@@ -145,9 +133,6 @@ export function useBookingChat() {
   return {
     messages,
     conversationId,
-    backendState,
-    backendStatus,
-    quickReplies,
     isSending,
     streamingStarted,
     error,

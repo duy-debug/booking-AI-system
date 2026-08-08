@@ -94,9 +94,7 @@ export function ChatApp() {
                 key={message.id}
                 message={message}
                 latest={index === messages.length - 1}
-                loading={isSending}
                 streaming={isSending && streamingStarted}
-                onQuickReply={(reply) => void sendMessage(reply)}
               />
             ))}
 

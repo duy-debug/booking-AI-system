@@ -83,14 +83,14 @@ async function send(page: Page, message: string) {
   await input.press("Enter");
 }
 
-test("sends the new body, renders text and quick replies without duplicate bubble", async ({ page }) => {
+test("sends the new body and renders assistant text without duplicate bubble", async ({ page }) => {
   const requests: CapturedRequest[] = [];
   await mockChat(page, requests);
   await page.goto("/");
   await send(page, "Xin chào");
 
   await expect(page.getByText("Xin chào từ E2E")).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Shibuya" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Shibuya" })).toHaveCount(0);
   expect(requests).toHaveLength(1);
   expect(requests[0]).toEqual({
     conversation_id: expect.any(String),
@@ -99,12 +99,12 @@ test("sends the new body, renders text and quick replies without duplicate bubbl
   await expect(page.getByRole("button", { name: "Ghi âm" })).toHaveCount(0);
 });
 
-test("quick reply creates a new backend-owned turn", async ({ page }) => {
+test("manual text creates a new backend-owned turn with the same conversation", async ({ page }) => {
   const requests: CapturedRequest[] = [];
   await mockChat(page, requests);
   await page.goto("/");
   await send(page, "Bắt đầu");
-  await page.getByRole("button", { name: "Shibuya" }).click();
+  await send(page, "Shibuya");
   await expect.poll(() => requests.length).toBe(2);
   expect(requests[1].message).toBe("Shibuya");
   expect(requests[1].conversation_id).toBe(requests[0].conversation_id);
@@ -158,7 +158,7 @@ test("renders failure_handled as a normal assistant response", async ({ page }) 
   await page.goto("/");
   await send(page, "Không có slot");
   await expect(page.getByText("Không còn khung giờ phù hợp, bạn hãy chọn ngày khác.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Ngày mai" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ngày mai" })).toHaveCount(0);
   await expect(page.getByText("Không gửi được tin nhắn")).toHaveCount(0);
 });
 
