@@ -745,7 +745,9 @@ class LLMNLU:
             return _llm_unresolved("invalid_nlu_output")
         merged_entities = _merge_candidate_entities(candidates)
         try:
-            output = LLMNLUOutput.model_validate(selected.model_dump())
+            output = LLMNLUOutput.model_validate(
+                _normalize_llm_output_payload(selected.model_dump())
+            )
         except ValidationError as error:
             trace_log(
                 logging.getLogger(__name__),
@@ -934,7 +936,7 @@ def _parse_llm_candidates(response: LLMResponse) -> list[IntentCandidate]:
     raw = json.loads(response.content)
     if isinstance(raw, dict) and "candidates" in raw:
         return LLMNLUCandidatesOutput.model_validate(raw).candidates
-    legacy = LLMNLUOutput.model_validate(raw)
+    legacy = LLMNLUOutput.model_validate(_normalize_llm_output_payload(raw))
     return [IntentCandidate.model_validate(legacy.model_dump())]
 
 
@@ -943,10 +945,17 @@ def _llm_entity_reference(
     output: LLMNLUOutput,
 ) -> tuple[NLUEntityKind | None, str | None]:
     if output.entity_kind is not None:
-        return NLUEntityKind(output.entity_kind), output.entity_query
+        entity_kind = NLUEntityKind(output.entity_kind)
+        entity_query = output.entity_query
+        if entity_kind is NLUEntityKind.THERAPIST:
+            entity_query = _normalize_therapist_query(entity_query)
+        return entity_kind, entity_query
     if output.intent.strip() == "select_therapist":
-        gender = output.entities.therapist_gender
-        if gender in {"male", "female"}:
+        therapist_name = _non_empty_text(output.entities.therapist_name)
+        if therapist_name is not None:
+            return NLUEntityKind.THERAPIST, therapist_name
+        gender = _normalize_therapist_gender(output.entities.therapist_gender)
+        if gender is not None:
             return NLUEntityKind.THERAPIST, gender
     return None, None
 
@@ -1079,9 +1088,61 @@ def _typed_llm_entity(key: str, value: object) -> object | None:
         return value if type(value) is int else None
     if key in {"confirmation", "skip_addon"}:
         return value if type(value) is bool else None
-    if key in {"therapist_gender", "change_target"}:
+    if key == "therapist_gender":
+        return _normalize_therapist_gender(value)
+    if key == "change_target":
         return value if isinstance(value, str) else None
     return None
+
+
+# Chuẩn hóa các giá trị therapist đặc thù trước khi ép vào schema nghiêm ngặt của LLM output.
+def _normalize_llm_output_payload(payload: Mapping[str, object]) -> dict[str, object]:
+    normalized = dict(payload)
+    entities_raw = normalized.get("entities")
+    if isinstance(entities_raw, Mapping):
+        entities = dict(entities_raw)
+        therapist_gender = _normalize_therapist_gender(entities.get("therapist_gender"))
+        if therapist_gender is not None:
+            entities["therapist_gender"] = therapist_gender
+        therapist_name = _non_empty_text(entities.get("therapist_name"))
+        if therapist_name is not None:
+            entities["therapist_name"] = therapist_name
+        normalized["entities"] = entities
+    if normalized.get("entity_kind") == NLUEntityKind.THERAPIST.value:
+        therapist_query = _normalize_therapist_query(normalized.get("entity_query"))
+        if therapist_query is not None:
+            normalized["entity_query"] = therapist_query
+    return normalized
+
+
+# Normalize therapist query tại boundary NLU để downstream chỉ nhận canonical values an toàn.
+def _normalize_therapist_query(value: object) -> str | None:
+    gender = _normalize_therapist_gender(value)
+    if gender is not None:
+        return gender
+    return _non_empty_text(value)
+
+
+# Chỉ chuẩn hóa các biến thể therapist gender/none nhỏ đã được chứng minh ở runtime.
+def _normalize_therapist_gender(value: object) -> str | None:
+    text = _non_empty_text(value)
+    if text is None:
+        return None
+    normalized = normalize_vietnamese(text)
+    return {
+        "male": "male",
+        "female": "female",
+        "none": "none",
+        "nam": "male",
+        "nu": "female",
+        "nữ": "female",
+        "khong yeu cau": "none",
+        "không yêu cầu": "none",
+    }.get(normalized)
+
+
+def _non_empty_text(value: object) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 # Đánh dấu người dùng đã nói thêm field ngoài intent chính để controller xử lý tiếp.
@@ -1470,6 +1531,7 @@ class EntityResolutionCoordinator:
         preference_type = {
             "male": TherapistPreferenceType.MALE,
             "female": TherapistPreferenceType.FEMALE,
+            "none": TherapistPreferenceType.NONE,
         }.get(query)
         if preference_type is not None:
             preference = TherapistPreference(preference_type)

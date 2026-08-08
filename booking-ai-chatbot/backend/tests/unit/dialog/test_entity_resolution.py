@@ -1,6 +1,7 @@
 """Unit tests for safe dialog-layer entity resolution."""
 
 from copy import deepcopy
+from datetime import date, time
 from decimal import Decimal
 from types import MappingProxyType
 from typing import cast
@@ -27,6 +28,7 @@ from app.dialog.nlu import (
 )
 from app.domain.booking_context import BookingContext, CourseSelectionMode
 from app.domain.booking_models import (
+    AvailableTherapistRequest,
     Course,
     CourseSelection,
     CourseType,
@@ -135,9 +137,25 @@ class FakeSearchCourseHandler:
         return HandlerResult(outcome, {"courses": tuple(self.results)})
 
 
+class FakeTherapistGateway:
+    def __init__(self, results: list[TherapistPreference] | None = None) -> None:
+        self.results = results or []
+        self.calls = 0
+        self.request: AvailableTherapistRequest | None = None
+
+    async def search_available_therapists(
+        self,
+        request: AvailableTherapistRequest,
+    ) -> list[TherapistPreference]:
+        self.calls += 1
+        self.request = request
+        return self.results
+
+
 def coordinator(
     shops: FakeSearchShopHandler | None = None,
     courses: FakeSearchCourseHandler | None = None,
+    gateway: FakeTherapistGateway | None = None,
 ) -> EntityResolutionCoordinator:
     return EntityResolutionCoordinator(
         search_shop_handler=cast(SearchShopHandler, shops or FakeSearchShopHandler()),
@@ -145,6 +163,7 @@ def coordinator(
             SearchCourseHandler,
             courses or FakeSearchCourseHandler(),
         ),
+        booking_gateway=gateway,
     )
 
 
@@ -459,6 +478,54 @@ async def test_therapist_name_needs_gateway_and_gender_maps_without_handlers() -
     preference = gender_result.dispatch_payload["therapist_preference"]
     assert preference == TherapistPreference(TherapistPreferenceType.FEMALE)
     assert not hasattr(preference, "therapist_uuid")
+
+
+@pytest.mark.asyncio
+async def test_therapist_none_maps_without_gateway() -> None:
+    result = await coordinator().resolve(
+        nlu_result=entity_request(NLUEntityKind.THERAPIST, "none"),
+        state=BookingState.SELECTING_THERAPIST,
+        context=BookingContext("conversation-1"),
+    )
+
+    assert result.status is EntityResolutionStatus.RESOLVED
+    preference = cast(TherapistPreference, result.dispatch_payload["therapist_preference"])
+    assert preference == TherapistPreference(TherapistPreferenceType.NONE)
+
+
+@pytest.mark.asyncio
+async def test_therapist_name_resolves_personal_preference_from_gateway() -> None:
+    gateway = FakeTherapistGateway(
+        [
+            TherapistPreference(
+                TherapistPreferenceType.PERSONAL,
+                therapist_id="99999999-9999-9999-9999-999999999999",
+                therapist_name="Quách Đình Khôi",
+            )
+        ]
+    )
+    context = BookingContext(
+        "conversation-therapist",
+        state=BookingState.SELECTING_THERAPIST,
+        shop=SHOP,
+        booking_date=date(2026, 8, 10),
+        start_time=time(17, 0),
+        duration_minutes=60,
+        num_customer=1,
+    )
+
+    result = await coordinator(gateway=gateway).resolve(
+        nlu_result=entity_request(NLUEntityKind.THERAPIST, "Quách Đình Khôi"),
+        state=context.state,
+        context=context,
+    )
+
+    assert result.status is EntityResolutionStatus.RESOLVED
+    preference = cast(TherapistPreference, result.dispatch_payload["therapist_preference"])
+    assert preference.preference_type is TherapistPreferenceType.PERSONAL
+    assert preference.therapist_id == "99999999-9999-9999-9999-999999999999"
+    assert preference.therapist_name == "Quách Đình Khôi"
+    assert gateway.calls == 1
 
 
 @pytest.mark.asyncio

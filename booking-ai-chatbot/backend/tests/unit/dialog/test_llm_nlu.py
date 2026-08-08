@@ -443,6 +443,114 @@ async def test_therapist_gender_becomes_an_entity_query() -> None:
 
 
 @pytest.mark.asyncio
+async def test_therapist_name_becomes_entity_resolution_query() -> None:
+    fallback, _ = fallback_for(
+        structured(
+            intent="select_therapist",
+            entities={"therapist_name": "Quách Đình Khôi"},
+        )
+    )
+
+    result = await fallback.parse(
+        text="Quách Đình Khôi",
+        state=BookingState.SELECTING_THERAPIST,
+    )
+
+    assert result.resolution_status is NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED
+    assert result.entity_kind is NLUEntityKind.THERAPIST
+    assert result.entity_query == "Quách Đình Khôi"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("content", "expected_query"),
+    [
+        (
+            json.dumps(
+                {
+                    "candidates": [
+                        {
+                            "intent": "select_therapist",
+                            "confidence": 0.9,
+                            "entities": {"therapist_gender": "Nam"},
+                            "entity_kind": None,
+                            "entity_query": None,
+                        }
+                    ]
+                }
+            ),
+            "male",
+        ),
+        (
+            json.dumps(
+                {
+                    "candidates": [
+                        {
+                            "intent": "select_therapist",
+                            "confidence": 0.9,
+                            "entities": {"therapist_gender": "Nữ"},
+                            "entity_kind": None,
+                            "entity_query": None,
+                        }
+                    ]
+                }
+            ),
+            "female",
+        ),
+        (
+            json.dumps(
+                {
+                    "candidates": [
+                        {
+                            "intent": "select_therapist",
+                            "confidence": 0.9,
+                            "entities": {"therapist_gender": "Không yêu cầu"},
+                            "entity_kind": None,
+                            "entity_query": None,
+                        }
+                    ]
+                }
+            ),
+            "none",
+        ),
+    ],
+)
+async def test_vietnamese_therapist_gender_values_are_canonicalized(
+    content: str,
+    expected_query: str,
+) -> None:
+    fallback, _ = fallback_for(content)
+
+    result = await fallback.parse(
+        text="therapist preference",
+        state=BookingState.SELECTING_THERAPIST,
+    )
+
+    assert result.resolution_status is NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED
+    assert result.entity_kind is NLUEntityKind.THERAPIST
+    assert result.entity_query == expected_query
+
+
+@pytest.mark.asyncio
+async def test_therapist_none_becomes_entity_query() -> None:
+    fallback, _ = fallback_for(
+        structured(
+            intent="select_therapist",
+            entities={"therapist_gender": "none"},
+        )
+    )
+
+    result = await fallback.parse(
+        text="Không yêu cầu",
+        state=BookingState.SELECTING_THERAPIST,
+    )
+
+    assert result.resolution_status is NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED
+    assert result.entity_kind is NLUEntityKind.THERAPIST
+    assert result.entity_query == "none"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "content",
     [
