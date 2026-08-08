@@ -118,6 +118,7 @@ class FlowLoader:
     """Loads and validates booking dialog flow definitions."""
 
     @staticmethod
+    # Đọc booking_flow.json và validate toàn bộ state/transition trước runtime.
     def load(path: Path) -> FlowDefinition:
         """Load a UTF-8 JSON flow definition from a filesystem path."""
         with path.open("r", encoding="utf-8") as flow_file:
@@ -140,6 +141,7 @@ class FlowLoader:
         return FlowDefinition(version, name, description, initial_state, states)
 
     @staticmethod
+    # Đọc mapping change target -> reset action để DialogController xử lý chỉnh sửa booking.
     def load_change_handlers(path: Path) -> dict[str, ChangeRule]:
         """Load the compact target-to-change-rule mapping."""
         with path.open("r", encoding="utf-8") as handlers_file:
@@ -168,6 +170,7 @@ class FlowLoader:
         }
 
 
+# Parse một rule chỉnh sửa field booking từ JSON và validate state/action/template.
 def _parse_change_rule(target: str, raw: object) -> ChangeRule:
     value = _object(raw, f"Change handler '{target}' must be an object.")
     if set(value) != {
@@ -209,12 +212,14 @@ def _parse_change_rule(target: str, raw: object) -> ChangeRule:
     )
 
 
+# Ép JSON node thành object để lỗi config rõ vị trí.
 def _object(raw: object, message: str) -> dict[str, object]:
     if not isinstance(raw, dict):
         raise InvalidFlowDefinitionError(message)
     return cast(dict[str, object], raw)
 
 
+# Lấy string bắt buộc từ JSON flow và reject chuỗi rỗng.
 def _required_string(raw: dict[str, object], field: str, location: str) -> str:
     value = raw.get(field)
     if not isinstance(value, str) or value == "":
@@ -230,6 +235,7 @@ def _optional_string(raw: object, location: str) -> str | None:
     return raw
 
 
+# Parse tên state từ JSON về BookingState enum.
 def _state_value(raw: object, location: str) -> BookingState:
     if not isinstance(raw, str):
         raise InvalidFlowDefinitionError(f"Field '{location}' must be a string.")
@@ -239,6 +245,7 @@ def _state_value(raw: object, location: str) -> BookingState:
         raise InvalidFlowDefinitionError(f"Unknown {location}: '{raw}'.") from exc
 
 
+# Lấy root states object và đảm bảo flow không rỗng.
 def _states_object(raw: object) -> dict[str, object]:
     states = _object(raw, "Field 'states' must be a JSON object.")
     if not states:
@@ -253,6 +260,7 @@ def _declared_states(raw: dict[str, object]) -> dict[BookingState, object]:
     return result
 
 
+# Parse một state gồm on_enter, transitions, auto transitions và phone split config.
 def _parse_state(
     name: str,
     raw: object,
@@ -295,6 +303,7 @@ def _parse_state(
     )
 
 
+# Parse on_enter action/template chạy khi context vừa vào state.
 def _parse_on_enter(
     state: str,
     raw: object,
@@ -314,6 +323,7 @@ def _parse_on_enter(
     return FlowOnEnter(template, actions, failures)
 
 
+# Parse transition intent -> target/actions/failure routes từ JSON.
 def _parse_transition(
     state: str,
     index: int,
@@ -343,6 +353,7 @@ def _target(
     return target
 
 
+# Parse danh sách action và reject action name trùng/rỗng/sai format.
 def _actions(raw: object, location: str) -> tuple[str, ...]:
     if not isinstance(raw, list):
         raise InvalidFlowDefinitionError(f"Actions for {location} must be a list.")
@@ -358,6 +369,7 @@ def _actions(raw: object, location: str) -> tuple[str, ...]:
     return tuple(result)
 
 
+# Parse danh sách condition khai báo cho transition/failure.
 def _conditions(raw: object, location: str) -> tuple[FlowCondition, ...]:
     if raw is None:
         return ()
@@ -379,6 +391,7 @@ def _condition(raw: object, location: str) -> FlowCondition:
     return FlowCondition(field, op, value.get("value"), ref, nested)
 
 
+# Parse failure routes để ActionRegistry/StateMachine recover theo error code.
 def _failures(
     raw: object,
     state: str,
@@ -424,6 +437,7 @@ def _failures(
     return tuple(result)
 
 
+# Parse auto transitions chạy sau khi context đạt điều kiện success.
 def _parse_auto_transitions(
     state: str,
     definition: dict[str, object],
@@ -447,6 +461,7 @@ def _parse_auto_transitions(
     return tuple(result)
 
 
+# Parse cấu hình tách khách cũ/khách mới ở bước phone verification.
 def _parse_phone_split(state: str, raw: object) -> PhoneSplitConfig | None:
     if raw is None:
         return None

@@ -9,9 +9,11 @@ from app.domain.outcomes import HandlerOutcome, HandlerResult
 class SearchShopHandler:
     """Coordinates the shop search use case."""
 
+    # Nhận gateway POS để tải danh sách shop authoritative.
     def __init__(self, booking_gateway: BookingGateway) -> None:
         self._booking_gateway = booking_gateway
 
+    # Tìm cửa hàng theo tên/khu vực sau khi đã lấy catalog từ POS.
     async def execute(self, query: str | None = None) -> HandlerResult:
         """Return the POS shop catalog through the common handler contract."""
         shops = _unique_named_shops(await self._booking_gateway.search_shops())
@@ -32,6 +34,7 @@ class SearchShopHandler:
         return HandlerResult(HandlerOutcome.SUCCESS, {"shops": tuple(matched)})
 
 
+# Chuẩn hóa text tiếng Việt để matching shop không phụ thuộc dấu/case.
 def _normalize_search_text(value: str) -> str:
     decomposed = unicodedata.normalize("NFD", value.strip().casefold())
     return "".join(
@@ -39,6 +42,7 @@ def _normalize_search_text(value: str) -> str:
     ).replace("đ", "d")
 
 
+# Loại shop trùng tên hoặc rỗng để danh sách gợi ý không gây nhiễu cho người dùng.
 def _unique_named_shops(shops: list[Shop]) -> list[Shop]:
     """Remove only invalid/duplicate names; never infer activity from wording."""
     if not shops:

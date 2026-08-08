@@ -41,9 +41,11 @@ class IntentPrioritizer:
         "search_shops": "query",
     }
 
+    # Nhận policy state để không chọn intent mà flow hiện tại không cho phép.
     def __init__(self, policy: IntentPolicy) -> None:
         self._policy = policy
 
+    # Chọn intent phù hợp nhất dựa trên confidence, state hiện tại và độ đầy đủ entity.
     def choose(
         self,
         candidates: Sequence[IntentCandidate],
@@ -92,6 +94,7 @@ class IntentPrioritizer:
         return selected
 
 
+# Chuẩn hóa alias intent từ LLM về tên intent canonical mà backend sử dụng.
 def _canonical_intent(intent: str) -> str:
     return {
         "select_shop": "select_store",
@@ -101,6 +104,7 @@ def _canonical_intent(intent: str) -> str:
     }.get(intent.strip(), intent.strip())
 
 
+# Chấm candidate có đủ entity bắt buộc cho intent hiện tại hay chưa.
 def _entity_complete(
     candidate: IntentCandidate,
     requirements: Mapping[str, str],
@@ -112,6 +116,7 @@ def _entity_complete(
     return 1 if required is None or candidate.entities.get(required) is not None else 0
 
 
+# Ưu tiên candidate phù hợp với dữ liệu context đã có, ví dụ slot/time hoặc shop/course.
 def _context_compatible(
     candidate: IntentCandidate,
     context: BookingContext | None,

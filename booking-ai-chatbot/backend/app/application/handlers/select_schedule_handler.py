@@ -10,6 +10,7 @@ from app.domain.outcomes import HandlerOutcome, HandlerResult
 class SelectScheduleHandler:
     """Applies only schedule choices already verified against context data."""
 
+    # Chỉ chấp nhận giờ nằm trong latest available_slots đã load từ POS.
     def select_time(self, context: BookingContext, value: time) -> HandlerResult:
         if context.available_slots is None or value not in context.available_slots:
             return HandlerResult(
@@ -22,6 +23,7 @@ class SelectScheduleHandler:
             context_updates={"start_time": value},
         )
 
+    # Validate therapist theo chính sách: group booking không chọn therapist cá nhân.
     def select_therapist(
         self,
         context: BookingContext,

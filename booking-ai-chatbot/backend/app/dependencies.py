@@ -81,12 +81,14 @@ class _ConversationLockEntry:
 class ConversationContextStore:
     """Coordinates booking-context persistence in the in-process cache."""
 
+    # Khởi tạo lock theo conversation để nhiều request cùng session không ghi đè context.
     def __init__(self, *, cache: ContextStore) -> None:
         self._cache = cache
         self._lock_registry_guard = asyncio.Lock()
         self._conversation_locks: dict[str, _ConversationLockEntry] = {}
 
     @asynccontextmanager
+    # Cấp lock cho một conversation_id và tự dọn lock khi context đã bị xóa khỏi store.
     async def conversation_lock(
         self,
         conversation_id: str,
@@ -109,6 +111,7 @@ class ConversationContextStore:
                 if entry.users == 0:
                     self._conversation_locks.pop(normalized_id, None)
 
+    # Lấy bản sao BookingContext để controller xử lý trên working copy có thể rollback.
     async def get_copy(self, conversation_id: str) -> BookingContext:
         """Load an isolated working context or create one on a cache miss."""
         normalized_id = _validate_conversation_id(conversation_id)
@@ -125,6 +128,7 @@ class ConversationContextStore:
             )
         return context
 
+    # Lưu BookingContext sau khi một lượt chat đã qua hết business pipeline thành công.
     async def save(
         self,
         conversation_id: str,
@@ -140,6 +144,7 @@ class ConversationContextStore:
             )
         await self._cache.save(context)
 
+    # Reset một conversation về context mới nhưng vẫn giữ conversation_id ổn định.
     async def reset(self, conversation_id: str) -> BookingContext:
         """Replace cached state with a new idle context for the conversation."""
         normalized_id = _validate_conversation_id(conversation_id)
@@ -177,6 +182,7 @@ class ApplicationContainer:
     _qdrant_client: QdrantClient | None = field(default=None, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
 
+    # Trả về handler đã wire sẵn để các fallback path không tự tạo dependency mới.
     def handler(self, handler_type: type[object]) -> object:
         """Return one already-composed handler by its concrete application type."""
         for configured in self._handlers:
@@ -184,6 +190,7 @@ class ApplicationContainer:
                 return configured
         raise RuntimeError(f"Handler {handler_type.__name__} is unavailable.")
 
+    # Đóng các tài nguyên async dùng chung như HTTP client khi app shutdown.
     async def close(self) -> None:
         """Close only resources created and owned by this container."""
         if self._closed:
@@ -195,6 +202,8 @@ class ApplicationContainer:
             self._qdrant_client.close()
 
 
+# Wire toàn bộ dependency production: POS, Qdrant, LLM, StateMachine,
+# ActionRegistry và DialogController.
 async def create_application_container(
     settings: Settings,
     *,
@@ -338,6 +347,7 @@ async def create_application_container(
 
 
 @asynccontextmanager
+# Quản lý vòng đời ApplicationContainer trong FastAPI lifespan.
 async def application_container_lifespan(
     settings: Settings,
 ) -> AsyncIterator[ApplicationContainer]:
@@ -349,6 +359,7 @@ async def application_container_lifespan(
         await container.close()
 
 
+# Kiểm tra flow JSON có đầy đủ action, failure code và template trước khi chạy runtime.
 def validate_runtime_flow(
     flow: FlowDefinition,
     action_registry: ActionRegistry,
@@ -362,6 +373,7 @@ def validate_runtime_flow(
     declared_intents: set[str] = set()
     reachable_edges: dict[BookingState, set[BookingState]] = {state: set() for state in flow.states}
 
+    # Gom failure code từ flow để đối chiếu với registry và response renderer.
     def include_failure(failure: object) -> None:
         actions = getattr(failure, "actions", ())
         template = getattr(failure, "instruction_template", None)
@@ -440,6 +452,7 @@ def validate_runtime_flow(
         )
 
 
+# Validate conversation_id để tránh lưu context với key rỗng hoặc quá dài.
 def _validate_conversation_id(conversation_id: str) -> str:
     if not isinstance(conversation_id, str):
         raise InvalidConversationIdError("Conversation ID must be a string.")
@@ -458,6 +471,7 @@ def _validate_conversation_id(conversation_id: str) -> str:
     return normalized_id
 
 
+# Fail fast khi cấu hình runtime không đủ để khởi tạo provider đang được bật.
 def _validate_settings(settings: Settings) -> None:
     if not settings.pos_base_url.strip():
         raise ValueError("POS base URL must not be empty.")

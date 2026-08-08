@@ -144,6 +144,7 @@ class BookingContext:
             addon.duration_minutes for addon in self.addons
         )
 
+    # Kiểm tra context đã đủ field bắt buộc để gọi POS create booking chưa.
     def is_ready_to_create(self) -> bool:
         """Return whether all data required to create a booking is present."""
         if (
@@ -175,17 +176,20 @@ class BookingContext:
             and self.therapist_preference.preference_type is not TherapistPreferenceType.NONE
         )
 
+    # Tăng sequence number cho mỗi lượt chat của cùng conversation.
     def begin_turn(self) -> int:
         """Advance and return the conversation-local trace sequence."""
         self.turn_sequence += 1
         return self.turn_sequence
 
+    # Tạo hoặc tái sử dụng idempotency key server-side cho một lần create booking.
     def ensure_booking_attempt_id(self) -> str:
         """Return the server-owned identifier for the current booking attempt."""
         if self.booking_attempt_id is None:
             self.booking_attempt_id = str(uuid4())
         return self.booking_attempt_id
 
+    # Xóa attempt id khi booking bị cancel/reset hoặc dữ liệu booking thay đổi.
     def clear_booking_attempt(self) -> None:
         """Invalidate idempotency when booking-defining data changes."""
         self.booking_attempt_id = None
@@ -197,6 +201,7 @@ class BookingContext:
             return None
         return CourseSelection(main_course=self.main_course, addons=self.addons)
 
+    # Lưu shop mới và clear dữ liệu phụ thuộc vào shop cũ.
     def set_shop(self, shop: Shop | None) -> None:
         """Set a shop and invalidate shop-dependent selections."""
         if shop == self.shop:
@@ -210,6 +215,7 @@ class BookingContext:
         self.ng_list_checked = False
         self.is_ng_customer = False
 
+    # Lưu ngày booking và clear availability/time/therapist cũ.
     def set_booking_date(self, booking_date: date | None) -> None:
         """Set a date and invalidate date-dependent selections."""
         if booking_date == self.booking_date:
@@ -218,6 +224,7 @@ class BookingContext:
         self.booking_date = booking_date
         self._clear_course_and_availability()
 
+    # Lưu số người và áp dụng rule group booking liên quan therapist/slot.
     def set_num_customer(self, value: int) -> None:
         """Set a valid number of customers."""
         if not 1 <= value <= 3:
@@ -232,6 +239,7 @@ class BookingContext:
         if value >= 2:
             self.therapist_preference = None
 
+    # Lưu thời lượng và clear course/availability phụ thuộc duration cũ.
     def set_duration(self, value: int) -> None:
         """Set a positive duration divisible by 15 minutes."""
         if value <= 0 or value % 15 != 0:
@@ -243,6 +251,7 @@ class BookingContext:
         self._clear_course_and_availability()
         self.course_selection_mode = CourseSelectionMode.MAIN
 
+    # Lưu main course/add-on và clear slot/time/therapist cần reload.
     def set_course_selection(self, selection: CourseSelection) -> None:
         """Set the main course and add-ons and invalidate availability."""
         if selection != self.course_selection:
@@ -254,6 +263,7 @@ class BookingContext:
             CourseSelectionMode.ADDON if not selection.addons else CourseSelectionMode.NONE
         )
 
+    # Đánh dấu bỏ qua add-on nhưng giữ main course đã chọn.
     def skip_addon(self) -> None:
         """Finish the optional add-on sub-step without changing the main course."""
         self.course_selection_mode = CourseSelectionMode.NONE
@@ -262,10 +272,12 @@ class BookingContext:
         """Set a compatible main course without add-ons."""
         self.set_course_selection(CourseSelection(main_course=course))
 
+    # Lưu latest slots từ POS và clear selected time nếu slot cũ không còn hợp lệ.
     def set_available_slots(self, slots: tuple[time, ...]) -> None:
         """Store the latest availability result."""
         self.available_slots = slots
 
+    # Lưu giờ bắt đầu và buộc therapist phải xác thực lại theo slot mới.
     def set_start_time(self, start_time: time | None) -> None:
         """Set a time and require therapist revalidation."""
         if start_time != self.start_time:
@@ -273,6 +285,7 @@ class BookingContext:
         self.start_time = start_time
         self.therapist_verified = False
 
+    # Lưu preference therapist, đồng thời chặn therapist cá nhân cho group booking.
     def set_therapist_preference(
         self,
         preference: TherapistPreference | None,
@@ -296,6 +309,7 @@ class BookingContext:
         """Store whether the selected therapist has been externally verified."""
         self.therapist_verified = verified
 
+    # Lưu phone mới và reset toàn bộ trạng thái xác thực khách hàng.
     def set_phone(self, phone: str) -> None:
         """Store a phone number and reset all customer verification."""
         if phone != self.phone:
@@ -308,12 +322,14 @@ class BookingContext:
         self.ng_list_checked = False
         self.is_ng_customer = False
 
+    # Đánh dấu phone đã được người dùng xác nhận sau bước verify.
     def confirm_phone(self) -> None:
         """Mark the stored phone number as confirmed."""
         if self.phone is None:
             raise InvalidBookingDataError("A phone number is required for confirmation.")
         self.phone_confirmed = True
 
+    # Lưu kết quả verify customer/NG list từ POS vào context.
     def set_customer_verification(
         self,
         *,
@@ -329,6 +345,7 @@ class BookingContext:
         self.ng_list_checked = True
         self.is_ng_customer = is_ng_customer
 
+    # Xóa phone và toàn bộ customer verification khi người dùng nhập lại.
     def clear_phone(self) -> None:
         """Clear the phone number and its confirmation state."""
         self.phone = None
@@ -337,6 +354,7 @@ class BookingContext:
         self.ng_list_checked = False
         self.is_ng_customer = False
 
+    # Đổi shop trong flow chỉnh sửa và clear field phụ thuộc nhưng giữ ngày nếu phù hợp.
     def change_shop(self, shop: Shop | None) -> None:
         """Replace the shop and clear only shop-dependent booking data."""
         self.shop = shop
@@ -348,12 +366,14 @@ class BookingContext:
         self.is_ng_customer = False
         self._clear_booking_result()
 
+    # Đổi ngày booking và clear slot/therapist đã phụ thuộc ngày cũ.
     def change_booking_date(self, booking_date: date | None) -> None:
         """Replace the date while preserving shop, course and customer choices."""
         self.booking_date = booking_date
         self._clear_availability_and_therapist()
         self._clear_booking_result()
 
+    # Đổi số người theo rule domain, rollback được nếu value không hợp lệ.
     def change_num_customer(self, value: int | None) -> None:
         """Replace the party size after validating its domain range."""
         if value is not None and not 1 <= value <= 3:
@@ -362,6 +382,7 @@ class BookingContext:
         self._clear_availability_and_therapist()
         self._clear_booking_result()
 
+    # Đổi duration và clear course/availability/time phụ thuộc duration cũ.
     def change_duration(self, value: int | None) -> None:
         """Replace duration and invalidate its course and slot dependencies."""
         if value is not None and (value <= 0 or value % 15 != 0):
@@ -375,6 +396,7 @@ class BookingContext:
             CourseSelectionMode.MAIN if value is not None else CourseSelectionMode.NONE
         )
 
+    # Đổi course/add-on và clear availability/time/therapist cần kiểm tra lại.
     def change_course_selection(
         self,
         selection: CourseSelection | None,
@@ -392,6 +414,7 @@ class BookingContext:
             CourseSelectionMode.MAIN if selection is None else CourseSelectionMode.ADDON
         )
 
+    # Đổi giờ booking và reset trạng thái therapist_verified.
     def change_start_time(self, start_time: time | None) -> None:
         """Replace the selected time and invalidate therapist confirmation."""
         self.start_time = start_time
@@ -399,6 +422,7 @@ class BookingContext:
         self.therapist_verified = False
         self._clear_booking_result()
 
+    # Đổi therapist preference trong flow chỉnh sửa mà không gọi POS create.
     def change_therapist_preference(
         self,
         preference: TherapistPreference | None,
@@ -417,6 +441,7 @@ class BookingContext:
         self.therapist_verified = False
         self._clear_booking_result()
 
+    # Đổi phone và clear verification/customer data để check lại từ đầu.
     def change_phone(self, phone: str | None) -> None:
         """Replace customer phone data without clearing booking selections."""
         self.customer = None
@@ -426,18 +451,21 @@ class BookingContext:
             self.phone = phone
         self._clear_booking_result()
 
+    # Clear course và toàn bộ dữ liệu availability phụ thuộc course/duration.
     def _clear_course_and_availability(self) -> None:
         self.main_course = None
         self.addons = ()
         self._clear_availability_and_therapist()
         self.course_selection_mode = CourseSelectionMode.MAIN
 
+    # Clear slot/time/therapist khi availability không còn đáng tin.
     def _clear_availability_and_therapist(self) -> None:
         self.available_slots = None
         self.start_time = None
         self.therapist_preference = None
         self.therapist_verified = False
 
+    # Clear booking result/idempotency khi dữ liệu đầu vào đã thay đổi.
     def _clear_booking_result(self) -> None:
         self.clear_booking_attempt()
         self.booking_id = None
@@ -445,6 +473,7 @@ class BookingContext:
         self.reservation_code = None
         self.last_failure_code = None
 
+    # Reset toàn bộ dữ liệu booking tạm nhưng giữ conversation_id và turn sequence.
     def reset(self) -> None:
         """Clear temporary booking data while preserving the conversation ID."""
         turn_sequence = self.turn_sequence
@@ -485,17 +514,20 @@ class BookingContext:
         self.last_failure_code = None
         self.turn_sequence = turn_sequence
 
+    # Bắt đầu booking mới từ state chọn shop.
     def restart_booking(self) -> None:
         """Reset booking data and enter the first selection state."""
         self.reset()
         self.state = BookingState.SELECTING_SHOP
 
+    # Chuyển context sang bước chọn shop cho flow bắt đầu/list shop.
     def enter_shop_selection(self) -> None:
         """Enter shop selection for a read-only shop discovery turn."""
         if self.state is not BookingState.IDLE:
             raise InvalidBookingDataError("Shop discovery can only start a booking from idle.")
         self.state = BookingState.SELECTING_SHOP
 
+    # Chuyển context sang bước chọn time sau khi đã có availability hợp lệ.
     def enter_time_selection(self) -> None:
         """Enter time selection after externally loading current slots."""
         if self.available_slots is None:

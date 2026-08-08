@@ -34,6 +34,7 @@ _SAFE_METADATA_KEYS = frozenset(
 )
 
 
+# Lấy ApplicationContainer đã được khởi tạo trong lifespan để transport không tự tạo dependency.
 def get_application_container(request: Request) -> ApplicationContainer:
     """Return the single container created by the FastAPI lifespan."""
     container = getattr(request.app.state, "application_container", None)
@@ -43,6 +44,7 @@ def get_application_container(request: Request) -> ApplicationContainer:
 
 
 @router.post("/chat", response_model=ChatResponse)
+# Nhận request JSON và chuyển toàn bộ xử lý nghiệp vụ xuống DialogController.
 async def chat(
     request: ChatRequest,
     http_request: Request,
@@ -69,6 +71,7 @@ async def chat(
 
 
 @router.post("/chat/stream", response_class=StreamingResponse)
+# Nhận request SSE và stream kết quả theo cùng pipeline xử lý với JSON endpoint.
 async def chat_stream(
     request: ChatRequest,
     http_request: Request,
@@ -86,6 +89,7 @@ async def chat_stream(
     )
 
 
+# Chạy một lượt chat qua DialogController và map lỗi runtime thành response an toàn.
 async def _process_chat_message(
     *,
     request: ChatRequest,
@@ -101,6 +105,7 @@ async def _process_chat_message(
     )
 
 
+# Tạo generator SSE từ cùng kết quả xử lý business turn của DialogController.
 def _stream_chat_events(
     *,
     request: ChatRequest,
@@ -117,6 +122,7 @@ def _stream_chat_events(
     )
 
 
+# Chuyển DialogResponse nội bộ thành schema public trả về frontend.
 def _to_chat_response(conversation_id: str, response: DialogResponse) -> ChatResponse:
     return ChatResponse(
         conversation_id=conversation_id,
@@ -129,6 +135,7 @@ def _to_chat_response(conversation_id: str, response: DialogResponse) -> ChatRes
     )
 
 
+# Lọc metadata chỉ giữ các kiểu dữ liệu an toàn cho public API.
 def _safe_metadata(
     metadata: Mapping[str, object],
 ) -> dict[str, bool | int | float | str | None]:

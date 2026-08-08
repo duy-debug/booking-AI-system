@@ -10,9 +10,11 @@ from app.domain.outcomes import HandlerOutcome, HandlerResult
 class SearchCourseHandler:
     """Loads and resolves courses without inventing catalog data."""
 
+    # Nhận gateway POS để tải course/add-on theo từng shop.
     def __init__(self, booking_gateway: BookingGateway) -> None:
         self._booking_gateway = booking_gateway
 
+    # Tìm liệu trình/add-on theo query, ưu tiên exact match trước substring match.
     async def execute(
         self,
         shop_id: UUID,
@@ -40,6 +42,7 @@ class SearchCourseHandler:
         return HandlerResult(HandlerOutcome.SUCCESS, {"courses": tuple(matched)})
 
 
+# Chuẩn hóa text tiếng Việt để matching course không phụ thuộc dấu/case.
 def _normalize(value: str) -> str:
     decomposed = unicodedata.normalize("NFD", value.strip().casefold())
     return "".join(

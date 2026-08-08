@@ -46,6 +46,7 @@ class SSESerializationError(TypeError):
     """Raised when an SSE data object is not JSON serializable."""
 
 
+# Mã hóa một event SSE thành đúng định dạng text/event-stream gửi về frontend.
 def encode_sse_event(
     *,
     event: str,
@@ -68,6 +69,7 @@ def encode_sse_event(
     return f"event: {event}\ndata: {payload}\n\n"
 
 
+# Stream started/message/completed để frontend biết vòng đời của một lượt chat.
 async def stream_chat_events(
     *,
     request: "ChatRequest",
@@ -94,6 +96,7 @@ async def stream_chat_events(
         reset_trace_context(token)
 
 
+# Bao lỗi trong quá trình stream thành event error an toàn thay vì làm đứt kết nối thô.
 async def _stream_bound_chat_events(
     *,
     request: "ChatRequest",

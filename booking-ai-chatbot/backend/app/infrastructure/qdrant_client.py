@@ -60,6 +60,7 @@ EncoderLoader = Callable[[str], _SentenceEncoder]
 class SentenceTransformerEmbedding:
     """Embed queries and documents with one lazily loaded local model."""
 
+    # Khởi tạo embedding gateway và lazy-load model để tránh tải model khi không dùng RAG.
     def __init__(
         self,
         model_name: str,
@@ -76,18 +77,21 @@ class SentenceTransformerEmbedding:
         self._load_lock = Lock()
 
     @property
+    # Trả dimension embedding để validate collection Qdrant.
     def dimension(self) -> int:
         """Return vector dimension after the first embedding operation."""
         if self._dimension is None:
             raise RuntimeError("Embedding dimension is available after the model has encoded text.")
         return self._dimension
 
+    # Embed một câu hỏi người dùng thành vector truy vấn.
     def embed_query(self, text: str) -> list[float]:
         """Return one normalized semantic vector for a non-empty query."""
         if not isinstance(text, str) or not text.strip():
             raise ValueError("Embedding query must not be empty.")
         return self._encode((text,))[0]
 
+    # Embed nhiều chunk knowledge cho quy trình indexing offline.
     def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         """Batch-encode documents in their supplied order."""
         document_texts = tuple(texts)
@@ -97,6 +101,7 @@ class SentenceTransformerEmbedding:
             raise ValueError("Embedding documents must contain non-empty text.")
         return self._encode(document_texts)
 
+    # Gọi model embedding và ép output về list vector float hợp lệ.
     def _encode(self, texts: Sequence[str]) -> list[list[float]]:
         model = self._get_model()
         raw_vectors = model.encode(
@@ -114,6 +119,7 @@ class SentenceTransformerEmbedding:
         self._dimension = model_dimension
         return vectors
 
+    # Lazy-load sentence transformer một lần và cache lại trong process.
     def _get_model(self) -> _SentenceEncoder:
         model = self._model
         if model is not None:
@@ -126,6 +132,7 @@ class SentenceTransformerEmbedding:
         return model
 
 
+# Tải sentence-transformers theo tên/model path đã cấu hình.
 def _load_sentence_transformer(model_name: str) -> _SentenceEncoder:
     from sentence_transformers import SentenceTransformer
 
@@ -135,6 +142,7 @@ def _load_sentence_transformer(model_name: str) -> _SentenceEncoder:
     )
 
 
+# Ép output embedding thành shape vector 2D và reject giá trị không phải số.
 def _coerce_vectors(raw_vectors: object) -> list[list[float]]:
     converter = getattr(raw_vectors, "tolist", None)
     converted = converter() if callable(converter) else raw_vectors
@@ -184,6 +192,7 @@ class QdrantQueryClient(Protocol):
 class KnowledgeQdrantClient:
     """Retrieve ranked knowledge documents using normalized query embeddings."""
 
+    # Nhận Qdrant client, collection và embedding gateway cho runtime retrieval.
     def __init__(
         self,
         *,
@@ -198,6 +207,7 @@ class KnowledgeQdrantClient:
         self._embedding = embedding
         self._collection_name = normalized_collection
 
+    # Tìm knowledge chunks liên quan trong Qdrant để phục vụ FAQ/RAG.
     async def search(
         self,
         query: str,
@@ -267,6 +277,7 @@ class KnowledgeQdrantClient:
         )
         return documents
 
+    # Chạy truy vấn Qdrant đồng bộ trong thread executor và map hit thành document an toàn.
     def _search_sync(self, query: str, limit: int) -> list[KnowledgeDocument]:
         query_vector = self._embedding.embed_query(query)
         response = self._client.query_points(
@@ -279,6 +290,7 @@ class KnowledgeQdrantClient:
         return _documents_from_points(response.points)
 
 
+# Chuyển Qdrant points thành KnowledgeDocument đã lọc score/source/content.
 def _documents_from_points(
     points: Sequence[models.ScoredPoint],
 ) -> list[KnowledgeDocument]:
@@ -311,6 +323,7 @@ def _documents_from_points(
     return documents
 
 
+# Validate logical source để response/log không chứa path nguy hiểm.
 def _is_safe_logical_source(source: str) -> bool:
     path = PurePosixPath(source)
     return bool(
@@ -405,6 +418,7 @@ class MarkdownKnowledgeLoader:
         self._root = root
         self._max_file_size = max_file_size
 
+    # Đọc một Markdown document knowledge và chuẩn hóa source logic cho indexing.
     def load(self, path: Path) -> MarkdownDocument:
         """Load one Markdown file without allowing access outside the root."""
         document_path = self._resolve_document_path(path)
@@ -436,6 +450,7 @@ class MarkdownKnowledgeLoader:
         source = PurePosixPath(self._root.name, relative_path).as_posix()
         return MarkdownDocument(content=normalized_content, source=source)
 
+    # Load toàn bộ file Markdown theo thứ tự ổn định để indexing repeatable.
     def load_all(self) -> list[MarkdownDocument]:
         """Load all Markdown files in deterministic relative-path order."""
         paths = sorted(
@@ -448,6 +463,7 @@ class MarkdownKnowledgeLoader:
         )
         return [self.load(path) for path in paths]
 
+    # Đảm bảo file knowledge nằm trong root cho phép và không escape qua path traversal.
     def _resolve_document_path(self, path: Path) -> Path:
         candidate = path if path.is_absolute() else self._root / path
         resolved = candidate.resolve()
@@ -466,6 +482,7 @@ class SectionAwareMarkdownChunker:
             raise ValueError("Maximum chunk size must be an integer of at least 64.")
         self._max_chunk_size = max_chunk_size
 
+    # Cắt Markdown thành chunks có heading/source/ID ổn định cho Qdrant.
     def chunk(self, document: MarkdownDocument) -> list[KnowledgeChunk]:
         """Create ordered chunks for one normalized Markdown document."""
         _validate_source(document.source)
@@ -496,6 +513,7 @@ class SectionAwareMarkdownChunker:
                 )
         return chunks
 
+    # Chunk nhiều documents và giữ thứ tự ổn định để test/index deterministic.
     def chunk_all(
         self,
         documents: list[MarkdownDocument],
@@ -504,6 +522,7 @@ class SectionAwareMarkdownChunker:
         return [chunk for document in documents for chunk in self.chunk(document)]
 
 
+# Tách Markdown theo heading để mỗi chunk giữ được ngữ cảnh section.
 def _extract_sections(content: str) -> tuple[_MarkdownSection, ...]:
     sections: list[_MarkdownSection] = []
     heading: str | None = None
@@ -544,6 +563,7 @@ def _fence_marker(line: str) -> str | None:
     return None
 
 
+# Chia nội dung section thành đoạn nhỏ không vượt max chunk size.
 def _split_section_body(body: str, max_size: int) -> tuple[str, ...]:
     paragraphs = tuple(
         normalized
@@ -597,6 +617,7 @@ def _split_long_paragraph(paragraph: str, max_size: int) -> tuple[str, ...]:
     return tuple(chunks)
 
 
+# Tạo chunk ID ổn định từ source/heading/content để upsert idempotent.
 def _chunk_id(
     *,
     source: str,
@@ -706,6 +727,7 @@ class IndexingSummary:
     vector_dimension: int
 
 
+# Index một tài liệu knowledge vào Qdrant cho workflow offline/admin.
 def index_knowledge_document(
     *,
     source: Path,
@@ -763,6 +785,7 @@ def index_knowledge_document(
     )
 
 
+# Chuyển chunk_id thành UUID ổn định tương thích Qdrant point id.
 def point_id_for_chunk(chunk_id: str) -> str:
     """Return a stable Qdrant-compatible UUID for one chunk identity."""
     if not chunk_id:
@@ -770,6 +793,7 @@ def point_id_for_chunk(chunk_id: str) -> str:
     return str(uuid5(_POINT_ID_NAMESPACE, chunk_id))
 
 
+# Tạo hoặc validate collection Qdrant có dimension/distance đúng với embedding model.
 def _ensure_collection(
     *,
     client: QdrantIndexClient,
@@ -815,6 +839,7 @@ def _source_filter(source: str) -> models.FilterSelector:
     )
 
 
+# Map KnowledgeChunk và vector embedding thành Qdrant point payload.
 def _point_from_chunk(
     *,
     chunk: KnowledgeChunk,
@@ -840,6 +865,7 @@ def _validate_collection_name(collection_name: str) -> str:
     return normalized
 
 
+# Đọc cấu hình indexing từ biến môi trường hiện tại.
 def _settings_from_environment() -> Settings:
     raw_port = os.getenv("QDRANT_PORT", "6333")
     try:
@@ -887,6 +913,7 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+# CLI entrypoint cho indexing offline, không nằm trong runtime chat request.
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the explicit offline indexing command."""
     arguments = _parser().parse_args(argv)
@@ -959,6 +986,7 @@ class FAQManager:
         self._instruction_builder = instruction_builder
         self._min_relevance_score = float(min_relevance_score)
 
+    # Trả lời FAQ bằng knowledge retrieval và InstructionBuilder, không đổi booking context.
     async def answer(
         self,
         *,
@@ -1029,6 +1057,7 @@ class FAQManager:
             duration_ms=elapsed_ms(started_at),
         )
 
+    # Render response an toàn khi Qdrant/knowledge chưa sẵn sàng hoặc không có kết quả.
     def _render_unavailable(self, context: BookingContext) -> DialogResponse:
         return self._instruction_builder.build_faq_response(
             answer=_FAQ_UNAVAILABLE_TEXT,
@@ -1038,6 +1067,7 @@ class FAQManager:
         )
 
 
+# Ghép nội dung documents thành context ngắn cho FAQ response.
 def _document_contents(
     documents: list[KnowledgeDocument],
 ) -> tuple[str, ...]:

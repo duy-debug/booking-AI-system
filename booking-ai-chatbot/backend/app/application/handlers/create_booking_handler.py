@@ -15,9 +15,11 @@ from app.domain.outcomes import HandlerOutcome, HandlerResult
 class CreateBookingHandler:
     """Performs final availability and one idempotent POS create call."""
 
+    # Nhận gateway POS dùng cho final availability và create booking thật.
     def __init__(self, booking_gateway: BookingGateway) -> None:
         self._booking_gateway = booking_gateway
 
+    # Recheck availability rồi gọi POS create một lần với idempotency key ổn định.
     async def execute(
         self,
         context: BookingContext,

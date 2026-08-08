@@ -47,6 +47,7 @@ _PUNCTUATION = re.compile(r'[.,!?;()\[\]{}"]')
 _ADDON = re.compile(r"\badd[ -]?on\b")
 
 
+# Chuẩn hóa tiếng Việt dùng chung cho tìm kiếm entity mà không fuzzy match quá rộng.
 def normalize_vietnamese(text: str, *, course_context: bool = False) -> str:
     """Normalize shared Vietnamese entity queries without fuzzy matching."""
     normalized = unicodedata.normalize("NFC", text).casefold().strip()
@@ -212,6 +213,8 @@ class StateIntentPolicy:
     allowed_intents: Mapping[BookingState, frozenset[str]]
     wildcard_states: frozenset[BookingState]
 
+    # Đóng băng policy để runtime không thể vô tình sửa allowed intents giữa các lượt chat.
+    # Validate candidate hiển thị để không lộ metadata nhạy cảm hoặc key không an toàn.
     def __post_init__(self) -> None:
         copied: dict[BookingState, frozenset[str]] = {}
         for state, intents in self.allowed_intents.items():
@@ -229,19 +232,23 @@ class StateIntentPolicy:
         object.__setattr__(self, "allowed_intents", MappingProxyType(copied))
         object.__setattr__(self, "wildcard_states", wildcard_states)
 
+    # Trả danh sách intent được phép ở một state, đã cộng thêm wildcard global nếu có.
     def allowed_for(self, state: BookingState) -> frozenset[str]:
         """Return named intents accepted by one state."""
         return self.allowed_intents.get(state, frozenset())
 
+    # Kiểm tra intent có được phép xử lý tại state hiện tại hay không.
     def is_allowed(self, state: BookingState, intent: str) -> bool:
         """Return whether an exact named intent is accepted by one state."""
         return intent in self.allowed_for(state)
 
+    # Kiểm tra state có fallback wildcard cho unknown/recovery hay không.
     def has_wildcard(self, state: BookingState) -> bool:
         """Return whether a state declares a separate wildcard transition."""
         return state in self.wildcard_states
 
 
+# Tạo policy intent từ flow JSON để LLM NLU không route ngoài state machine.
 def build_state_intent_policy(
     flow: FlowDefinition,
     *,
@@ -282,6 +289,8 @@ class NLUResult:
     has_unconsumed_entities: bool = False
     merged_entities: Mapping[str, object] = field(default_factory=dict)
 
+    # Validate NLUResult để chỉ result hợp lệ mới đi tiếp sang controller.
+    # Validate kết quả resolution để chỉ status hợp lệ mới có payload dispatch.
     def __post_init__(self) -> None:
         if self.intent is not None and (
             not isinstance(self.intent, str) or not self.intent.strip()
@@ -315,6 +324,7 @@ class NLUResult:
         if self.entity_query is not None:
             object.__setattr__(self, "entity_query", self.entity_query.strip())
 
+    # Cho biết result đã đủ intent/payload để dispatch thẳng vào DialogController hay chưa.
     def is_dispatchable(self) -> bool:
         """Return whether the result has the basic shape required for dispatch."""
         return (
@@ -324,6 +334,7 @@ class NLUResult:
             and self.entity_kind is None
         )
 
+    # Đảm bảo status resolved/entity/unresolved có shape đúng và không lẫn trách nhiệm.
     def _validate_resolution_shape(self) -> None:
         if self.resolution_status is NLUResolutionStatus.RESOLVED:
             if self.intent is None:
@@ -354,6 +365,7 @@ class NLUResult:
             raise ValueError("Unresolved NLU result cannot contain an entity query.")
 
 
+# Chuyển NLUResult đã resolved thành DialogTurnInput canonical cho DialogController.
 def to_dialog_turn_input(
     result: NLUResult,
     *,
@@ -386,6 +398,7 @@ def to_dialog_turn_input(
     )
 
 
+# Tạo NLUResult recovery khi LLM/provider không trả output đáp ứng contract.
 def _unresolved(
     *,
     confidence: float = 0.0,
@@ -404,6 +417,7 @@ def _unresolved(
     )
 
 
+# Kiểm tra payload nghiệp vụ tối thiểu tương ứng từng intent trước khi dispatch.
 def _validate_dispatch_payload(
     intent: str,
     payload: Mapping[str, object],
@@ -471,6 +485,7 @@ def _validate_dispatch_payload(
             raise NLUResultNotDispatchableError("NLU payload value has an invalid dispatch type.")
 
 
+# Validate change payload để chỉnh sửa booking luôn có target và value đúng kiểu.
 def _validate_change_payload(payload: Mapping[str, object]) -> None:
     target = payload.get("change_target")
     value_contracts: dict[str, tuple[str, type[object]]] = {
@@ -499,10 +514,12 @@ def _validate_change_payload(payload: Mapping[str, object]) -> None:
         raise NLUResultNotDispatchableError("Booking change value has an invalid type.")
 
 
+# Đóng băng payload để caller sau không mutate dữ liệu NLU đã validate.
 def _freeze_mapping(values: Mapping[str, object]) -> Mapping[str, object]:
     return MappingProxyType({key: _freeze_value(value) for key, value in values.items()})
 
 
+# Đệ quy đóng băng list/dict trong payload thành tuple/mapping bất biến.
 def _freeze_value(value: object) -> object:
     if isinstance(value, Mapping):
         return _freeze_mapping(value)
@@ -591,6 +608,7 @@ _LLM_NO_PAYLOAD_INTENTS = frozenset(
 class LLMNLU:
     """Parse every message using validated Gemini structured output."""
 
+    # Nhận LLM gateway, policy state và prioritizer để biến text thành NLUResult canonical.
     def __init__(
         self,
         *,
@@ -619,6 +637,7 @@ class LLMNLU:
         self._now_provider = now_provider or _utc_now
         self._prioritizer = IntentPrioritizer(intent_policy)
 
+    # Gửi câu người dùng sang Gemini, validate structured output và chọn intent tốt nhất.
     async def parse(
         self,
         *,
@@ -665,6 +684,7 @@ class LLMNLU:
             )
             return _llm_unresolved("nlu_unavailable")
         try:
+            # Parse tool/function response hoặc JSON content thành IntentCandidate đã validate.
             candidates = _parse_llm_candidates(response)
         except (ValueError, json.JSONDecodeError) as error:
             record_turn_metrics(nlu_duration_ms=elapsed_ms(started_at))
@@ -710,6 +730,7 @@ class LLMNLU:
             duration_ms=elapsed_ms(started_at),
         )
         record_turn_metrics(nlu_duration_ms=elapsed_ms(started_at))
+        # Chỉ chọn candidate tương thích với state hiện tại và đủ entity bắt buộc.
         selected = self._prioritizer.choose(
             candidates,
             state=state,
@@ -737,8 +758,10 @@ class LLMNLU:
                 error_code="invalid_nlu_output",
             )
             return _llm_unresolved("invalid_nlu_output")
+        # Candidate đã chọn được map thành NLUResult để DialogController xử lý tiếp.
         return self._to_nlu_result(output, state, merged_entities)
 
+    # Chuyển IntentCandidate đã được chọn thành NLUResult canonical cho pipeline phía sau.
     def _to_nlu_result(
         self,
         output: LLMNLUOutput,
@@ -803,6 +826,7 @@ class LLMNLU:
         )
 
 
+# Tạo prompt ngắn cho LLM NLU, chỉ đưa state/rule cần thiết và không đưa toàn bộ context nhạy cảm.
 def _build_llm_messages(
     *,
     text: str,
@@ -897,7 +921,9 @@ _INTENT_TOOL: dict[str, object] = {
 }
 
 
+# Parse structured/tool response của Gemini thành danh sách IntentCandidate hợp lệ.
 def _parse_llm_candidates(response: LLMResponse) -> list[IntentCandidate]:
+    # Runtime mới ưu tiên tool/function calling candidates.
     if response.tool_calls:
         call = response.tool_calls[0]
         if call.name != "extract_intent_candidates":
@@ -912,6 +938,7 @@ def _parse_llm_candidates(response: LLMResponse) -> list[IntentCandidate]:
     return [IntentCandidate.model_validate(legacy.model_dump())]
 
 
+# Chuyển entity reference từ LLM thành yêu cầu resolver, không tự tạo domain object.
 def _llm_entity_reference(
     output: LLMNLUOutput,
 ) -> tuple[NLUEntityKind | None, str | None]:
@@ -924,11 +951,13 @@ def _llm_entity_reference(
     return None, None
 
 
+# Map entity từ LLM thành payload nghiệp vụ tương ứng với từng intent.
 def _llm_direct_payload(
     intent: str,
     entities: LLMNLUEntities,
 ) -> dict[str, object] | None:
-    # Chuyển intent đã chọn thành payload chuẩn; intent xã hội không cần entity.
+    # `{}` nghĩa là intent hợp lệ nhưng không cần payload nghiệp vụ.
+    # `None` nghĩa là intent/entity không map được và sẽ bị chuyển thành unresolved.
     if intent == "change_info":
         return _llm_change_payload(entities)
     if intent in _LLM_NO_PAYLOAD_INTENTS:
@@ -955,6 +984,7 @@ def _llm_direct_payload(
     return None
 
 
+# Map change target/value từ LLM thành payload chỉnh sửa booking an toàn.
 def _llm_change_payload(
     entities: LLMNLUEntities,
 ) -> dict[str, object] | None:
@@ -983,6 +1013,7 @@ def _llm_change_payload(
     return payload
 
 
+# Parse ngày ISO từ LLM thành date chuẩn, trả None nếu provider gửi sai format.
 def _llm_date_payload(value: str) -> dict[str, object] | None:
     if not _LLM_ISO_DATE_PATTERN.fullmatch(value):
         return None
@@ -992,6 +1023,7 @@ def _llm_date_payload(value: str) -> dict[str, object] | None:
         return None
 
 
+# Parse giờ HH:MM từ LLM thành time chuẩn, trả None nếu provider gửi sai format.
 def _llm_time_payload(value: str) -> dict[str, object] | None:
     if not _LLM_CLOCK_PATTERN.fullmatch(value):
         return None
@@ -1001,6 +1033,7 @@ def _llm_time_payload(value: str) -> dict[str, object] | None:
         return None
 
 
+# Gom entity từ các candidate phụ để controller có thể tiêu thụ field đã nói sớm.
 def _merge_candidate_entities(
     candidates: list[IntentCandidate],
 ) -> dict[str, object]:
@@ -1023,6 +1056,7 @@ def _merge_candidate_entities(
     return merged
 
 
+# Ép kiểu entity primitive từ LLM, giữ None cho giá trị không an toàn hoặc sai kiểu.
 def _typed_llm_entity(key: str, value: object) -> object | None:
     if key == "booking_date" and isinstance(value, str):
         payload = _llm_date_payload(value)
@@ -1050,6 +1084,7 @@ def _typed_llm_entity(key: str, value: object) -> object | None:
     return None
 
 
+# Đánh dấu người dùng đã nói thêm field ngoài intent chính để controller xử lý tiếp.
 def _has_merged_secondary_entities(
     intent: str,
     merged_entities: Mapping[str, object],
@@ -1065,10 +1100,12 @@ def _has_merged_secondary_entities(
     return bool(set(merged_entities) - primary_keys)
 
 
+# Chuyển lỗi output LLM thành unresolved an toàn thay vì dispatch payload sai.
 def _llm_unresolved(error_code: str = "invalid_nlu_output") -> NLUResult:
     return _unresolved(matched_rule=error_code)
 
 
+# Lấy thời điểm UTC để ghi metadata request ổn định cho NLUResult.
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -1137,6 +1174,7 @@ class EntityCandidate:
     selection_key: str
     metadata: Mapping[str, object] = field(default_factory=dict)
 
+    # Đóng băng dispatch candidate để lựa chọn lại không gọi POS lần nữa.
     def __post_init__(self) -> None:
         if not isinstance(self.kind, NLUEntityKind):
             raise TypeError("Entity candidate kind is invalid.")
@@ -1200,6 +1238,7 @@ class EntityResolutionResult:
         )
         self._validate_status_shape()
 
+    # Đảm bảo mỗi status resolution có đúng shape dữ liệu và failure code phù hợp.
     def _validate_status_shape(self) -> None:
         if self.status is EntityResolutionStatus.RESOLVED:
             if self.dispatch_intent is None or not self.dispatch_payload:
@@ -1231,6 +1270,7 @@ class EntityResolutionResult:
 class EntityResolutionCoordinator:
     """Coordinate safe shop, course and therapist entity resolution."""
 
+    # Nhận các search handler thật để resolve tên shop/course/therapist qua nguồn nghiệp vụ.
     def __init__(
         self,
         *,
@@ -1242,6 +1282,7 @@ class EntityResolutionCoordinator:
         self._search_course_handler = search_course_handler
         self._booking_gateway = booking_gateway
 
+    # Resolve entity query từ NLU thành domain payload hoặc candidate ambiguity an toàn.
     async def resolve(
         self,
         *,
@@ -1261,6 +1302,7 @@ class EntityResolutionCoordinator:
             )
         return await self._resolve_therapist(query, context)
 
+    # Chọn candidate đã resolve trước đó mà không gọi lại handler/POS.
     def select_candidate(
         self,
         *,
@@ -1286,6 +1328,7 @@ class EntityResolutionCoordinator:
             matched_count=1,
         )
 
+    # Tìm shop qua handler và map 0/1/n kết quả thành not_found/resolved/ambiguous.
     async def _resolve_shop(
         self,
         query: str,
@@ -1325,6 +1368,7 @@ class EntityResolutionCoordinator:
         )
         return _ambiguous_result(NLUEntityKind.SHOP, candidates, dispatches)
 
+    # Tìm liệu trình/add-on trong phạm vi shop hiện tại và tạo CourseSelection phù hợp.
     async def _resolve_course(
         self,
         query: str,
@@ -1417,6 +1461,7 @@ class EntityResolutionCoordinator:
             tuple(dispatches),
         )
 
+    # Resolve yêu cầu therapist theo giới tính hoặc tên, tôn trọng chính sách nhóm/single booking.
     async def _resolve_therapist(
         self,
         query: str,
@@ -1486,6 +1531,7 @@ class EntityResolutionCoordinator:
         return _ambiguous_result(NLUEntityKind.THERAPIST, candidates, dispatches)
 
 
+# Chuyển entity resolution đã resolved thành DialogTurnInput để chạy tiếp StateMachine.
 def entity_resolution_to_dialog_turn_input(
     result: EntityResolutionResult,
     *,
@@ -1512,6 +1558,7 @@ def entity_resolution_to_dialog_turn_input(
     )
 
 
+# Validate state/entity trước khi gọi resolver để không lookup sai loại hoặc sai state.
 def _validate_resolution_request(
     result: NLUResult,
     state: BookingState,
@@ -1550,6 +1597,7 @@ def _validate_resolution_request(
     return result.entity_kind, result.entity_query, result.change_target
 
 
+# Ghép main course và add-on theo mode hiện tại của BookingContext.
 def _build_course_selection(
     service: Course,
     context: BookingContext,
@@ -1574,6 +1622,7 @@ def _build_course_selection(
         return None
 
 
+# Tạo EntityResolutionResult thành công từ dispatch đã được validate.
 def _resolved_result(
     kind: NLUEntityKind,
     dispatch: _CandidateDispatch,
@@ -1587,6 +1636,7 @@ def _resolved_result(
     )
 
 
+# Tạo kết quả không tìm thấy để renderer trả hướng dẫn nhập lại.
 def _not_found(kind: NLUEntityKind, code: str) -> EntityResolutionResult:
     return EntityResolutionResult(
         status=EntityResolutionStatus.NOT_FOUND,
@@ -1597,6 +1647,7 @@ def _not_found(kind: NLUEntityKind, code: str) -> EntityResolutionResult:
     )
 
 
+# Tạo kết quả unsupported khi loại entity không thể resolve ở trạng thái hiện tại.
 def _unsupported(kind: NLUEntityKind, code: str) -> EntityResolutionResult:
     return EntityResolutionResult(
         status=EntityResolutionStatus.UNSUPPORTED,
@@ -1607,6 +1658,7 @@ def _unsupported(kind: NLUEntityKind, code: str) -> EntityResolutionResult:
     )
 
 
+# Tạo failure an toàn khi handler/POS lỗi hoặc response không đúng contract.
 def _failure(kind: NLUEntityKind, code: str) -> EntityResolutionResult:
     return EntityResolutionResult(
         status=EntityResolutionStatus.FAILED,
@@ -1617,6 +1669,7 @@ def _failure(kind: NLUEntityKind, code: str) -> EntityResolutionResult:
     )
 
 
+# Tạo danh sách candidate hiển thị khi có nhiều kết quả cùng phù hợp.
 def _ambiguous_result(
     kind: NLUEntityKind,
     candidates: tuple[EntityCandidate, ...],
@@ -1638,6 +1691,7 @@ def _ambiguous_result(
     )
 
 
+# Lọc metadata candidate để không lộ UUID/raw payload ra response.
 def _safe_candidate_metadata(values: Mapping[str, object]) -> Mapping[str, object]:
     safe: dict[str, object] = {}
     for key, value in values.items():
@@ -1652,6 +1706,7 @@ def _safe_candidate_metadata(values: Mapping[str, object]) -> Mapping[str, objec
     return MappingProxyType(safe)
 
 
+# Kiểm tra payload domain sau resolution trước khi chuyển sang DialogTurnInput.
 def _validate_resolution_payload(
     intent: str,
     payload: Mapping[str, object],

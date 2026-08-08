@@ -94,10 +94,12 @@ InstructionRenderer: TypeAlias = Callable[
 class InstructionBuilder:
     """Render registered instruction identifiers without side effects or I/O."""
 
+    # Khởi tạo registry template để render response theo state/outcome đã xử lý.
     def __init__(self) -> None:
         self._templates: dict[str, InstructionRenderer] = {}
         self._register_default_templates()
 
+    # Đăng ký renderer cho instruction_template mà flow JSON tham chiếu.
     def register_template(
         self,
         name: str,
@@ -113,14 +115,17 @@ class InstructionBuilder:
             )
         self._templates[normalized_name] = renderer
 
+    # Kiểm tra template có renderer để validate flow lúc startup.
     def has_template(self, name: str) -> bool:
         """Return whether an exact template name is registered."""
         return isinstance(name, str) and name.strip() in self._templates
 
+    # Trả danh sách template đã đăng ký để audit binding.
     def registered_templates(self) -> tuple[str, ...]:
         """Return template names in registration order."""
         return tuple(self._templates)
 
+    # Tìm template trong flow chưa có renderer để fail fast trước runtime.
     def find_missing_templates(
         self,
         declared_templates: Iterable[str],
@@ -135,6 +140,7 @@ class InstructionBuilder:
                     missing.append(name)
         return tuple(missing)
 
+    # Chọn instruction phù hợp dựa trên state mới và kết quả business đã xử lý.
     def build_response(
         self,
         *,
@@ -169,6 +175,7 @@ class InstructionBuilder:
             metadata=_allowlisted_metadata(draft.metadata),
         )
 
+    # Tổng hợp instruction và context an toàn trước khi gọi LLM NLG.
     def build_nlg_prompt(
         self,
         *,
@@ -206,6 +213,7 @@ class InstructionBuilder:
         )
         return "\n".join(facts)
 
+    # Tạo response FAQ grounded từ knowledge documents mà không mutate booking state.
     def build_faq_response(
         self,
         *,
@@ -255,6 +263,7 @@ class InstructionBuilder:
             metadata={"response_type": "faq", "source_count": source_count},
         )
 
+    # Lấy renderer theo template name hoặc dùng fallback an toàn nếu thiếu.
     def _get_renderer(self, name: str) -> InstructionRenderer:
         try:
             return self._templates[name]
@@ -264,6 +273,7 @@ class InstructionBuilder:
             ) from error
 
     @staticmethod
+    # Chuẩn hóa template name để flow không dùng key rỗng hoặc sai format.
     def _normalize_template_name(name: str) -> str:
         if not isinstance(name, str):
             raise InvalidInstructionTemplateNameError("Instruction template name must be a string.")
@@ -274,6 +284,7 @@ class InstructionBuilder:
             )
         return normalized
 
+    # Đăng ký toàn bộ renderer mặc định mà booking_flow.json đang sử dụng.
     def _register_default_templates(self) -> None:
         templates: tuple[tuple[str, InstructionRenderer], ...] = (
             ("greeting", self._greeting),

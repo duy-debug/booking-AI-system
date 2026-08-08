@@ -12,9 +12,11 @@ from app.domain.outcomes import HandlerOutcome, HandlerResult
 class CheckAvailabilityHandler:
     """Loads slots for the complete booking shape without choosing one."""
 
+    # Nhận gateway POS để kiểm tra slot dựa trên dữ liệu booking hiện tại.
     def __init__(self, booking_gateway: BookingGateway) -> None:
         self._booking_gateway = booking_gateway
 
+    # Gọi POS lấy slot trống và map kết quả thành HandlerResult cho StateMachine.
     async def execute(self, context: BookingContext) -> HandlerResult:
         """Load slots without mutating the working booking context."""
         if (

@@ -36,9 +36,11 @@ class StateMachine:
 
     _COLLECTION_TYPES = (tuple, list, set, frozenset)
 
+    # Giữ flow đã parse để mọi transition đều dựa trên cùng một định nghĩa khai báo.
     def __init__(self, flow: FlowDefinition) -> None:
         self._flow = flow
 
+    # Đọc giá trị field trong BookingContext cho điều kiện declarative của flow.
     def _resolve_field(
         self,
         context: BookingContext,
@@ -64,6 +66,7 @@ class StateMachine:
                 return None
         return current
 
+    # Chuẩn hóa enum/collection trước khi so sánh điều kiện trong state machine.
     def _normalize_value(self, value: object) -> object:
         if isinstance(value, Enum):
             return value.value
@@ -77,6 +80,7 @@ class StateMachine:
             return frozenset(self._normalize_value(item) for item in value)
         return value
 
+    # Đánh giá một điều kiện flow mà không làm thay đổi BookingContext.
     def _evaluate_condition(
         self,
         condition: FlowCondition,
@@ -148,6 +152,7 @@ class StateMachine:
                 return False
         raise InvalidFlowConditionError(f"Unsupported condition operator '{op}'.")
 
+    # Kiểm tra toàn bộ điều kiện của một transition có khớp context hiện tại không.
     def _matches_conditions(
         self,
         conditions: tuple[FlowCondition, ...],
@@ -155,6 +160,7 @@ class StateMachine:
     ) -> bool:
         return all(self._evaluate_condition(condition, context) for condition in conditions)
 
+    # Tìm transition phù hợp với state hiện tại và intent đã được NLU chọn.
     def resolve_transition(
         self,
         context: BookingContext,
@@ -192,6 +198,7 @@ class StateMachine:
             f"Cannot transition from '{context.state.value}' using intent '{intent}'."
         )
 
+    # Chọn candidate đầu tiên khớp điều kiện, fallback sang transition không có điều kiện.
     def _resolve_candidates(
         self,
         candidates: tuple[FlowTransition, ...],
@@ -208,6 +215,7 @@ class StateMachine:
             None,
         )
 
+    # Tìm auto transition sau khi business action cập nhật context, nhưng chưa commit state.
     def resolve_auto_transition(
         self,
         context: BookingContext,
@@ -225,6 +233,7 @@ class StateMachine:
             None,
         )
 
+    # Áp dụng state mới sau khi handler/action đã hoàn tất thành công.
     def apply_transition(
         self,
         context: BookingContext,
@@ -244,6 +253,7 @@ class StateMachine:
         )
 
     @staticmethod
+    # Ghi trace transition đã chọn để dễ theo dõi state đi qua flow nào.
     def _log_resolved(
         context: BookingContext,
         intent: str,
@@ -260,6 +270,7 @@ class StateMachine:
             success_target=transition.target.value,
         )
 
+    # Tìm failure transition theo mã lỗi business, ưu tiên exact code rồi mới fallback.
     def resolve_failure(
         self,
         transition: FailureSource,
@@ -283,6 +294,7 @@ class StateMachine:
             None,
         )
 
+    # Áp dụng failure state mà không commit thêm dữ liệu business không hợp lệ.
     def apply_failure(
         self,
         context: BookingContext,
@@ -291,6 +303,7 @@ class StateMachine:
         """Commit only a resolved failure target."""
         context.state = failure.target
 
+    # Giữ alias cũ cho caller/test nhưng vẫn không tự commit state.
     def transition(
         self,
         context: BookingContext,
@@ -299,6 +312,7 @@ class StateMachine:
         """Compatibility alias for resolve_transition; does not commit state."""
         return self.resolve_transition(context, intent)
 
+    # Kiểm tra intent có route hợp lệ ở state hiện tại mà không làm đổi context.
     def can_transition(
         self,
         context: BookingContext,
@@ -311,6 +325,7 @@ class StateMachine:
             return False
         return True
 
+    # Liệt kê các intent được khai báo cho state để phục vụ policy/audit.
     def available_events(
         self,
         current_state: BookingState,
@@ -323,6 +338,7 @@ class StateMachine:
             )
         )
 
+    # Lấy định nghĩa state đã parse hoặc fail fast nếu flow thiếu state.
     def get_state_definition(self, state: BookingState) -> FlowState:
         """Return the flow definition for a booking state."""
         try:
@@ -332,6 +348,7 @@ class StateMachine:
                 f"State '{state.value}' is not declared in the flow."
             ) from exc
 
+    # Trả auto transition khai báo để caller quyết định thời điểm đánh giá.
     def get_auto_transitions(
         self,
         state: BookingState,
@@ -339,6 +356,7 @@ class StateMachine:
         """Return parsed auto transitions without evaluating them."""
         return self.get_state_definition(state).auto_transitions
 
+    # Lấy cấu hình tách luồng phone/customer mà không tự chạy logic phone.
     def get_phone_split_config(
         self,
         state: BookingState,

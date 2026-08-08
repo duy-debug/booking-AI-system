@@ -19,12 +19,14 @@ from app.domain.outcomes import HandlerOutcome, HandlerResult
 class CheckCustomerHandler:
     """Coordinates customer verification without partial mutation on failures."""
 
+    # Nhận gateway POS để kiểm tra blacklist/customer record theo số điện thoại.
     def __init__(
         self,
         booking_gateway: BookingGateway,
     ) -> None:
         self._booking_gateway = booking_gateway
 
+    # Kiểm tra phone trên POS, phân biệt khách bị chặn, khách cũ và khách mới cần tên.
     async def check(
         self,
         context: BookingContext,
@@ -113,6 +115,7 @@ class CheckCustomerHandler:
             updates,
         )
 
+    # Xác nhận phone đã qua bước check trước đó và cập nhật context confirmation.
     def confirm(self, context: BookingContext) -> HandlerResult:
         if context.phone is None:
             return HandlerResult(

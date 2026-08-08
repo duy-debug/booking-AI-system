@@ -148,6 +148,7 @@ class FailureDescriptor:
     cause: Exception
 
 
+# Lấy payload bắt buộc cho action và fail fast nếu kiểu dữ liệu không đúng contract.
 def _require_payload_value(
     context: ActionExecutionContext,
     key: str,
@@ -168,6 +169,7 @@ def _require_payload_value(
 class ActionRegistry:
     """Registers explicit action bindings and executes them sequentially."""
 
+    # Đăng ký action declarative và handler thật được inject từ composition root.
     def __init__(
         self,
         *,
@@ -190,6 +192,7 @@ class ActionRegistry:
         self._register_domain_actions()
         self._register_injected_handler_actions()
 
+    # Đăng ký binding action theo tên trong flow JSON mà không cho ghi đè âm thầm.
     def register_action(self, name: str, action: ActionCallable) -> None:
         """Register an explicitly supplied async action without overriding."""
         normalized_name = self._normalize_action_name(name)
@@ -269,6 +272,7 @@ class ActionRegistry:
             "action_execution_error",
         )
 
+    # Chạy recovery actions nhưng chặn mọi side effect có thể tạo booking lại.
     async def execute_failure_actions(
         self,
         failure: FlowFailure,
@@ -282,6 +286,7 @@ class ActionRegistry:
             raise InvalidActionSequenceError("Failure actions must not create or retry a booking.")
         return await self.execute_actions(failure.actions, context)
 
+    # Chạy một action đơn lẻ trên snapshot để rollback nếu action lỗi.
     async def execute_action(
         self,
         action_name: str,
@@ -301,6 +306,7 @@ class ActionRegistry:
             self._restore_booking_context(context.booking_context, snapshot)
             raise
 
+    # Điều phối chuỗi business action và rollback toàn bộ working context nếu có lỗi.
     async def execute_actions(
         self,
         action_names: Sequence[str],
@@ -334,6 +340,7 @@ class ActionRegistry:
         return ActionExecutionReport(tuple(results))
 
     @staticmethod
+    # Chuẩn hóa tên action từ flow để tránh registry nhận tên không an toàn.
     def _normalize_action_name(name: str) -> str:
         if not isinstance(name, str):
             raise InvalidActionNameError("Action name must be a string.")
@@ -345,6 +352,7 @@ class ActionRegistry:
         return normalized_name
 
     @staticmethod
+    # Bóc lỗi gốc khỏi ActionExecutionError lồng nhau để map failure code chính xác.
     def _unwrap_action_error(error: Exception) -> Exception:
         current = error
         seen: set[int] = set()
@@ -598,6 +606,7 @@ class ActionRegistry:
             booking.set_duration(booking.main_course.duration_minutes)
         return ActionResult("infer_duration_from_course", booking.duration_minutes)
 
+    # Đăng ký các action cần handler thật như POS availability, customer check và create booking.
     def _register_injected_handler_actions(self) -> None:
         if self._search_shop_handler is not None:
             self.register_action("search_shop", self._search_shop)
@@ -616,6 +625,7 @@ class ActionRegistry:
         if self._create_booking_handler is not None:
             self.register_action("create_booking", self._create_booking)
 
+    # Gọi handler tìm danh sách shop và lưu catalog gợi ý vào BookingContext.
     async def _search_shop(
         self,
         context: ActionExecutionContext,
@@ -636,6 +646,7 @@ class ActionRegistry:
         context.booking_context.suggested_shops_loaded = True
         return ActionResult("search_shop", shops)
 
+    # Áp dụng shop đã resolve vào context và clear các dữ liệu phụ thuộc.
     async def _handle_store_selection(
         self,
         context: ActionExecutionContext,
@@ -644,6 +655,7 @@ class ActionRegistry:
         context.booking_context.set_shop(shop)
         return ActionResult("handle_store_selection", shop)
 
+    # Validate và lưu ngày booking đã chọn.
     async def _handle_date_selection(
         self,
         context: ActionExecutionContext,
@@ -658,6 +670,7 @@ class ActionRegistry:
             context.booking_context.set_booking_date(booking_date)
         return ActionResult("handle_date_selection", booking_date)
 
+    # Validate và lưu số người, để domain tự clear therapist/slot khi cần.
     async def _handle_people_selection(
         self,
         context: ActionExecutionContext,
@@ -672,6 +685,7 @@ class ActionRegistry:
             context.booking_context.set_num_customer(num_customer)
         return ActionResult("handle_people_selection", num_customer)
 
+    # Validate thời lượng trước khi chuyển sang chọn liệu trình.
     async def _handle_duration_selection(
         self,
         context: ActionExecutionContext,
@@ -688,6 +702,7 @@ class ActionRegistry:
             context.booking_context.set_duration(duration)
         return ActionResult("handle_duration_selection", duration)
 
+    # Lưu main course/add-on đã resolve vào BookingContext.
     async def _handle_course_selection(
         self,
         context: ActionExecutionContext,
@@ -700,10 +715,12 @@ class ActionRegistry:
         context.booking_context.set_course_selection(selection)
         return ActionResult("handle_course_selection", selection)
 
+    # Đánh dấu người dùng không chọn add-on để flow có thể chuyển bước tiếp.
     async def _skip_addon(self, context: ActionExecutionContext) -> ActionResult:
         context.booking_context.skip_addon()
         return ActionResult("skip_addon", None)
 
+    # Chỉ nhận slot nằm trong latest available_slots đã load từ POS.
     async def _handle_time_selection(
         self,
         context: ActionExecutionContext,
@@ -724,6 +741,7 @@ class ActionRegistry:
             context.booking_context.set_start_time(start_time)
         return ActionResult("handle_time_selection", start_time)
 
+    # Lưu yêu cầu therapist đã được domain/POS xác thực theo chính sách booking.
     async def _handle_therapist_selection(
         self,
         context: ActionExecutionContext,
@@ -745,6 +763,7 @@ class ActionRegistry:
             context.booking_context.set_therapist_verified(True)
         return ActionResult("handle_therapist_selection", preference)
 
+    # Đổi shop và clear các field phụ thuộc để tránh dùng dữ liệu của shop cũ.
     async def _change_shop(self, context: ActionExecutionContext) -> ActionResult:
         shop = context.payload.get("shop")
         if shop is not None and not isinstance(shop, Shop):
@@ -752,6 +771,7 @@ class ActionRegistry:
         context.booking_context.change_shop(shop)
         return ActionResult("change_shop", shop)
 
+    # Đổi ngày và clear slot/therapist đã phụ thuộc vào ngày cũ.
     async def _change_date(self, context: ActionExecutionContext) -> ActionResult:
         booking_date = context.payload.get("booking_date")
         if booking_date is not None and type(booking_date) is not date:
@@ -759,6 +779,7 @@ class ActionRegistry:
         context.booking_context.change_booking_date(booking_date)
         return ActionResult("change_date", booking_date)
 
+    # Đổi số người và giữ rollback atomic nếu giá trị vượt rule domain.
     async def _change_people(self, context: ActionExecutionContext) -> ActionResult:
         value = context.payload.get("num_customer")
         if value is not None and type(value) is not int:
@@ -766,6 +787,7 @@ class ActionRegistry:
         context.booking_context.change_num_customer(value)
         return ActionResult("change_people", value)
 
+    # Đổi duration và clear liệu trình/availability đang phụ thuộc duration cũ.
     async def _change_duration(self, context: ActionExecutionContext) -> ActionResult:
         value = context.payload.get("duration_minutes")
         if value is not None and type(value) is not int:
@@ -773,6 +795,7 @@ class ActionRegistry:
         context.booking_context.change_duration(value)
         return ActionResult("change_duration", value)
 
+    # Đổi course hoặc add-on rồi buộc reload slot/time/therapist sau đó.
     async def _change_course(self, context: ActionExecutionContext) -> ActionResult:
         selection = context.payload.get("course_selection")
         if selection is not None and not isinstance(selection, CourseSelection):
@@ -780,6 +803,7 @@ class ActionRegistry:
         context.booking_context.change_course_selection(selection)
         return ActionResult("change_course", selection)
 
+    # Đổi giờ booking và yêu cầu xác thực lại therapist nếu có.
     async def _change_time(self, context: ActionExecutionContext) -> ActionResult:
         start_time = context.payload.get("start_time")
         if start_time is not None and type(start_time) is not time:
@@ -787,6 +811,7 @@ class ActionRegistry:
         context.booking_context.change_start_time(start_time)
         return ActionResult("change_time", start_time)
 
+    # Đổi yêu cầu therapist theo giới tính hoặc bỏ yêu cầu, không tạo booking.
     async def _change_therapist(
         self,
         context: ActionExecutionContext,
@@ -800,6 +825,7 @@ class ActionRegistry:
         context.booking_context.change_therapist_preference(preference)
         return ActionResult("change_therapist", preference)
 
+    # Đổi số điện thoại và reset trạng thái xác thực khách hàng.
     async def _change_phone(self, context: ActionExecutionContext) -> ActionResult:
         phone = context.payload.get("phone")
         if phone is not None:
@@ -809,6 +835,7 @@ class ActionRegistry:
         context.booking_context.change_phone(phone)
         return ActionResult("change_phone", phone)
 
+    # Lưu lựa chọn không yêu cầu therapist cho booking một người.
     async def _skip_therapist(
         self,
         context: ActionExecutionContext,
@@ -817,6 +844,7 @@ class ActionRegistry:
         context.booking_context.set_therapist_preference(preference)
         return ActionResult("skip_therapist", preference)
 
+    # Tự bỏ therapist cá nhân cho group booking vì nhóm chỉ được chọn giới tính/none.
     async def _skip_therapist_for_group(
         self,
         context: ActionExecutionContext,
@@ -836,6 +864,7 @@ class ActionRegistry:
             context.booking_context.set_therapist_verified(True)
         return ActionResult("skip_therapist_for_group")
 
+    # Validate format phone trước khi cho phép confirm hoặc check customer.
     async def _validate_phone(
         self,
         context: ActionExecutionContext,
@@ -846,6 +875,7 @@ class ActionRegistry:
         BookingRules.validate_phone(phone)
         return ActionResult("validate_phone", phone)
 
+    # Xóa phone đã nhập khi người dùng phủ nhận số điện thoại.
     async def _clear_phone_confirmation(
         self,
         context: ActionExecutionContext,
@@ -853,6 +883,7 @@ class ActionRegistry:
         context.booking_context.clear_phone()
         return ActionResult("clear_phone_confirmation")
 
+    # Gọi availability handler để lấy slot mới nhất từ POS và lưu vào context.
     async def _load_time_slots(
         self,
         context: ActionExecutionContext,
@@ -871,6 +902,7 @@ class ActionRegistry:
             slots,
         )
 
+    # Gọi POS/customer handler để kiểm tra phone, blacklist và trạng thái khách hàng.
     async def _handle_phone_collection(
         self,
         context: ActionExecutionContext,
@@ -895,6 +927,7 @@ class ActionRegistry:
         _apply_context_updates(context.booking_context, result)
         return ActionResult("handle_phone_collection", result.data["verification"])
 
+    # Commit trạng thái phone_confirmed sau khi người dùng xác nhận số điện thoại.
     async def _mark_phone_confirmed(
         self,
         context: ActionExecutionContext,
@@ -905,6 +938,7 @@ class ActionRegistry:
         _apply_context_updates(context.booking_context, result)
         return ActionResult("mark_phone_confirmed")
 
+    # Lưu tên cho khách mới sau khi phone chưa có customer record trên POS.
     async def _handle_customer_name(
         self,
         context: ActionExecutionContext,
@@ -918,6 +952,7 @@ class ActionRegistry:
         context.booking_context.customer = Customer(phone=phone, name=name)
         return ActionResult("handle_customer_name", name)
 
+    # Tạo booking thật trên POS sau final confirmation và idempotency key đã sẵn sàng.
     async def _create_booking(
         self,
         context: ActionExecutionContext,
@@ -933,12 +968,14 @@ class ActionRegistry:
         return ActionResult("create_booking", result.data["create_result"])
 
 
+# Chuyển HandlerResult không thành công thành lỗi để StateMachine đi failure path.
 def _ensure_success(result: HandlerResult) -> None:
     if result.outcome is HandlerOutcome.SUCCESS:
         return
     raise InvalidBookingDataError(result.error_code or result.outcome.value)
 
 
+# Lấy tuple item typed từ HandlerResult để action không dùng dữ liệu sai contract.
 def _typed_result_items(
     result: HandlerResult,
     key: str,
@@ -950,6 +987,7 @@ def _typed_result_items(
     return value
 
 
+# Áp dụng context_updates từ handler sau khi đã xác thực field thuộc BookingContext.
 def _apply_context_updates(
     context: BookingContext,
     result: HandlerResult,

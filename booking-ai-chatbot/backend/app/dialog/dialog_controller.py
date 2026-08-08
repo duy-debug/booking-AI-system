@@ -186,6 +186,7 @@ class DialogTurnResult:
 class DialogController:
     """Coordinates state resolution, action execution and state commits."""
 
+    # Nhận StateMachine, ActionRegistry và change rules để điều phối một dialog turn.
     def __init__(
         self,
         *,
@@ -204,12 +205,14 @@ class DialogController:
         self._max_auto_transitions = max_auto_transitions
         self._runtime: ApplicationContainer | None = None
 
+    # Bind composition graph sau khi toàn bộ dependency đã được tạo ở application container.
     def bind_runtime(self, runtime: "ApplicationContainer") -> None:
         """Bind the completed composition graph once for message orchestration."""
         if self._runtime is not None and self._runtime is not runtime:
             raise RuntimeError("DialogController runtime is already bound.")
         self._runtime = runtime
 
+    # Nhận message từ API, khóa conversation và chạy trọn một lượt xử lý hội thoại.
     async def handle_message(
         self,
         *,
@@ -231,6 +234,7 @@ class DialogController:
                 correlation_id=correlation_id,
             )
 
+    # Chạy một turn đã parse sẵn qua StateMachine và ActionRegistry, chưa render response cuối.
     async def handle_turn(
         self,
         booking_context: BookingContext,
@@ -247,6 +251,7 @@ class DialogController:
                 committed_actions=(),
                 auto_transition_count=0,
             )
+        # Final confirm cần idempotency key trước khi state BOOKING_EXECUTING gọi POS create.
         if turn.intent == "confirm" and initial_state in {
             BookingState.AWAITING_CONFIRMATION,
             BookingState.BOOKING_FAILED,
@@ -271,6 +276,7 @@ class DialogController:
                 turn.intent,
             )
 
+        # Chạy action của transition trên working context để rollback nếu action fail.
         try:
             transition_report = await self._execute_actions(
                 transition.actions,
@@ -289,6 +295,7 @@ class DialogController:
             )
 
         committed_actions = transition_report.executed_action_names
+        # Chỉ commit state sau khi action chính đã thành công.
         self._state_machine.apply_transition(booking_context, transition)
         if booking_context.state is BookingState.CANCELLED:
             booking_context.clear_booking_attempt()
@@ -334,6 +341,7 @@ class DialogController:
             instruction_template=on_enter.instruction_template,
         )
 
+    # Tạo transition tạm cho change_info dựa trên field cần sửa và có value hay chưa.
     def _change_transition(
         self,
         booking_context: BookingContext,
@@ -364,6 +372,7 @@ class DialogController:
         )
         return rule, transition, has_value
 
+    # Chạy auto transition sau khi context đủ điều kiện, ví dụ booking success sang completed.
     async def _execute_auto_transitions(
         self,
         *,
@@ -652,6 +661,7 @@ async def _process_serialized_chat_message(
     container: ApplicationContainer,
     correlation_id: str | None = None,
 ) -> DialogResponse:
+    # Gắn trace/conversation context rồi chạy pipeline message theo thứ tự an toàn.
     """Run the deterministic message pipeline without booking business rules."""
     token = bind_conversation(conversation_id)
     correlation_token = bind_correlation_id(correlation_id)
@@ -685,6 +695,7 @@ async def _process_serialized_chat_message(
             user_message=message[:500],
         )
     try:
+        # Phân tích NLU, route, chạy handler và dựng DialogResponse trên working context.
         response = await _process_bound_chat_message(
             conversation_id=conversation_id,
             message=message,
@@ -692,6 +703,7 @@ async def _process_serialized_chat_message(
             container=container,
             context=context,
         )
+        # LLM NLG chỉ diễn đạt response, không quyết định business outcome.
         if getattr(container, "llm_nlg_required", False):
             response = await container.response_generator.generate(
                 response=response,
@@ -772,10 +784,12 @@ async def _process_bound_chat_message(
     container: ApplicationContainer,
     context: BookingContext,
 ) -> DialogResponse:
+    # Xử lý turn khi trace context đã bind: NLU -> route -> entity/action -> response.
     """Process a turn after its safe logging context has been bound."""
     if context.state is BookingState.AWAITING_CONFIRMATION and _is_generic_change_request(message):
         return _change_menu_response(context)
 
+    # Phân tích câu người dùng bằng LLM NLU thành NLUResult canonical.
     nlu_result = await container.llm_nlu.parse(
         text=message,
         state=context.state,
@@ -783,6 +797,7 @@ async def _process_bound_chat_message(
     )
     resolver = "llm"
 
+    # Stage entity đã nói sớm vào context để chỉ hỏi field còn thiếu.
     _stage_requested_entities(nlu_result, context)
 
     if context.state in {
@@ -1313,6 +1328,7 @@ async def _next_requested_turn(
     )
 
 
+# Ghi lý do router chọn nhánh xử lý để trace một chat turn trong terminal.
 def _trace_route(
     route: str,
     reason: str,
@@ -1331,6 +1347,7 @@ def _trace_route(
     )
 
 
+# Chụp snapshot context trước xử lý để so sánh diff sau turn.
 def _context_snapshot(context: BookingContext) -> dict[str, object]:
     return {
         item.name: getattr(context, item.name)
@@ -1339,6 +1356,7 @@ def _context_snapshot(context: BookingContext) -> dict[str, object]:
     }
 
 
+# Log các field changed/preserved/cleared mà không log toàn bộ BookingContext.
 def _trace_context_diff(before: Mapping[str, object], context: BookingContext) -> None:
     after = _context_snapshot(context)
     changed = sorted(name for name, value in after.items() if value != before[name])
@@ -1362,10 +1380,12 @@ def _trace_context_diff(before: Mapping[str, object], context: BookingContext) -
     )
 
 
+# Xác định field có giá trị đáng ghi vào preserved diff hay không.
 def _is_meaningful_context_value(value: object) -> bool:
     return value is not None and value is not False and value != () and value != "none"
 
 
+# Lấy tên hiển thị của entity đã resolve để trace mà không lộ raw payload.
 def _matched_display_name(resolution: EntityResolutionResult) -> str:
     for value in resolution.dispatch_payload.values():
         display_name = getattr(value, "name", None)
@@ -1374,6 +1394,7 @@ def _matched_display_name(resolution: EntityResolutionResult) -> str:
     return "none"
 
 
+# Ghi debug log sau khi context đã được commit vào store.
 def _trace_context_saved(context: BookingContext) -> None:
     trace_log(
         logger,
@@ -1384,6 +1405,7 @@ def _trace_context_saved(context: BookingContext) -> None:
     )
 
 
+# Tự tải gợi ý an toàn cho state mới để người dùng không phải hỏi danh sách thủ công.
 async def _with_proactive_suggestions(
     *,
     response: DialogResponse,
@@ -1459,6 +1481,7 @@ async def _with_proactive_suggestions(
     return response
 
 
+# Gọi POS lấy therapist còn trống cho slot đã chọn, chỉ dùng khi single booking.
 async def _available_therapists(
     container: ApplicationContainer,
     context: BookingContext,
@@ -1485,6 +1508,7 @@ async def _available_therapists(
     )
 
 
+# Log metadata instruction an toàn; nội dung đầy đủ chỉ bật trong local debug.
 def _log_instruction(response: DialogResponse) -> None:
     trace_log(
         logger,
@@ -1505,6 +1529,7 @@ def _log_instruction(response: DialogResponse) -> None:
         )
 
 
+# Chỉ cho phép log raw/debug khi môi trường local và flag tương ứng bật.
 def _local_debug_enabled(name: str) -> bool:
     environment = os.getenv("APP_ENV", "production").strip().casefold()
     enabled = os.getenv(name, "false").strip().casefold()
@@ -1528,6 +1553,7 @@ _DISCOVERY_INTENTS = frozenset(
 )
 
 
+# Xử lý các intent liệt kê/tìm kiếm catalog mà không chọn entity vào booking.
 async def _handle_discovery(
     *,
     nlu_result: NLUResult,
@@ -1627,6 +1653,7 @@ async def _handle_discovery(
     return _handled_response(context, "Yêu cầu danh sách chưa được hỗ trợ.")
 
 
+# Render danh sách shop gợi ý từ POS mà không tự chọn shop thay người dùng.
 def _shop_catalog_response(
     context: BookingContext,
     shops: list[Shop],
@@ -1652,6 +1679,7 @@ def _shop_catalog_response(
     return _catalog_response(context, text, visible, len(names))
 
 
+# Render danh sách course/add-on đọc từ POS cho intent discovery.
 def _service_catalog_response(
     context: BookingContext,
     courses: list[Course],
@@ -1673,6 +1701,7 @@ def _service_catalog_response(
     return _catalog_response(context, text, names, len(courses))
 
 
+# Render gợi ý theo bước chọn liệu trình chính hoặc add-on trong booking flow.
 def _service_step_response(
     context: BookingContext,
     courses: list[Course],
@@ -1721,10 +1750,12 @@ def _service_step_response(
     )
 
 
+# Format tên course thành danh sách đánh số ngắn gọn cho response.
 def _numbered_course_names(courses: list[Course]) -> str:
     return "\n".join(f"{index}. {service.name}" for index, service in enumerate(courses[:8], 1))
 
 
+# Tạo DialogResponse cho catalog/listing với quick replies an toàn.
 def _catalog_response(
     context: BookingContext,
     text: str,
@@ -1743,6 +1774,7 @@ def _catalog_response(
     )
 
 
+# Xác định field còn thiếu trước khi được phép gọi availability POS.
 def _missing_availability_field(context: BookingContext) -> str | None:
     fields = (
         (context.shop, "Bạn hãy chọn cửa hàng trước khi xem giờ trống."),
@@ -1754,6 +1786,7 @@ def _missing_availability_field(context: BookingContext) -> str | None:
     return next((message for value, message in fields if value is None), None)
 
 
+# Render kết quả entity resolution không dispatch được: ambiguous/not_found/unsupported/failure.
 async def _entity_response(
     context: BookingContext,
     result: EntityResolutionResult,
@@ -1804,6 +1837,7 @@ async def _entity_response(
     return _handled_response(context, _ENTITY_FAILURE_TEXT)
 
 
+# Retry availability từ POS khi người dùng hỏi lại sau lỗi slot/reload.
 async def _retry_availability(
     *, container: ApplicationContainer, context: BookingContext
 ) -> DialogResponse:
@@ -1839,6 +1873,7 @@ async def _retry_availability(
         )
 
 
+# Tạo response an toàn cho intent toàn cục như greeting, thanks hoặc repeat question.
 def _global_intent_response(intent: str, context: BookingContext) -> DialogResponse:
     from app.dialog.instruction_builder import DialogResponse
 
@@ -1865,6 +1900,7 @@ def _global_intent_response(intent: str, context: BookingContext) -> DialogRespo
     )
 
 
+# Lấy tối đa 8 tên candidate duy nhất để làm quick replies.
 def _candidate_names(result: EntityResolutionResult) -> tuple[str, ...]:
     names: list[str] = []
     seen: set[str] = set()
@@ -1877,6 +1913,7 @@ def _candidate_names(result: EntityResolutionResult) -> tuple[str, ...]:
     return tuple(names)
 
 
+# Tạo response recovery an toàn khi turn không dispatch được hoặc business failure đã xử lý.
 def _handled_response(
     context: BookingContext,
     text: str,
@@ -1893,6 +1930,7 @@ def _handled_response(
     )
 
 
+# Gắn quick replies theo state hiện tại vào response recovery.
 def _with_state_recovery_suggestions(
     response: DialogResponse,
     context: BookingContext,
@@ -1910,6 +1948,7 @@ def _with_state_recovery_suggestions(
     )
 
 
+# Sinh quick replies dựa trên state và dữ liệu context đã validate.
 def _state_recovery_quick_replies(context: BookingContext) -> tuple[str, ...]:
     """Return safe choices derived from the current state and validated context."""
     if context.state is BookingState.SELECTING_SHOP:
@@ -1924,6 +1963,7 @@ def _state_recovery_quick_replies(context: BookingContext) -> tuple[str, ...]:
     return _RECOVERY_QUICK_REPLIES.get(context.state, ())
 
 
+# Nhận diện câu "chỉnh sửa" chung để mở menu change thay vì bắt LLM đoán target.
 def _is_generic_change_request(message: str) -> bool:
     normalized = " ".join(message.casefold().strip().split())
     return normalized in {
@@ -1938,6 +1978,7 @@ def _is_generic_change_request(message: str) -> bool:
     }
 
 
+# Tạo menu chọn field cần sửa khi người dùng chỉ nói muốn chỉnh sửa booking.
 def _change_menu_response(context: BookingContext) -> DialogResponse:
     from app.dialog.instruction_builder import DialogResponse
 
@@ -1963,6 +2004,7 @@ def _change_menu_response(context: BookingContext) -> DialogResponse:
     )
 
 
+# Lấy danh sách item typed từ HandlerResult cho các path discovery/retry.
 def _handler_items(
     result: HandlerResult,
     key: str,

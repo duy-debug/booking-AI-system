@@ -70,6 +70,7 @@ class _ParsedReservation:
 class PosApiClient:
     """Implement verified BookingGateway operations over an injected HTTP client."""
 
+    # Cấu hình HTTP client, base URL và auth header an toàn cho mọi call sang POS.
     def __init__(
         self,
         *,
@@ -87,6 +88,7 @@ class PosApiClient:
         self._base_url = normalized_base_url
         self._timeout_seconds = timeout_seconds
 
+    # Tìm cửa hàng trên POS theo tên hoặc từ khóa người dùng cung cấp.
     async def search_shops(self, query: str | None = None) -> list[Shop]:
         """Return the default active POS shop list when no keyword is requested."""
         if query is not None:
@@ -104,6 +106,7 @@ class PosApiClient:
         _validate_shop_meta(root)
         return [_parse_shop(item, index) for index, item in enumerate(items)]
 
+    # Lấy danh sách course/add-on của một shop từ POS theo loại và trạng thái active.
     async def search_courses(
         self,
         request: CourseSearchRequest,
@@ -125,6 +128,7 @@ class PosApiClient:
             for index, item in enumerate(_list(root, "data"))
         ]
 
+    # Lấy availability từ POS dựa trên shop, ngày, service, số người và therapist policy.
     async def get_available_slots(
         self,
         request: AvailabilityRequest,
@@ -146,6 +150,7 @@ class PosApiClient:
         )
         return tuple(slot.start_time for slot in slots if slot.available)
 
+    # Tìm therapist còn trống tại slot đã chọn để hỗ trợ chọn tên hoặc giới tính.
     async def search_available_therapists(
         self,
         request: AvailableTherapistRequest,
@@ -184,6 +189,7 @@ class PosApiClient:
             )
         return preferences
 
+    # Kiểm tra khách hàng/NG list trên POS theo shop và số điện thoại.
     async def verify_customer(
         self,
         request: CustomerVerificationRequest,
@@ -198,6 +204,7 @@ class PosApiClient:
         )
         return _parse_customer_verification(payload)
 
+    # Recheck slot ngay trước create booking để tránh dùng availability cũ.
     async def check_final_availability(
         self,
         request: FinalAvailabilityRequest,
@@ -231,6 +238,7 @@ class PosApiClient:
             reason=slot.reason_code or slot.message,
         )
 
+    # Tạo booking thật trên POS sau khi người dùng xác nhận cuối cùng.
     async def create_booking(
         self,
         request: CreateBookingRequest,
@@ -247,12 +255,14 @@ class PosApiClient:
         )
         return _parse_create_booking_result(payload, request)
 
+    # Lookup booking trên POS theo UUID nội bộ khi có workflow cần tra cứu.
     async def lookup_booking(self, booking_id: UUID) -> Booking:
         """Fail because the public response cannot populate the domain customer phone."""
         raise POSContractNotConfiguredError(
             "POS booking detail omits customer phone required by the domain Booking model."
         )
 
+    # Gửi yêu cầu đổi lịch booking lên POS khi workflow reschedule được bật.
     async def reschedule_booking(
         self,
         booking_id: UUID,
@@ -264,12 +274,14 @@ class PosApiClient:
             "POS update response omits customer phone required by the domain Booking model."
         )
 
+    # Gửi yêu cầu hủy booking lên POS theo booking_id.
     async def cancel_booking(self, booking_id: UUID) -> Booking:
         """Fail because the cancel response cannot populate the complete domain booking."""
         raise POSContractNotConfiguredError(
             "POS cancel response omits customer phone required by the domain Booking model."
         )
 
+    # Gọi HTTP POS, log metadata an toàn và parse JSON response hoặc raise lỗi typed.
     async def _request_json(
         self,
         *,
@@ -393,6 +405,7 @@ class PosApiClient:
         return payload
 
 
+# Lấy business error code an toàn từ POS mà không log raw payload.
 def _safe_pos_error_code(response: httpx.Response) -> str:
     try:
         payload = response.json()
@@ -408,6 +421,7 @@ def _safe_pos_error_code(response: httpx.Response) -> str:
     return code if isinstance(code, str) and code else f"pos_http_{response.status_code}"
 
 
+# Đếm số item trong POS response để trace mà không log nội dung chi tiết.
 def _safe_item_count(payload: object) -> int:
     if isinstance(payload, Mapping):
         data = payload.get("data")
@@ -416,6 +430,7 @@ def _safe_item_count(payload: object) -> int:
     return 0
 
 
+# Map request availability domain thành query params đúng contract POS.
 def _availability_params(
     request: AvailabilityRequest | FinalAvailabilityRequest,
 ) -> dict[str, str]:
@@ -434,6 +449,7 @@ def _availability_params(
     return params
 
 
+# Map CreateBookingRequest thành body POS, bao gồm group/idempotency/therapist request.
 def _create_booking_body(request: CreateBookingRequest) -> dict[str, object]:
     if not request.idempotency_key:
         raise POSRequestMappingError("POS create requires a non-empty idempotency key.")
@@ -461,6 +477,7 @@ def _create_booking_body(request: CreateBookingRequest) -> dict[str, object]:
     return body
 
 
+# Chuẩn hóa therapist preference thành payload POS cho none/gender/specific.
 def _therapist_request_body(
     preference: TherapistPreference,
 ) -> dict[str, object]:
@@ -485,6 +502,7 @@ def _therapist_request_body(
     )
 
 
+# Parse response verify-customer từ POS thành CustomerVerificationResult typed.
 def _parse_customer_verification(payload: object) -> CustomerVerificationResult:
     root = _mapping(payload, "eligibility response")
     data = _mapping(_required(root, "data"), "eligibility data")
@@ -527,6 +545,7 @@ def _parse_customer_verification(payload: object) -> CustomerVerificationResult:
     )
 
 
+# Parse response create booking và validate correlation với request đã gửi.
 def _parse_create_booking_result(
     payload: object,
     request: CreateBookingRequest,
@@ -597,6 +616,7 @@ def _parse_create_booking_result(
     )
 
 
+# Chặn POS response không khớp request để tránh commit nhầm booking.
 def _validate_create_response_correlation(
     data: Mapping[str, object],
     *,
@@ -643,6 +663,7 @@ def _validate_create_response_correlation(
         )
 
 
+# Parse một reservation con trong group booking hoặc single booking response.
 def _parse_reservation(value: object, index: int) -> _ParsedReservation:
     reservation = _mapping(value, f"reservation[{index}]")
     reference = ChildReservationReference(
@@ -662,6 +683,7 @@ def _parse_reservation(value: object, index: int) -> _ParsedReservation:
     return _ParsedReservation(reference=reference, courses=courses)
 
 
+# Parse course trong reservation POS thành Course domain object.
 def _parse_reservation_course(value: object, index: int) -> Course:
     course = _mapping(value, f"reservation course[{index}]")
     return Course(
@@ -673,6 +695,7 @@ def _parse_reservation_course(value: object, index: int) -> Course:
     )
 
 
+# Gắn therapist preference từ POS response vào Booking nếu POS trả đủ thông tin.
 def _apply_therapist_preference(
     params: dict[str, str],
     preference: TherapistPreference,
@@ -699,6 +722,7 @@ def _apply_therapist_preference(
     )
 
 
+# Parse danh sách slot từ POS thành tuple time hợp lệ.
 def _parse_slots(
     payload: object,
     *,
@@ -741,6 +765,7 @@ def _parse_slots(
     return parsed
 
 
+# Parse shop item từ POS thành Shop domain object.
 def _parse_shop(value: object, index: int) -> Shop:
     item = _mapping(value, f"shop data[{index}]")
     return Shop(
@@ -751,6 +776,7 @@ def _parse_shop(value: object, index: int) -> Shop:
     )
 
 
+# Parse service/course item từ POS thành Course domain object.
 def _parse_service(
     value: object,
     index: int,
@@ -769,6 +795,7 @@ def _parse_service(
     )
 
 
+# Validate metadata phân trang shop để phát hiện POS response sai contract.
 def _validate_shop_meta(root: Mapping[str, object]) -> None:
     meta = _mapping(_required(root, "meta"), "shop meta")
     total = _required(meta, "total")
@@ -776,6 +803,7 @@ def _validate_shop_meta(root: Mapping[str, object]) -> None:
         raise POSResponseMappingError("POS shop meta.total must be an integer.")
 
 
+# Map HTTP status POS thành exception typed theo operation đang gọi.
 def _raise_http_error(operation: str, response: httpx.Response) -> None:
     code = _error_code(response)
     if code == "CUSTOMER_IN_NG_LIST":
@@ -804,6 +832,7 @@ def _raise_http_error(operation: str, response: httpx.Response) -> None:
     )
 
 
+# Trích error code từ problem/json response nếu POS cung cấp.
 def _error_code(response: httpx.Response) -> str | None:
     try:
         payload = response.json()
@@ -815,18 +844,21 @@ def _error_code(response: httpx.Response) -> str | None:
     return code if isinstance(code, str) else None
 
 
+# Ép object thành mapping để parser fail rõ khi POS trả sai shape.
 def _mapping(value: object, location: str) -> Mapping[str, object]:
     if not isinstance(value, dict):
         raise POSResponseMappingError(f"POS {location} must be an object.")
     return cast(dict[str, object], value)
 
 
+# Lấy field bắt buộc từ POS payload và báo lỗi nếu thiếu.
 def _required(value: Mapping[str, object], field: str) -> object:
     if field not in value:
         raise POSResponseMappingError(f"POS response is missing required field {field!r}.")
     return value[field]
 
 
+# Lấy field list bắt buộc từ POS payload.
 def _list(value: Mapping[str, object], field: str) -> list[object]:
     result = _required(value, field)
     if not isinstance(result, list):
@@ -834,6 +866,7 @@ def _list(value: Mapping[str, object], field: str) -> list[object]:
     return cast(list[object], result)
 
 
+# Lấy field string bắt buộc từ POS payload.
 def _string(value: Mapping[str, object], field: str) -> str:
     result = _required(value, field)
     if not isinstance(result, str):
@@ -841,6 +874,7 @@ def _string(value: Mapping[str, object], field: str) -> str:
     return result
 
 
+# Lấy field string optional từ POS payload.
 def _optional_string(value: Mapping[str, object], field: str) -> str | None:
     result = _required(value, field)
     if result is not None and not isinstance(result, str):

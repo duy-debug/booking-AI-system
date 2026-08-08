@@ -16,6 +16,7 @@ from app.infrastructure.context_store import (
 from app.transport.chat_api import router as chat_router
 
 
+# Đọc biến môi trường dạng boolean để bật/tắt behavior runtime khi khởi động app.
 def _environment_bool(name: str, *, default: bool = False) -> bool:
     raw_value = os.getenv(name)
     if raw_value is None:
@@ -28,6 +29,7 @@ def _environment_bool(name: str, *, default: bool = False) -> bool:
     raise ValueError(f"{name} must be a boolean value.")
 
 
+# Chọn port Qdrant hợp lệ khi knowledge retrieval được bật hoặc giữ giá trị an toàn khi tắt.
 def _enabled_qdrant_port(enabled: bool) -> int:
     if not enabled:
         return 6333
@@ -38,10 +40,12 @@ def _enabled_qdrant_port(enabled: bool) -> int:
         raise ValueError("QDRANT_PORT must be an integer.") from error
 
 
+# Tạo FastAPI app, wire middleware và mount toàn bộ transport endpoint của chatbot.
 def create_app(settings: Settings) -> FastAPI:
     """Create one application whose container lives for the app lifespan."""
 
     @asynccontextmanager
+    # Khởi tạo và đóng ApplicationContainer theo vòng đời thật của FastAPI.
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         async with application_container_lifespan(settings) as container:
             application.state.application_container = container

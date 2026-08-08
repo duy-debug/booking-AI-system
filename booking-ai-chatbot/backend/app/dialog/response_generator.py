@@ -15,10 +15,12 @@ logger = logging.getLogger(__name__)
 class ResponseGenerator:
     """Use Gemini for NLG while preserving backend-owned response metadata."""
 
+    # Nhận LLM gateway và InstructionBuilder để diễn đạt response nhưng không đổi business outcome.
     def __init__(self, llm_gateway: LLMGateway, instruction_builder: InstructionBuilder) -> None:
         self._llm_gateway = llm_gateway
         self._instruction_builder = instruction_builder
 
+    # Gửi instruction/context sang LLM NLG và fallback về text cũ nếu provider lỗi.
     async def generate(
         self,
         *,
@@ -96,6 +98,7 @@ class ResponseGenerator:
         )
 
 
+# Chỉ cho phép log prompt đầy đủ trong local/debug để tránh lộ dữ liệu nhạy cảm.
 def _full_prompt_logging_enabled() -> bool:
     environment = os.getenv("APP_ENV", "production").strip().casefold()
     enabled = os.getenv("LOG_LLM_PROMPTS", "false").strip().casefold()

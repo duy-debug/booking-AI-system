@@ -9,6 +9,7 @@ from app.domain.outcomes import HandlerOutcome, HandlerResult
 class SelectBookingInfoHandler:
     """Owns non-I/O booking information updates."""
 
+    # Validate ngày không nằm trong quá khứ trước khi cập nhật context.
     def select_date(self, context: BookingContext, value: date) -> HandlerResult:
         if value < date.today():
             return HandlerResult(HandlerOutcome.INVALID_INPUT, error_code="date_in_past")
@@ -17,6 +18,7 @@ class SelectBookingInfoHandler:
             context_updates={"booking_date": value},
         )
 
+    # Validate số người trong phạm vi business hỗ trợ trước khi cập nhật context.
     def select_people(self, context: BookingContext, value: int) -> HandlerResult:
         if type(value) is not int or not 1 <= value <= 3:
             return HandlerResult(
@@ -28,6 +30,7 @@ class SelectBookingInfoHandler:
             context_updates={"num_customer": value},
         )
 
+    # Validate duration theo block 15 phút để khớp contract availability/POS.
     def select_duration(self, context: BookingContext, value: int) -> HandlerResult:
         if type(value) is not int or value <= 0 or value % 15:
             return HandlerResult(

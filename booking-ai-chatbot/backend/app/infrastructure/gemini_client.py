@@ -74,6 +74,7 @@ _LOGGER = logging.getLogger(__name__)
 class GeminiClient:
     """Generate text through Gemini's OpenAI-compatible chat endpoint."""
 
+    # Cấu hình Gemini/OpenAI-compatible endpoint, model chính và model fallback nếu có.
     def __init__(
         self,
         *,
@@ -93,6 +94,7 @@ class GeminiClient:
         self._fallback_model = normalized_fallback or None
         self._max_retries = max_retries
 
+    # Gửi chat completion tới Gemini và fallback model khi lỗi quota/rate-limit phù hợp.
     async def generate(
         self,
         messages: list[LLMMessage],
@@ -189,6 +191,7 @@ class GeminiClient:
             return parsed
         raise LLMGatewayUnavailableError("Gemini is unavailable.")
 
+    # Log lỗi LLM an toàn, không ghi API key hoặc raw payload.
     def _log_failure(
         self,
         error_code: str,
@@ -209,6 +212,7 @@ class GeminiClient:
             duration_ms=elapsed_ms(started_at),
         )
 
+    # Log lần chuyển sang fallback model để debug quota/provider failure.
     def _log_fallback(
         self,
         primary_model: str,
@@ -228,6 +232,7 @@ class GeminiClient:
         )
 
 
+# Map HTTP status từ Gemini thành error code ổn định cho log/recovery.
 def _http_error_code(status_code: int) -> str:
     if status_code in {401, 403}:
         return "gemini_auth_failed"
@@ -236,10 +241,12 @@ def _http_error_code(status_code: int) -> str:
     return "gemini_unavailable"
 
 
+# Xác định status có nên thử fallback model hay không.
 def _is_fallback_status(status_code: int) -> bool:
     return status_code in {408, 429} or status_code >= 500
 
 
+# Lấy usage token thật từ provider nếu response có trả metadata usage.
 def _usage_tokens(response: httpx.Response) -> tuple[int | None, int | None]:
     try:
         usage = response.json().get("usage", {})
@@ -255,6 +262,7 @@ def _usage_tokens(response: httpx.Response) -> tuple[int | None, int | None]:
     )
 
 
+# Parse Gemini/OpenAI-compatible response thành LLMResponse nội bộ.
 def _parse_response(response: httpx.Response) -> LLMResponse:
     try:
         body = response.json()
@@ -269,6 +277,7 @@ def _parse_response(response: httpx.Response) -> LLMResponse:
     return LLMResponse(content=content, tool_calls=tool_calls)
 
 
+# Parse một tool/function call từ provider để NLU dùng structured candidates.
 def _parse_tool_call(value: object) -> LLMToolCall:
     if not isinstance(value, dict):
         raise TypeError
