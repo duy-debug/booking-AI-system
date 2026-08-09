@@ -6,7 +6,7 @@ import logging
 import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from datetime import time as clock_time
 from enum import StrEnum
 from time import perf_counter
@@ -1128,6 +1128,13 @@ def _stage_requested_entities(result: NLUResult, context: BookingContext) -> Non
         and type(duration) is int
     ):
         context.requested_duration_minutes = duration
+    start_time = entities.get("start_time")
+    if (
+        "start_time" not in primary
+        and _can_stage_requested_slot("start_time", context.state)
+        and type(start_time) is time
+    ):
+        context.requested_start_time = start_time
 
     main_course = requested_text("main_course_name")
     generic_course = requested_text("service_name")

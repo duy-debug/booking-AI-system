@@ -958,6 +958,7 @@ class ActionRegistry:
             raise CustomerVerificationMismatchError(result.error_code)
         _ensure_success(result)
         _apply_context_updates(context.booking_context, result)
+        context.booking_context.phone_confirmed = True
         return ActionResult("handle_phone_collection", result.data["verification"])
 
     # Commit trạng thái phone_confirmed sau khi người dùng xác nhận số điện thoại.
@@ -983,6 +984,7 @@ class ActionRegistry:
         if phone is None:
             raise InvalidActionInputError("Customer phone is required before name.")
         context.booking_context.customer = Customer(phone=phone, name=name)
+        context.booking_context.phone_confirmed = True
         return ActionResult("handle_customer_name", name)
 
     # Tạo booking thật trên POS sau final confirmation và idempotency key đã sẵn sàng.

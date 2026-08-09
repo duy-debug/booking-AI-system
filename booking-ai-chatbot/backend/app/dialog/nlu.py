@@ -136,49 +136,6 @@ DISCOVERY_ALLOWED_STATES: Mapping[str, frozenset[BookingState]] = MappingProxyTy
 
 _RULE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _WHITESPACE_PATTERN = re.compile(r"\s+")
-_PEOPLE_NUMERIC_PATTERN = re.compile(r"(?<!\d)(\d{1,2})\s*người\b")
-_PEOPLE_WORD_PATTERN = re.compile(r"\b(một|hai|ba)\s+người\b")
-_MINUTES_PATTERN = re.compile(r"(?<!\d)(\d{1,3})\s*phút\b")
-_HOURS_PATTERN = re.compile(
-    r"(?<!\d)(\d{1,2})\s*(?:giờ|tiếng)(\s+rưỡi)?\b"
-    r"(?!\s*(?:sáng|trưa|chiều|tối))"
-)
-_ISO_DATE_PATTERN = re.compile(r"(?<!\d)(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)")
-_SLASH_DATE_PATTERN = re.compile(r"(?<!\d)(\d{1,2})/(\d{1,2})(?:/(\d{4}))?(?!\d)")
-_CLOCK_PATTERN = re.compile(
-    r"(?<!\d)(\d{1,2})(?::(\d{2})|h(\d{2})?|\s+giờ)"
-    r"(?:\s*(sáng|trưa|chiều|tối))?(?!\w)"
-)
-_PHONE_PATTERN = re.compile(r"(?<![\w+])(\+?\d(?:[\s-]?\d){8,14})(?!\w)")
-_COURSE_DURATION_PATTERN = re.compile(
-    r"(?<!\d)(?:\d{1,3}\s*phút|\d{1,2}\s*(?:giờ|tiếng)(?:\s+rưỡi)?)(?!\w)"
-)
-
-_CANCEL_PHRASES = frozenset({"hủy", "hủy đặt lịch", "dừng đặt lịch", "thôi không đặt nữa"})
-_RESTART_PHRASES = frozenset({"đặt lại từ đầu", "bắt đầu lại", "restart booking"})
-_WHY_PHRASES = frozenset(
-    {
-        "tại sao",
-        "vì sao",
-        "sao lại thế",
-        "tôi phải làm gì tiếp theo",
-        "bạn đang cần tôi nhập gì",
-    }
-)
-_REPEAT_PHRASES = frozenset({"nhắc lại", "hỏi lại đi", "lặp lại câu hỏi", "thử lại"})
-_QUESTION_PREFIXES = (
-    "ai ",
-    "gì ",
-    "tại sao ",
-    "vì sao ",
-    "khi nào ",
-    "ở đâu ",
-    "bao nhiêu ",
-    "như thế nào ",
-    "có thể ",
-)
-
-
 class NLUSource(StrEnum):
     """Identifies whether a result came from rules or the safe fallback."""
 
@@ -574,7 +531,7 @@ class LLMNLUCandidatesOutput(BaseModel):
 
 
 _LLM_ISO_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
-_LLM_CLOCK_PATTERN = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d")
+_LLM_CLOCK_PATTERN = re.compile(r"(?:\d|[01]\d|2[0-3]):[0-5]\d")
 _LLM_INTENT_ALIASES = {
     "select_shop": "select_store",
     "select_service": "select_course",
@@ -1037,7 +994,9 @@ def _llm_time_payload(value: str) -> dict[str, object] | None:
     if not _LLM_CLOCK_PATTERN.fullmatch(value):
         return None
     try:
-        return {"start_time": time.fromisoformat(value)}
+        hour, minute = value.split(":", 1)
+        normalized = f"{int(hour):02d}:{minute}"
+        return {"start_time": time.fromisoformat(normalized)}
     except ValueError:
         return None
 

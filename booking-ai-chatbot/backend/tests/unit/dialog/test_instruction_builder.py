@@ -196,19 +196,6 @@ def test_group_therapist_renderer_offers_gender_but_not_names() -> None:
     assert response.quick_replies == ("Không yêu cầu", "Nam", "Nữ")
 
 
-def test_phone_readback_masks_phone_and_never_adds_it_to_metadata() -> None:
-    context = BookingContext("conversation-1", phone="0901234567")
-
-    response = InstructionBuilder().build_response(
-        result=turn_result("readback_phone", BookingState.VERIFYING_PHONE),
-        context=context,
-    )
-
-    assert "0901234567" not in response.text
-    assert "4567" in response.text
-    assert "0901234567" not in repr(response.metadata)
-
-
 def test_confirmation_summary_formats_context_without_internal_identifiers() -> None:
     context = ready_context()
     context.therapist_preference = TherapistPreference(TherapistPreferenceType.FEMALE)
@@ -221,11 +208,12 @@ def test_confirmation_summary_formats_context_without_internal_identifiers() -> 
     assert "Sen Spa" in response.text
     assert "02/08/2026" in response.text
     assert "10:30" in response.text
+    assert "Tên khách hàng: An" in response.text
+    assert "Số điện thoại: 0901234567" in response.text
     assert "Massage thư giãn" in response.text
     assert "Đá nóng" in response.text
     assert "Kỹ thuật viên: Ưu tiên kỹ thuật viên nữ" in response.text
-    assert "4567" in response.text
-    assert "0901234567" not in response.text
+    assert "******" not in response.text
     assert str(BOOKING_ID) not in response.text
     assert response.quick_replies == ("Xác nhận", "Chỉnh sửa", "Hủy")
 
@@ -241,6 +229,8 @@ def test_completed_response_uses_real_reservation_code() -> None:
 
     assert "Đặt lịch thành công" in response.text
     assert "RSV-2026-001" in response.text
+    assert "Tên khách hàng: An" in response.text
+    assert "Số điện thoại: 0901234567" in response.text
     assert response.metadata == {"booking_created": True}
 
 
@@ -255,6 +245,7 @@ def test_completed_response_without_code_does_not_invent_one() -> None:
 
     assert "Mã đặt lịch" not in response.text
     assert "đã được ghi nhận" in response.text
+    assert "Tên khách hàng: An" in response.text
     assert str(BOOKING_ID) not in response.text
 
 

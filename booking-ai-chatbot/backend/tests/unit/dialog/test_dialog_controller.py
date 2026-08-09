@@ -1,6 +1,6 @@
 """Tests for parsed-turn dialog workflow orchestration."""
 
-from datetime import time
+from datetime import date, time
 from typing import cast
 
 import pytest
@@ -16,6 +16,7 @@ from app.dialog.dialog_controller import (
     DialogTurnInput,
     DialogTurnStatus,
     InvalidDialogTurnError,
+    _stage_requested_entities,
 )
 from app.dialog.flow_loader import (
     FlowAutoTransition,
@@ -26,6 +27,7 @@ from app.dialog.flow_loader import (
     FlowState,
     FlowTransition,
 )
+from app.dialog.nlu import NLUResolutionStatus, NLUResult, NLUSource
 from app.dialog.state_machine import StateMachine
 from app.domain.booking_context import BookingContext
 from app.domain.booking_models import Booking, SlotConflictError
@@ -100,6 +102,30 @@ def test_controller_rejects_invalid_auto_transition_limit() -> None:
 
     with pytest.raises(ValueError):
         controller(flow, ActionRegistry(), max_auto_transitions=0)
+
+
+def test_stage_requested_entities_preserves_secondary_start_time_until_time_step() -> None:
+    context = BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.SELECTING_PEOPLE,
+        requested_booking_date=date(2026, 8, 10),
+    )
+    result = NLUResult(
+        intent="select_people",
+        payload={"num_customer": 1},
+        confidence=0.99,
+        source=NLUSource.FALLBACK,
+        resolution_status=NLUResolutionStatus.RESOLVED,
+        merged_entities={
+            "number_of_people": 1,
+            "start_time": time(8, 0),
+        },
+    )
+
+    _stage_requested_entities(result, context)
+
+    assert context.requested_num_customer is None
+    assert context.requested_start_time == time(8, 0)
 
 
 @pytest.mark.asyncio

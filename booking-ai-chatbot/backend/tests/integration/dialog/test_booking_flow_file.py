@@ -34,7 +34,6 @@ CONVERSATIONAL_STATES = (
     BookingState.SELECTING_TIME,
     BookingState.SELECTING_THERAPIST,
     BookingState.COLLECTING_PHONE,
-    BookingState.VERIFYING_PHONE,
     BookingState.AWAITING_CONFIRMATION,
     BookingState.BOOKING_FAILED,
 )
@@ -113,8 +112,8 @@ def test_flow_loads_all_booking_states(flow: FlowDefinition) -> None:
     assert flow.version == "2.0"
     assert flow.name == "booking-flow"
     assert flow.initial_state is BookingState.IDLE
-    assert set(flow.states) == set(BookingState)
-    assert len(flow.states) == 16
+    assert set(flow.states) == set(BookingState) - {BookingState.VERIFYING_PHONE}
+    assert len(flow.states) == 15
     assert "selecting_options" not in {state.value for state in flow.states}
 
 
@@ -161,11 +160,6 @@ def test_flow_loads_all_booking_states(flow: FlowDefinition) -> None:
         (
             BookingState.COLLECTING_NAME,
             "provide_name",
-            BookingState.VERIFYING_PHONE,
-        ),
-        (
-            BookingState.VERIFYING_PHONE,
-            "confirm",
             BookingState.AWAITING_CONFIRMATION,
         ),
         (
@@ -228,8 +222,17 @@ def test_customer_name_step_skips_only_for_existing_customer(flow: FlowDefinitio
     transition = machine.resolve_auto_transition(existing)
 
     assert transition is not None
-    assert transition.target is BookingState.VERIFYING_PHONE
+    assert transition.target is BookingState.AWAITING_CONFIRMATION
     assert machine.resolve_auto_transition(first_time) is None
+
+
+def test_new_customer_name_submission_goes_straight_to_confirmation(
+    flow: FlowDefinition,
+) -> None:
+    transition = _transition(flow, BookingState.COLLECTING_NAME, "provide_name")
+
+    assert transition.target is BookingState.AWAITING_CONFIRMATION
+    assert transition.actions == ("handle_customer_name",)
 
 
 def test_booking_result_resolves_success_auto_transition(
@@ -422,11 +425,11 @@ def test_invalid_phone_failure_returns_to_collection(flow: FlowDefinition) -> No
     assert failure.instruction_template == "phone_invalid"
 
 
-def test_phone_denial_returns_to_collection(flow: FlowDefinition) -> None:
-    transition = _transition(flow, BookingState.VERIFYING_PHONE, "deny")
+def test_phone_change_handler_returns_to_collection_from_confirmation(flow: FlowDefinition) -> None:
+    rules = FlowLoader.load_change_handlers(CHANGE_HANDLERS_PATH)
 
-    assert transition.target is BookingState.COLLECTING_PHONE
-    assert transition.actions == ("clear_phone_confirmation",)
+    assert rules["phone"].next_state is BookingState.COLLECTING_PHONE
+    assert rules["phone"].applied_state is BookingState.AWAITING_CONFIRMATION
 
 
 def test_booking_failure_and_retry_paths(flow: FlowDefinition) -> None:
@@ -497,7 +500,6 @@ def test_flow_has_no_out_of_flow_faq_action(flow: FlowDefinition) -> None:
         BookingState.SELECTING_TIME,
         BookingState.SELECTING_THERAPIST,
         BookingState.COLLECTING_PHONE,
-        BookingState.VERIFYING_PHONE,
         BookingState.AWAITING_CONFIRMATION,
     ],
 )
@@ -569,14 +571,12 @@ def test_action_registry_audits_declared_actions_without_reading_json(
     declared_actions = _all_declared_actions(flow)
     unregistered = bridge.find_unregistered_actions(declared_actions)
 
-    assert len(set(declared_actions)) == 28
+    assert len(set(declared_actions)) == 26
     assert {
         "search_shop",
         "load_time_slots",
         "reload_time_slots",
         "handle_phone_collection",
-        "clear_phone_confirmation",
-        "mark_phone_confirmed",
         "create_booking",
     }.isdisjoint(unregistered)
     assert "run_final_check" not in declared_actions

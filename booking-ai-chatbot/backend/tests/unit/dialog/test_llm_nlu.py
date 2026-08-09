@@ -552,6 +552,32 @@ async def test_therapist_none_becomes_entity_query() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("raw_time", "expected"),
+    [
+        ("8:00", time(8, 0)),
+        ("08:00", time(8, 0)),
+        ("9:30", time(9, 30)),
+        ("09:30", time(9, 30)),
+    ],
+)
+async def test_select_time_accepts_single_or_double_digit_hour_formats(
+    raw_time: str,
+    expected: time,
+) -> None:
+    fallback, gateway = fallback_for(
+        structured(intent="select_time", entities={"start_time": raw_time})
+    )
+
+    result = await fallback.parse(text=f"Tôi muốn {raw_time}", state=BookingState.SELECTING_TIME)
+
+    assert result.intent == "select_time"
+    assert result.payload == {"start_time": expected}
+    assert result.resolution_status is NLUResolutionStatus.RESOLVED
+    assert gateway.calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "content",
     [
         "not-json",
@@ -564,6 +590,8 @@ async def test_therapist_none_becomes_entity_query() -> None:
         structured(intent="select_people", unexpected=True),
         structured(intent="select_date", entities={"booking_date": "03/08/2026"}),
         structured(intent="select_time", entities={"start_time": "after dinner"}),
+        structured(intent="select_time", entities={"start_time": "25:00"}),
+        structured(intent="select_time", entities={"start_time": "8:99"}),
     ],
 )
 async def test_invalid_unsafe_or_state_disallowed_output_is_unresolved(

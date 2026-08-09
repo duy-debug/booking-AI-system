@@ -230,7 +230,6 @@ async def advance_to_awaiting_confirmation(
                 {"therapist_preference": therapist_preference},
             )
     await turn("provide_phone", {"phone": "0901234567", "name": "Nguyen An"})
-    await turn("confirm", {})
     return context, tuple(states)
 
 
@@ -511,44 +510,6 @@ async def test_shop_search_failure_does_not_partially_mutate_context() -> None:
 
 
 @pytest.mark.asyncio
-async def test_phone_denial_uses_production_binding_and_commits_collection_state() -> None:
-    client = httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda request: httpx.Response(500, request=request)),
-        base_url="http://pos.test",
-    )
-    container = await create_application_container(settings(), http_client=client)
-    context = BookingContext(
-        conversation_id="conversation-phone",
-        state=BookingState.VERIFYING_PHONE,
-        shop=SHOP,
-        main_course=COURSE,
-        booking_date=date(2099, 8, 5),
-        start_time=time(10, 30),
-        num_customer=1,
-        duration_minutes=60,
-        phone="0901234567",
-        phone_confirmed=True,
-        ng_list_checked=True,
-    )
-
-    result = await container.dialog_controller.handle_turn(
-        context,
-        DialogTurnInput(intent="deny", payload={}),
-    )
-
-    assert result.status is DialogTurnStatus.SUCCESS
-    assert result.executed_actions == ("clear_phone_confirmation",)
-    assert context.state is BookingState.COLLECTING_PHONE
-    assert context.phone is None
-    assert context.shop is SHOP
-    assert context.main_course == COURSE
-    assert context.start_time == time(10, 30)
-
-    await container.close()
-    await client.aclose()
-
-
-@pytest.mark.asyncio
 async def test_reload_failure_rolls_back_and_does_not_commit_selecting_time() -> None:
     client = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda request: httpx.Response(500, request=request)),
@@ -635,10 +596,7 @@ async def test_booking_happy_path_reaches_completed_once_without_user_code(
         BookingState.SELECTING_TIME,
     )
     assert BookingState.COLLECTING_PHONE in states
-    assert states[-2:] == (
-        BookingState.VERIFYING_PHONE,
-        BookingState.AWAITING_CONFIRMATION,
-    )
+    assert states[-1] is BookingState.AWAITING_CONFIRMATION
     assert result.status is DialogTurnStatus.SUCCESS
     assert result.executed_actions == ("create_booking",)
     assert context.state is BookingState.COMPLETED

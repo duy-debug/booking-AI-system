@@ -760,7 +760,7 @@ async def test_phone_collection_binding_passes_phone_and_optional_name() -> None
 
     assert handler.calls == [(booking_context, "0901234567", "Nguyen An")]
     assert booking_context.phone == "0901234567"
-    assert booking_context.phone_confirmed is False
+    assert booking_context.phone_confirmed is True
     assert booking_context.state is BookingState.COLLECTING_PHONE
 
 
@@ -795,6 +795,27 @@ async def test_phone_confirmation_binding_does_not_change_state() -> None:
     assert handler.contexts == [booking_context]
     assert booking_context.phone_confirmed is True
     assert booking_context.state is BookingState.VERIFYING_PHONE
+
+
+@pytest.mark.asyncio
+async def test_customer_name_collection_marks_phone_confirmed_for_new_customer() -> None:
+    bridge = production_bridge(customer=FakeCustomerLookup())
+    booking_context = BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.COLLECTING_NAME,
+        phone="0901234567",
+    )
+
+    await bridge.execute_action(
+        "handle_customer_name",
+        execution_context(
+            booking_context=booking_context,
+            payload={"name": "Nguyen An"},
+        ),
+    )
+
+    assert booking_context.customer == Customer("0901234567", "Nguyen An")
+    assert booking_context.phone_confirmed is True
 
 
 @pytest.mark.asyncio

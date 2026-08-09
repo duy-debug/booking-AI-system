@@ -49,7 +49,7 @@
                             "phone":  {
                                           "reset_action":  "change_phone",
                                           "next_state":  "collecting_phone",
-                                          "applied_state":  "verifying_phone",
+                                          "applied_state":  "awaiting_confirmation",
                                           "prompt_template":  "change_ask_phone"
                                       }
                         },
@@ -803,7 +803,7 @@
                                            "transitions":  [
                                                                {
                                                                    "intent":  "provide_name",
-                                                                   "target":  "verifying_phone",
+                                                                   "target":  "awaiting_confirmation",
                                                                    "actions":  [
                                                                                    "handle_customer_name"
                                                                                ]
@@ -836,70 +836,11 @@
                                                                                      "field":  "customer_id",
                                                                                      "op":  "not_null"
                                                                                  },
-                                                                   "target":  "verifying_phone",
-                                                                   "actions":  [
-
-                                                                               ]
-                                                               }
-                                       },
-                   "verifying_phone":  {
-                                           "description":  "Waiting for phone number confirmation.",
-                                           "on_enter":  {
-                                                            "instruction_template":  "readback_phone"
-                                                        },
-                                           "transitions":  [
-                                                               {
-                                                                   "intent":  "confirm",
                                                                    "target":  "awaiting_confirmation",
                                                                    "actions":  [
-                                                                                   "mark_phone_confirmed"
-                                                                               ]
-                                                               },
-                                                               {
-                                                                   "intent":  "deny",
-                                                                   "target":  "collecting_phone",
-                                                                   "actions":  [
-                                                                                   "clear_phone_confirmation"
-                                                                               ]
-                                                               },
-                                                               {
-                                                                   "intent":  "provide_phone",
-                                                                   "target":  "verifying_phone",
-                                                                   "actions":  [
-                                                                                   "handle_phone_collection",
-                                                                                   "validate_phone"
-                                                                               ]
-                                                               },
-                                                               {
-                                                                   "intent":  "change_info",
-                                                                   "target":  "verifying_phone",
-                                                                   "actions":  [
-                                                                                   "defer_change_info"
-                                                                               ]
-                                                               },
-                                                               {
-                                                                   "intent":  "unknown",
-                                                                   "target":  "verifying_phone",
-                                                                   "actions":  [
-                                                                                   "ask_to_clarify"
-                                                                               ]
-                                                               },
-                                                               {
-                                                                   "intent":  "cancel_flow",
-                                                                   "target":  "cancelled",
-                                                                   "actions":  [
 
                                                                                ]
-                                                               },
-                                                               {
-                                                                   "intent":  "*",
-                                                                   "target":  "verifying_phone",
-                                                                   "actions":  [
-                                                                                   "log_unhandled",
-                                                                                   "ask_to_clarify"
-                                                                               ]
                                                                }
-                                                           ]
                                        },
                    "awaiting_confirmation":  {
                                                  "description":  "Waiting for final booking confirmation.",

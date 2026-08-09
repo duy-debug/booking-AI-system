@@ -94,7 +94,7 @@ def test_real_flow_template_audit_has_no_missing_or_unused_renderer() -> None:
         + ("change_invalid",)
     )
 
-    assert len(declared) == 42
+    assert len(declared) == 41
     assert builder.find_missing_templates(declared) == ()
     assert set(builder.registered_templates()) - set(declared) == set()
 
@@ -111,7 +111,8 @@ def test_real_confirmation_template_renders_complete_context() -> None:
 
     assert "Sen Spa" in response.text
     assert "02/08/2026" in response.text
-    assert "******4567" in response.text
+    assert "Tên khách hàng: An" in response.text
+    assert "Số điện thoại: 0901234567" in response.text
 
 
 def test_real_group_completed_template_without_code_hides_internal_ids() -> None:
@@ -140,6 +141,8 @@ def test_real_group_completed_template_without_code_hides_internal_ids() -> None
     assert "Đặt lịch thành công" in response.text
     assert "đã được ghi nhận" in response.text
     assert "Mã đặt lịch" not in response.text
+    assert "Tên khách hàng: An" in response.text
+    assert "Số điện thoại: 0901234567" in response.text
     assert str(BOOKING_ID) not in response.text
     assert str(CHILD_ID) not in response.text
     assert str(second_child_id) not in response.text

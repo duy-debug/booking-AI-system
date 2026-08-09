@@ -206,7 +206,7 @@ class InstructionBuilder:
         if context.start_time is not None:
             facts.append(f"Giờ đã xác nhận: {context.start_time.strftime('%H:%M')}.")
         if context.reservation_code is not None:
-            facts.append(f"Mã đặt chỗ POS: {context.reservation_code}.")
+            facts.append(f"Mã đặt lịch: {context.reservation_code}.")
         facts.extend(
             (
                 "Hãy viết câu trả lời tiếng Việt tự nhiên, ngắn gọn.",
@@ -320,7 +320,6 @@ class InstructionBuilder:
                 self._customer_verification_unavailable,
             ),
             ("shop_lookup_unavailable", self._shop_lookup_unavailable),
-            ("readback_phone", self._readback_phone),
             ("final_confirmation", self._final_confirmation),
             ("booking_processing", self._booking_processing),
             ("booking_data_incomplete", self._booking_data_incomplete),
@@ -424,7 +423,6 @@ class InstructionBuilder:
             BookingState.SELECTING_THERAPIST: self._ask_therapist,
             BookingState.COLLECTING_PHONE: self._ask_phone,
             BookingState.COLLECTING_NAME: self._ask_customer_name,
-            BookingState.VERIFYING_PHONE: self._readback_phone,
             BookingState.AWAITING_CONFIRMATION: self._final_confirmation,
             BookingState.BOOKING_EXECUTING: self._booking_processing,
             BookingState.COMPLETED: self._booking_complete,
@@ -692,32 +690,15 @@ class InstructionBuilder:
         )
 
     @staticmethod
-    def _readback_phone(
-        context: BookingContext,
-        result: DialogTurnResult,
-    ) -> DialogResponseDraft:
-        phone = _mask_phone(context.phone) if context.phone is not None else "chưa có"
-        return DialogResponseDraft(
-            f"Vui lòng xác nhận số điện thoại {phone}.",
-            ("Xác nhận", "Nhập lại"),
-        )
-
-    @staticmethod
     def _final_confirmation(
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
         lines = (
             "Vui lòng xác nhận thông tin đặt lịch:",
-            f"- Cửa hàng: {_shop_name(context)}",
-            f"- Ngày: {_date_text(context)}",
-            f"- Giờ: {_time_text(context)}",
-            f"- Số người: {_people_text(context)}",
-            f"- Thời lượng: {_duration_text(context)}",
-            f"- Liệu trình: {_course_name(context)}",
-            f"- Add-on: {_addon_text(context)}",
-            f"- Kỹ thuật viên: {_therapist_text(context)}",
-            f"- Số điện thoại: {_phone_text(context)}",
+            *_booking_summary_lines(context),
+            "",
+            "Bạn có muốn xác nhận đặt lịch với thông tin trên không?",
         )
         return DialogResponseDraft(
             "\n".join(lines),
@@ -766,12 +747,14 @@ class InstructionBuilder:
                 metadata={"booking_created": False},
             )
         reservation_code = context.booking.reservation_code or context.reservation_code
-        text = "Đặt lịch thành công."
+        lines = ["Đặt lịch thành công!"]
         if reservation_code:
-            text += f" Mã đặt lịch: {reservation_code}."
+            lines.append(f"Mã đặt lịch: {reservation_code}")
         else:
-            text += " Thông tin đặt lịch đã được ghi nhận."
-        return DialogResponseDraft(text, metadata={"booking_created": True})
+            lines.append("Thông tin đặt lịch đã được ghi nhận.")
+        lines.append("")
+        lines.extend(_booking_summary_lines(context))
+        return DialogResponseDraft("\n".join(lines), metadata={"booking_created": True})
 
     @staticmethod
     def _booking_cancelled(
@@ -818,15 +801,6 @@ def _allowlisted_metadata(values: Mapping[str, object]) -> Mapping[str, object]:
         elif type(value) is bool:
             safe[key] = value
     return MappingProxyType(safe)
-
-
-def _mask_phone(phone: str) -> str:
-    compact = "".join(character for character in phone if character.isdigit())
-    if not compact:
-        return "***"
-    if len(compact) <= 4:
-        return "*" * len(compact)
-    return "*" * (len(compact) - 4) + compact[-4:]
 
 
 def _format_date(value: date) -> str:
@@ -878,5 +852,24 @@ def _therapist_text(context: BookingContext) -> str:
     return preference.therapist_name or "Kỹ thuật viên đã chọn"
 
 
-def _phone_text(context: BookingContext) -> str:
-    return _mask_phone(context.phone) if context.phone is not None else "chưa có"
+def _full_phone_text(context: BookingContext) -> str:
+    return context.phone if context.phone is not None else "chưa có"
+
+
+def _customer_name_text(context: BookingContext) -> str:
+    return context.customer_name or "chưa có"
+
+
+def _booking_summary_lines(context: BookingContext) -> tuple[str, ...]:
+    return (
+        f"Tên khách hàng: {_customer_name_text(context)}",
+        f"Số điện thoại: {_full_phone_text(context)}",
+        f"Cửa hàng: {_shop_name(context)}",
+        f"Ngày: {_date_text(context)}",
+        f"Giờ: {_time_text(context)}",
+        f"Số người: {_people_text(context)}",
+        f"Thời lượng: {_duration_text(context)}",
+        f"Liệu trình: {_course_name(context)}",
+        f"Add-on: {_addon_text(context)}",
+        f"Kỹ thuật viên: {_therapist_text(context)}",
+    )
