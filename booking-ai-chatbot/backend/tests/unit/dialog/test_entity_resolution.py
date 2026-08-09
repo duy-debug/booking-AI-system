@@ -172,7 +172,7 @@ def entity_request(kind: NLUEntityKind, query: str) -> NLUResult:
         intent=None,
         payload={},
         confidence=0.8,
-        source=NLUSource.DETERMINISTIC,
+        source=NLUSource.LLM,
         resolution_status=NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED,
         matched_rule=f"{kind.value}_query_state",
         entity_query=query,
@@ -218,7 +218,7 @@ async def test_invalid_nlu_result_and_wrong_state_are_rejected() -> None:
         "unknown",
         {},
         0.0,
-        NLUSource.FALLBACK,
+        NLUSource.LLM,
         NLUResolutionStatus.RESOLVED,
     )
     resolver = coordinator()

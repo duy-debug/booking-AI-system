@@ -174,7 +174,7 @@ async def test_valid_people_output_maps_to_typed_nlu_result() -> None:
     assert result.intent == "select_people"
     assert result.payload == {"num_customer": 3}
     assert type(result.payload["num_customer"]) is int
-    assert result.source is NLUSource.FALLBACK
+    assert result.source is NLUSource.LLM
     assert result.confidence == 0.9
     assert gateway.calls == 1
     assert gateway.tools is not None

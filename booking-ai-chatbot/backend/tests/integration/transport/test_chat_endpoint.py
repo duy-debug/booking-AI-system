@@ -405,41 +405,6 @@ def test_shop_discovery_does_not_truncate_shop_list(
     assert outbound_requests == []
 
 
-def test_generic_edit_at_final_confirmation_returns_guided_change_menu(
-    chat_client: tuple[TestClient, list[httpx.Request]],
-) -> None:
-    client, outbound_requests = chat_client
-    container = container_of(client)
-    context = BookingContext(
-        "conversation-edit-menu",
-        state=BookingState.AWAITING_CONFIRMATION,
-    )
-    container.memory_cache._contexts[context.conversation_id] = context
-
-    response = post_message(
-        client,
-        conversation_id=context.conversation_id,
-        message="tôi muốn chỉnh sửa booking",
-    )
-    body = response.json()
-
-    assert response.status_code == 200
-    assert body["state"] == "awaiting_confirmation"
-    assert body["status"] == "success"
-    assert body["quick_replies"] == [
-        "Đổi cửa hàng",
-        "Đổi ngày",
-        "Đổi số người",
-        "Đổi thời lượng",
-        "Đổi liệu trình",
-        "Đổi giờ",
-        "Đổi kỹ thuật viên",
-        "Đổi số điện thoại",
-    ]
-    assert context.state is BookingState.AWAITING_CONFIRMATION
-    assert outbound_requests == []
-
-
 def test_service_package_synonym_lists_services_during_duration_selection(
     chat_client: tuple[TestClient, list[httpx.Request]],
 ) -> None:

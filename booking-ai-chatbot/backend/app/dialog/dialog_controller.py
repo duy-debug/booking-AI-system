@@ -150,7 +150,6 @@ class DialogTurnInput:
     intent: str
     payload: Mapping[str, object]
     idempotency_key: str | None = None
-    raw_message: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.intent, str) or not self.intent.strip():
@@ -789,9 +788,6 @@ async def _process_bound_chat_message(
 ) -> DialogResponse:
     # Xử lý turn khi trace context đã bind: NLU -> route -> entity/action -> response.
     """Process a turn after its safe logging context has been bound."""
-    if context.state is BookingState.AWAITING_CONFIRMATION and _is_generic_change_request(message):
-        return _change_menu_response(context)
-
     # Phân tích câu người dùng bằng LLM NLU thành NLUResult canonical.
     nlu_result = await container.llm_nlu.parse(
         text=message,
@@ -871,7 +867,6 @@ async def _process_bound_chat_message(
             nlu_result,
             state=context.state,
             intent_policy=container.state_intent_policy,
-            raw_message=message,
         )
         query = faq_turn.payload["query"]
         assert isinstance(query, str)
@@ -955,7 +950,6 @@ async def _process_bound_chat_message(
             state=context.state,
             intent_policy=container.state_intent_policy,
             idempotency_key=idempotency_key,
-            raw_message=message,
         )
 
     trace_log(
@@ -1326,7 +1320,7 @@ async def _next_requested_turn(
         intent=None,
         payload={},
         confidence=1.0,
-        source=NLUSource.FALLBACK,
+        source=NLUSource.CONTEXT,
         resolution_status=NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED,
         matched_rule="prefilled_entity",
         entity_query=query,
@@ -2166,19 +2160,6 @@ def _should_resume_recovery(context: BookingContext) -> bool:
     )
 
 
-# Nhận diện câu "chỉnh sửa" chung để mở menu change thay vì bắt LLM đoán target.
-def _is_generic_change_request(message: str) -> bool:
-    normalized = " ".join(message.casefold().strip().split())
-    return normalized in {
-        "chỉnh sửa",
-        "chỉnh sửa booking",
-        "chỉnh sửa đặt lịch",
-        "tôi muốn chỉnh sửa",
-        "tôi muốn chỉnh sửa booking",
-        "sửa thông tin",
-        "chỉnh lại thông tin",
-        "quay lại sửa",
-    }
 
 
 # Tạo menu chọn field cần sửa khi người dùng chỉ nói muốn chỉnh sửa booking.

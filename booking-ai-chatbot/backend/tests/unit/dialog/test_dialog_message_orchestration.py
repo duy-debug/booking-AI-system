@@ -243,7 +243,7 @@ def resolved_nlu() -> NLUResult:
         intent="start_booking",
         payload={},
         confidence=1.0,
-        source=NLUSource.DETERMINISTIC,
+        source=NLUSource.LLM,
         resolution_status=NLUResolutionStatus.RESOLVED,
     )
 
@@ -253,7 +253,7 @@ def entity_nlu(kind: NLUEntityKind = NLUEntityKind.SHOP) -> NLUResult:
         intent=None,
         payload={},
         confidence=0.8,
-        source=NLUSource.DETERMINISTIC,
+        source=NLUSource.LLM,
         resolution_status=NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED,
         entity_query="Shibuya",
         entity_kind=kind,
@@ -265,7 +265,7 @@ def unresolved_nlu() -> NLUResult:
         intent=None,
         payload={},
         confidence=0.0,
-        source=NLUSource.FALLBACK,
+        source=NLUSource.LLM,
         resolution_status=NLUResolutionStatus.UNRESOLVED,
     )
 
@@ -275,7 +275,7 @@ def greeting_nlu() -> NLUResult:
         intent="greeting",
         payload={},
         confidence=1.0,
-        source=NLUSource.DETERMINISTIC,
+        source=NLUSource.LLM,
         resolution_status=NLUResolutionStatus.RESOLVED,
     )
 
@@ -285,7 +285,7 @@ def change_nlu() -> NLUResult:
         intent="change_info",
         payload={"change_target": "people", "num_customer": 5},
         confidence=1.0,
-        source=NLUSource.DETERMINISTIC,
+        source=NLUSource.LLM,
         resolution_status=NLUResolutionStatus.RESOLVED,
         matched_rule="change_booking_field",
     )
@@ -296,7 +296,7 @@ def faq_nlu(query: str) -> NLUResult:
         intent="ask_question",
         payload={"query": query},
         confidence=1.0,
-        source=NLUSource.DETERMINISTIC,
+        source=NLUSource.LLM,
         resolution_status=NLUResolutionStatus.RESOLVED,
         matched_rule="faq_explicit",
     )
@@ -354,7 +354,6 @@ async def test_resolved_branch_runs_controller_renderer_and_save_once() -> None:
     assert fake.llm_nlu.calls == [("Tôi muốn đặt lịch", BookingState.IDLE)]
     assert len(fake.dialog_controller.calls) == 1
     assert fake.dialog_controller.calls[0][1].idempotency_key == " stable-key "
-    assert fake.dialog_controller.calls[0][1].raw_message == "Tôi muốn đặt lịch"
     assert len(fake.instruction_builder.calls) == 1
     assert fake.conversation_context_store.saved == [("conversation-a", context)]
     assert response.text == "Safe response"

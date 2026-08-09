@@ -137,10 +137,10 @@ DISCOVERY_ALLOWED_STATES: Mapping[str, frozenset[BookingState]] = MappingProxyTy
 _RULE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _WHITESPACE_PATTERN = re.compile(r"\s+")
 class NLUSource(StrEnum):
-    """Identifies whether a result came from rules or the safe fallback."""
+    """Identifies the structured source of a parsed NLU result."""
 
-    DETERMINISTIC = "deterministic"
-    FALLBACK = "fallback"
+    LLM = "llm"
+    CONTEXT = "context"
 
 
 class NLUResolutionStatus(StrEnum):
@@ -329,7 +329,6 @@ def to_dialog_turn_input(
     state: BookingState,
     intent_policy: StateIntentPolicy,
     idempotency_key: str | None = None,
-    raw_message: str | None = None,
 ) -> DialogTurnInput:
     """Map only a policy-valid and payload-safe result to a dialog turn."""
     from app.dialog.dialog_controller import DialogTurnInput
@@ -351,7 +350,6 @@ def to_dialog_turn_input(
         intent=result.intent,
         payload=payload,
         idempotency_key=idempotency_key,
-        raw_message=raw_message,
     )
 
 
@@ -359,7 +357,7 @@ def to_dialog_turn_input(
 def _unresolved(
     *,
     confidence: float = 0.0,
-    source: NLUSource = NLUSource.FALLBACK,
+    source: NLUSource = NLUSource.LLM,
     matched_rule: str | None = None,
     has_unconsumed_entities: bool = False,
 ) -> NLUResult:
@@ -755,7 +753,7 @@ class LLMNLU:
                 intent=None,
                 payload={},
                 confidence=output.confidence,
-                source=NLUSource.FALLBACK,
+                source=NLUSource.LLM,
                 resolution_status=NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED,
                 matched_rule="llm_nlu",
                 entity_query=entity_query.strip(),
@@ -774,7 +772,7 @@ class LLMNLU:
             intent=intent,
             payload=payload,
             confidence=output.confidence,
-            source=NLUSource.FALLBACK,
+            source=NLUSource.LLM,
             resolution_status=NLUResolutionStatus.RESOLVED,
             matched_rule="llm_nlu",
             has_unconsumed_entities=_has_merged_secondary_entities(

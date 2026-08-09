@@ -114,7 +114,7 @@ def test_stage_requested_entities_preserves_secondary_start_time_until_time_step
         intent="select_people",
         payload={"num_customer": 1},
         confidence=0.99,
-        source=NLUSource.FALLBACK,
+        source=NLUSource.LLM,
         resolution_status=NLUResolutionStatus.RESOLVED,
         merged_entities={
             "number_of_people": 1,
