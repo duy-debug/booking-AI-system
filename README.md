@@ -29,16 +29,16 @@ Hệ thống bao gồm:
 
 - **FastAPI Booking Backend** — nơi chứa toàn bộ business rules và dữ liệu nghiệp vụ cốt lõi, được tổ chức theo kiến trúc phân lớp (api → services → repositories → db);
 - **Next.js Frontend** — giao diện dành cho khách hàng và quản trị viên;
-- **AI Chatbot Service** độc lập sử dụng Qdrant và Groq;
+- **AI Chatbot Service** độc lập dùng Gemini cho LLM NLU/NLG, Qdrant cho FAQ/RAG và gọi Booking Backend API để xử lý booking;
 - **Supabase PostgreSQL** — nơi lưu trữ dữ liệu giao dịch và booking.
 
 Chatbot không truy cập trực tiếp vào các bảng booking. Những dữ liệu theo thời gian thực như shop, course, slot khả dụng và trạng thái booking đều được lấy thông qua Booking Backend API.
 
-> **RAG đã được tách khỏi backend.** Tìm kiếm ngữ nghĩa (Qdrant + Groq) giờ nằm trong
+> **RAG đã được tách khỏi backend.** Tìm kiếm ngữ nghĩa (Qdrant + Gemini) giờ nằm trong
 > service Chatbot độc lập. Backend chỉ còn tầng dữ liệu giao dịch (PostgreSQL).
 
 > **Trạng thái dự án:** Backend đã hoàn chỉnh (API booking + kiến trúc phân lớp, RAG/POS đã xóa).
-> Chatbot đã hoàn thiện pipeline RAG + intent routing. Web Admin đã triển khai dashboard,
+> Chatbot đã hoàn thiện pipeline LLM NLU + state machine + POS/Qdrant routing. Web Admin đã triển khai dashboard,
 > lịch booking và các màn hình quản lý; giao diện booking dành cho khách hàng vẫn đang phát triển.
 
 ---
@@ -59,11 +59,12 @@ Chatbot không truy cập trực tiếp vào các bảng booking. Những dữ l
 
 ### AI Assistant
 
-- Truy xuất FAQ và policy bằng Qdrant
-- Semantic search với sentence-transformer embeddings
-- Intent routing giữa FAQ và các thao tác booking theo thời gian thực
-- Tra cứu shop, course và slot thông qua Booking Backend API
-- Yêu cầu xác nhận trước khi tạo, cập nhật hoặc hủy booking
+- LLM NLU đọc raw user text và trả structured output có validate
+- Intent prioritization theo state hiện tại và booking context
+- Điều phối multi-turn booking bằng state machine và booking context
+- Tra cứu FAQ/policy qua Qdrant chỉ khi người dùng hỏi knowledge question
+- Tra cứu shop, course, slot, therapist và tạo booking qua Booking Backend API
+- Yêu cầu xác nhận trước khi tạo booking
 - Chạy độc lập và không truy cập trực tiếp database booking
 
 ### Web Application
@@ -90,7 +91,7 @@ flowchart TB
     FE --> BE[FastAPI Booking Backend]
     CB --> BE
     CB --> Qdrant[(Qdrant Vector DB)]
-    CB --> Groq[Groq LLM]
+    CB --> Gemini[Gemini LLM]
 
     BE --> DB[(Supabase PostgreSQL)]
 ```
@@ -125,7 +126,7 @@ Xem thêm tại [Tài liệu kiến trúc](docs/architecture.md).
 | Database | Supabase PostgreSQL |
 | Migrations | Alembic |
 | Authentication | Supabase Auth JWT (ES256, verify qua JWKS) |
-| AI service | Groq-compatible LLM, sentence-transformers |
+| AI service | Gemini API-compatible gateway, sentence-transformers |
 | Vector database | Qdrant |
 | Testing | Pytest |
 | Deployment | Docker, Docker Compose |
@@ -158,7 +159,7 @@ Cần cài đặt:
 - Node.js 20 trở lên
 - Docker và Docker Compose
 - Một Supabase PostgreSQL project
-- Groq API key để chạy Chatbot
+- Gemini API key để chạy Chatbot
 
 ### Clone repository
 
@@ -268,7 +269,6 @@ uvicorn app.main:app --reload --port 8001
 Kiểm tra:
 
 ```text
-Health:  http://localhost:8001/health
 Swagger: http://localhost:8001/docs
 ```
 
@@ -323,21 +323,20 @@ SUPABASE_TEST_PASSWORD=test-password
 Create `booking-ai-chatbot/backend/.env` from `.env.example`.
 
 ```env
-GROQ_API_KEY=
-GROQ_MODEL=mixtral-8x7b-32768
+GEMINI_API_KEY=
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+GEMINI_MODEL=gemini-2.5-flash
+GEMINI_FALLBACK_MODEL=
+DIALOG_INTENT_TOOL_ENABLED=true
 
 EMBED_MODEL_NAME=all-MiniLM-L6-v2
-EMBED_DIM=384
 
 QDRANT_HOST=localhost
 QDRANT_PORT=6333
 QDRANT_COLLECTION=kb_chunks
 
 BOOKING_API_URL=http://localhost:8000
-BOOKING_API_SERVICE_KEY=
-
-ADMIN_API_KEY=change-me-in-production
-```
+KNOWLEDGE_QDRANT_ENABLED=true
 ```
 
 Khi chạy bằng Docker Compose:
