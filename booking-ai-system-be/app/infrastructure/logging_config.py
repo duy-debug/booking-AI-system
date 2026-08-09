@@ -3,7 +3,7 @@
 import json
 import logging
 import sys
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 from app.utils.sensitive_data import sanitize_text, sanitize_value
 
@@ -41,9 +41,13 @@ class ConsoleFormatter(logging.Formatter):
 
         context = current_trace_context()
         base = super().format(record)
+        parts = [f"[trace={context.trace_id}]"]
+        if context.session_id != "-":
+            parts.append(f"[session={context.session_id}]")
+        if context.turn_id is not None:
+            parts.append(f"[turn={context.turn_id}]")
         return sanitize_text(
-            f"{base} [trace={context.trace_id}] [session={context.session_id}] "
-            f"[turn={context.turn_id or '-'}]"
+            f"{base} {' '.join(parts)}"
         )
 
 
@@ -66,10 +70,15 @@ def configure_logging(*, level: str = "INFO", log_format: str = "console") -> No
         existing.close()
     root.addHandler(handler)
     root.setLevel(logging.getLevelNamesMapping()[normalized_level])
-    for name in ("uvicorn", "uvicorn.error", "uvicorn.access", "fastapi"):
+    for name in ("uvicorn", "uvicorn.error", "fastapi"):
         child = logging.getLogger(name)
         child.handlers.clear()
+        child.setLevel(logging.getLevelNamesMapping()[normalized_level])
         child.propagate = True
+    access_logger = logging.getLogger("uvicorn.access")
+    access_logger.handlers.clear()
+    access_logger.setLevel(logging.WARNING)
+    access_logger.propagate = False
 
 
 def log_event(
@@ -78,6 +87,7 @@ def log_event(
     event: str,
     *,
     exc_info: bool = False,
+    message: str | None = None,
     **fields: object,
 ) -> None:
     from app.infrastructure.trace_context import current_trace_context
@@ -86,7 +96,7 @@ def log_event(
     safe = {key: sanitize_value(key, value) for key, value in fields.items()}
     logging.getLogger(f"app.{component}").log(
         level,
-        event,
+        message or event,
         extra={
             "component": component,
             "event": event,

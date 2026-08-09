@@ -61,7 +61,7 @@ def list_available_slots(
     )
     validated_result = AvailableSlotListResponse.model_validate(result)
     log_event(
-        logging.INFO,
+        logging.DEBUG,
         "SlotService",
         "pos_business_rules_checked",
         operation="get_available_slots",
@@ -115,7 +115,7 @@ def list_available_therapists(
         result
     )
     log_event(
-        logging.INFO,
+        logging.DEBUG,
         "SlotService",
         "pos_business_rules_checked",
         operation="search_available_therapists",

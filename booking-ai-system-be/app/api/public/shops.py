@@ -13,10 +13,10 @@ from app.schemas.common import (
 )
 from app.schemas.course import PublicCourseResponse
 from app.schemas.shop import PublicShopListResponse, PublicShopResponse
+from app.schemas.therapist import PublicTherapistResponse
 from app.services.course_service import CourseService
 from app.services.shop_service import ShopService
 from app.services.therapist_service import TherapistService
-from app.schemas.therapist import PublicTherapistResponse
 
 router = APIRouter(prefix="/api/shops", tags=["public-shops"])
 
@@ -31,7 +31,7 @@ def list_shops(
     service = ShopService(db)
     shops = service.list_public(is_active=effective_active)
     log_event(
-        logging.INFO,
+        logging.DEBUG,
         "ShopAPI",
         "pos_request_validated",
         operation="search_shops",
@@ -69,7 +69,7 @@ def list_courses(
         is_active=effective_active,
     )
     log_event(
-        logging.INFO,
+        logging.DEBUG,
         "CourseAPI",
         "pos_request_validated",
         operation="search_services",
@@ -94,7 +94,7 @@ def list_therapists(
     service = TherapistService(db)
     therapists = service.list_public(uid, is_active=effective_active)
     log_event(
-        logging.INFO,
+        logging.DEBUG,
         "TherapistAPI",
         "pos_request_validated",
         operation="search_shop_therapists",

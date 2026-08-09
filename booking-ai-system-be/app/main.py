@@ -1,7 +1,5 @@
 # FastAPI app entry — điểm khởi chạy backend
 
-import logging
-
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,7 +18,7 @@ from app.api.public.bookings import router as public_bookings_router
 from app.api.public.shops import router as public_shops_router
 from app.api.public.therapist_schedule import router as therapist_schedule_router
 from app.core.config import settings
-from app.infrastructure.logging_config import configure_logging, log_event
+from app.infrastructure.logging_config import configure_logging
 from app.infrastructure.trace_context import TraceMiddleware
 from app.schemas.common import ApplicationInfoResponse, HealthResponse
 
@@ -40,15 +38,12 @@ app.add_middleware(TraceMiddleware)
 # Chuyển lỗi kiểm tra dữ liệu đầu vào của FastAPI sang cấu trúc Problem Details thống nhất cho frontend.
 @app.exception_handler(RequestValidationError)
 def validation_handler(request: Request, exc: RequestValidationError):
-    log_event(
-        logging.WARNING,
-        "POSValidation",
-        "pos_business_error",
-        operation=request.url.path,
-        error_code="VALIDATION_ERROR",
-        status_code=422,
-        invalid_fields=[".".join(str(part) for part in error["loc"]) for error in exc.errors()],
-    )
+    request.scope["pos_error"] = {
+        "error_code": "VALIDATION_ERROR",
+        "status_code": 422,
+        "invalid_fields": [".".join(str(part) for part in error["loc"]) for error in exc.errors()],
+        "validation": True,
+    }
     return JSONResponse(
         status_code=422,
         content={
@@ -74,14 +69,11 @@ def http_exception_handler(request: Request, exc: HTTPException):
         if isinstance(exc.detail, dict)
         else "UNKNOWN_ERROR"
     )
-    log_event(
-        logging.WARNING,
-        "POSBusiness",
-        "pos_business_error",
-        operation=request.url.path,
-        error_code=error_code,
-        status_code=exc.status_code,
-    )
+    request.scope["pos_error"] = {
+        "error_code": error_code,
+        "status_code": exc.status_code,
+        "validation": False,
+    }
     if isinstance(exc.detail, dict):
         return JSONResponse(status_code=exc.status_code, content=exc.detail)
     return JSONResponse(

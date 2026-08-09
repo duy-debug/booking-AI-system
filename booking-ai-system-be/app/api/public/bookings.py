@@ -34,7 +34,7 @@ def create_booking(
     service = BookingService(db)
     result = PublicBookingResponse.model_validate(service.create(body, idempotency_key))
     log_event(
-        logging.INFO,
+        logging.DEBUG,
         "BookingService",
         "pos_business_rules_checked",
         operation="create_booking",

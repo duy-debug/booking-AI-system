@@ -25,7 +25,7 @@ def check_eligibility(body: BookingEligibilityCheckInput, db: Session = Depends(
     service = EligibilityService(db)
     result = service.check_eligibility(phone=body.phone, shop_id=body.shop_id)
     log_event(
-        logging.INFO,
+        logging.DEBUG,
         "EligibilityService",
         "pos_business_rules_checked",
         operation="verify_customer",

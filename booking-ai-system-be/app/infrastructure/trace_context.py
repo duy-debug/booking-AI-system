@@ -4,8 +4,10 @@ import logging
 import re
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
+from http import HTTPStatus
 from time import perf_counter
 from typing import Any
+from urllib.parse import parse_qsl
 from uuid import uuid4
 
 from app.infrastructure.logging_config import log_event
@@ -62,15 +64,12 @@ class TraceMiddleware:
         token = bind_trace_context(context)
         started = perf_counter()
         status_code = 500
-        path = str(scope.get("path", ""))
-        operation = _operation(scope)
         log_event(
-            logging.INFO,
+            logging.DEBUG,
             "POSMiddleware",
             "pos_request_received",
             method=scope.get("method"),
-            path=path,
-            operation=operation,
+            path=str(scope.get("path", "")),
         )
 
         async def send_with_trace(message: dict[str, Any]) -> None:
@@ -89,22 +88,34 @@ class TraceMiddleware:
 
         try:
             await self.app(scope, receive, send_with_trace)
-            log_event(
-                logging.INFO,
-                "POSMiddleware",
-                "pos_request_completed",
-                operation=operation,
-                path=path,
+            self._log_completed_request(
+                scope=scope,
                 status_code=status_code,
                 duration_ms=round((perf_counter() - started) * 1000),
+                context=context,
             )
         except Exception as error:
+            normalized_path = _normalized_path(scope)
+            endpoint = _endpoint_name(scope)
+            source = _request_source(context)
+            message = (
+                f"[source={source}]"
+                + (f"[turn={context.turn_id}]" if context.turn_id is not None else "")
+                + f"[POS] {endpoint}\n"
+                f"{scope.get('method')} {normalized_path}\n"
+                f"→ 500 INTERNAL SERVER ERROR | "
+                f"{round((perf_counter() - started) * 1000)}ms | "
+                f"unexpected_exception | error_code={type(error).__name__}"
+            )
             log_event(
                 logging.ERROR,
                 "POSMiddleware",
                 "pos_request_failed",
-                operation=operation,
-                path=path,
+                message=message,
+                source=source,
+                method=scope.get("method"),
+                path=normalized_path,
+                endpoint=endpoint,
                 status_code=500,
                 exception_type=type(error).__name__,
                 duration_ms=round((perf_counter() - started) * 1000),
@@ -113,6 +124,58 @@ class TraceMiddleware:
             raise
         finally:
             reset_trace_context(token)
+
+    def _log_completed_request(
+        self,
+        *,
+        scope: dict[str, Any],
+        status_code: int,
+        duration_ms: int,
+        context: TraceContext,
+    ) -> None:
+        normalized_path = _normalized_path(scope)
+        endpoint = _endpoint_name(scope)
+        params = _important_params(scope)
+        source = _request_source(context)
+        error_code, status_hint = _error_metadata(scope)
+        status_label = _status_label(status_code)
+        lines = [
+            f"[source={source}]"
+            + (f"[turn={context.turn_id}]" if context.turn_id is not None else "")
+            + f"[POS] {endpoint}",
+            f"{scope.get('method')} {normalized_path}",
+        ]
+        if params:
+            lines.append(f"params={params}")
+        result_line = f"→ {status_code} {status_label} | {duration_ms}ms"
+        if status_code >= 400:
+            result_line += f" | {status_hint}"
+            if error_code is not None:
+                result_line += f" | error_code={error_code}"
+        lines.append(result_line)
+        message = "\n".join(lines)
+        level = logging.INFO
+        event = "pos_request_completed"
+        if 400 <= status_code < 500:
+            level = logging.WARNING
+            event = "pos_request_failed"
+        elif status_code >= 500:
+            level = logging.ERROR
+            event = "pos_request_failed"
+        log_event(
+            level,
+            "POSMiddleware",
+            event,
+            message=message,
+            source=source,
+            method=scope.get("method"),
+            path=normalized_path,
+            endpoint=endpoint,
+            status_code=status_code,
+            params=params or None,
+            duration_ms=duration_ms,
+            error_code=error_code,
+        )
 
 
 def _valid(value: str | None, default: str) -> str:
@@ -143,3 +206,51 @@ def _operation(scope: dict[str, Any]) -> str:
     if path == "/api/bookings" and method == "POST":
         return "create_booking"
     return "http_request"
+
+
+def _normalized_path(scope: dict[str, Any]) -> str:
+    route = scope.get("route")
+    path_format = getattr(route, "path_format", None)
+    if isinstance(path_format, str) and path_format:
+        return path_format
+    return str(scope.get("path", ""))
+
+
+def _endpoint_name(scope: dict[str, Any]) -> str:
+    endpoint = scope.get("endpoint")
+    module = getattr(endpoint, "__module__", "")
+    function = getattr(endpoint, "__name__", "")
+    if module and function:
+        return f"{module.rsplit('.', maxsplit=1)[-1]}.{function}()"
+    if function:
+        return f"{function}()"
+    return "unknown_endpoint()"
+
+
+def _important_params(scope: dict[str, Any]) -> dict[str, str]:
+    query_string = scope.get("query_string", b"")
+    if not isinstance(query_string, bytes) or not query_string:
+        return {}
+    return dict(parse_qsl(query_string.decode("latin-1"), keep_blank_values=False))
+
+
+def _error_metadata(scope: dict[str, Any]) -> tuple[str | None, str]:
+    error = scope.get("pos_error")
+    if not isinstance(error, dict):
+        return None, "request_failed"
+    code = error.get("error_code")
+    safe_code = code if isinstance(code, str) and code else None
+    if error.get("validation") is True:
+        return safe_code, "validation_failed"
+    return safe_code, "business_failed"
+
+
+def _status_label(status_code: int) -> str:
+    try:
+        return HTTPStatus(status_code).phrase.upper()
+    except ValueError:
+        return "UNKNOWN"
+
+
+def _request_source(context: TraceContext) -> str:
+    return "chatbot" if context.turn_id is not None else "pos_ui"
