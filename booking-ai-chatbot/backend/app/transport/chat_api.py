@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping
+import inspect
+import logging
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from time import perf_counter
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -15,6 +18,12 @@ from app.dependencies import (
     InvalidConversationIdError,
 )
 from app.dialog.instruction_builder import DialogResponse
+from app.infrastructure.context_store import (
+    consume_completed_turn_metrics,
+    elapsed_ms,
+    trace_log,
+    turn_metrics_payload,
+)
 from app.transport.schemas import ChatRequest, ChatResponse
 from app.transport.sse import stream_chat_events
 
@@ -51,11 +60,13 @@ async def chat(
     container: Annotated[ApplicationContainer, Depends(get_application_container)],
 ) -> ChatResponse:
     """Process one non-streaming chat message."""
+    started_at = perf_counter()
     try:
         response = await _process_chat_message(
             request=request,
             container=container,
             correlation_id=http_request.headers.get("x-correlation-id"),
+            entrypoint="/api/v1/chat",
         )
     except InvalidConversationIdError as error:
         raise HTTPException(
@@ -67,6 +78,24 @@ async def chat(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error.",
         ) from error
+    metrics = consume_completed_turn_metrics()
+    trace_log(
+        logging.getLogger(__name__),
+        logging.INFO,
+        "[9] DELIVERY",
+        "completed",
+        channel="json",
+        status="completed",
+        duration_ms=elapsed_ms(started_at),
+    )
+    if metrics is not None:
+        trace_log(
+            logging.getLogger(__name__),
+            logging.INFO,
+            "[10] TURN METRICS",
+            "completed",
+            metrics=turn_metrics_payload(metrics, total_duration_ms=elapsed_ms(started_at)),
+        )
     return _to_chat_response(request.conversation_id, response)
 
 
@@ -95,8 +124,18 @@ async def _process_chat_message(
     request: ChatRequest,
     container: ApplicationContainer,
     correlation_id: str | None = None,
+    entrypoint: str | None = None,
 ) -> DialogResponse:
     """Delegate one complete business turn to DialogController."""
+    parameters = inspect.signature(container.dialog_controller.handle_message).parameters
+    if "entrypoint" in parameters:
+        return await container.dialog_controller.handle_message(
+            conversation_id=request.conversation_id,
+            message=request.message,
+            idempotency_key=request.idempotency_key,
+            correlation_id=correlation_id,
+            entrypoint=entrypoint,
+        )
     return await container.dialog_controller.handle_message(
         conversation_id=request.conversation_id,
         message=request.message,
@@ -113,10 +152,28 @@ def _stream_chat_events(
     correlation_id: str | None = None,
 ) -> AsyncIterator[str]:
     """Delegate SSE lifecycle generation to the SSE transport module."""
+    async def process_stream_message(
+        *,
+        request: ChatRequest,
+        container: ApplicationContainer,
+        correlation_id: str | None = None,
+    ) -> DialogResponse:
+        parameters = inspect.signature(_process_chat_message).parameters
+        kwargs: dict[str, object] = {
+            "request": request,
+            "container": container,
+        }
+        if correlation_id is not None and "correlation_id" in parameters:
+            kwargs["correlation_id"] = correlation_id
+        if "entrypoint" in parameters:
+            kwargs["entrypoint"] = "/api/v1/chat/stream"
+        process_message = cast(Callable[..., Awaitable[DialogResponse]], _process_chat_message)
+        return await process_message(**kwargs)
+
     return stream_chat_events(
         request=request,
         container=container,
-        process_message=_process_chat_message,
+        process_message=process_stream_message,
         response_mapper=_to_chat_response,
         correlation_id=correlation_id,
     )

@@ -505,7 +505,7 @@ class ActionRegistry:
                 )
             trace_log(
                 logging.getLogger(__name__),
-                logging.INFO,
+                logging.DEBUG,
                 function_name,
                 "handler_verification_completed",
                 handler=function_name,
@@ -519,7 +519,7 @@ class ActionRegistry:
             )
             trace_log(
                 logging.getLogger(__name__),
-                logging.INFO,
+                logging.DEBUG,
                 function_name,
                 "handler_completed",
                 handler=function_name,

@@ -42,8 +42,8 @@ class ResponseGenerator:
             )
         trace_log(
             logger,
-            logging.INFO,
-            "ResponseGenerator",
+            logging.DEBUG,
+            "[7] RESPONSE",
             "nlg_started",
             provider="gemini",
             operation="response_generation",
@@ -80,8 +80,8 @@ class ResponseGenerator:
             return response
         trace_log(
             logger,
-            logging.INFO,
-            "ResponseGenerator",
+            logging.DEBUG,
+            "[7] RESPONSE",
             "nlg_completed",
             operation="response_generation",
             response_length=len(text),

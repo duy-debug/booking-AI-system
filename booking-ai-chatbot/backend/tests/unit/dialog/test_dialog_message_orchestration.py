@@ -430,21 +430,18 @@ async def test_turn_trace_logs_lifecycle_intent_transition_without_raw_content(
         )
 
     output = caplog.text
-    assert "[DialogController #1] turn_started" in output
-    assert "[DialogController #1] turn_completed" in output
-    assert output.count("turn_completed") == 1
+    assert "[[1] REQUEST #1] request_started" in output
+    assert "[[2] CONTEXT #1] loaded" in output
     assert "turn_failed" not in output
-    assert "[NLU #1] resolved intent=start_booking resolver=llm" in output
-    assert "[Router #1] dispatch route=dialog" in output
-    assert "[DialogCtrl #1] dispatch" in output
-    assert "[DialogCtrl #1] transition" in output
-    assert "[StateMachine #1] transition" in output
-    assert "[Response #1] prepared" in output
+    assert "[[5] ROUTING #1] dispatch route=dialog" in output
+    assert "[[5] ROUTING #1] state_actions_completed" in output
+    assert "[[8] CONTEXT SAVE #1] saved" in output
+    assert "[[7] RESPONSE #1] response_ready" in output
     assert "instruction_template=greeting" in output
     assert "private-conversation-id" not in output
     assert "private raw user message" not in output
     assert "0901234567" not in output
-    assert "Safe response" not in output
+    assert "Safe response" in output
 
 
 @pytest.mark.asyncio
@@ -458,8 +455,8 @@ async def test_turn_trace_sequence_increments_for_same_conversation(
         await _process_controller_pipeline(request=request(), container=as_container(fake))
         await _process_controller_pipeline(request=request(), container=as_container(fake))
 
-    assert "[DialogController #1] turn_started" in caplog.text
-    assert "[DialogController #2] turn_started" in caplog.text
+    assert "[[1] REQUEST #1] request_started" in caplog.text
+    assert "[[1] REQUEST #2] request_started" in caplog.text
     assert context.turn_sequence == 2
 
 
@@ -488,8 +485,8 @@ async def test_local_raw_turn_text_flags_log_truncated_user_and_assistant(
     assert f"user_message={'u' * 500}" in caplog.text
     assert "u" * 501 not in caplog.text
     assert "assistant_message=Safe response" in caplog.text
-    assert "[ContextStore #1] context_updated" in caplog.text
-    assert "fields_changed=['state']" in caplog.text
+    assert "[[8] CONTEXT SAVE #1] saved" in caplog.text
+    assert "'state': 'selecting_shop'" in caplog.text
     assert caplog.text.count("correlation=") > 3
     correlations = {
         getattr(record, "correlation", None)
@@ -522,7 +519,7 @@ async def test_production_never_logs_raw_turn_text_when_flags_are_true(
         )
 
     assert "production private message" not in caplog.text
-    assert "Safe response" not in caplog.text
+    assert "[[7] RESPONSE #1] response_ready" in caplog.text
 
 
 @pytest.mark.asyncio

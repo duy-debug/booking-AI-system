@@ -197,15 +197,39 @@ class TurnMetrics:
     intent: str | None = None
     handler: str | None = None
     outcome: str | None = None
+    llm_calls: int = 0
+    llm_input_tokens: int = 0
+    llm_output_tokens: int = 0
     pos_calls: int = 0
     qdrant_calls: int = 0
     nlu_duration_ms: int = 0
+    entity_resolution_ms: int = 0
     handler_duration_ms: int = 0
     nlg_duration_ms: int = 0
+
+    def snapshot(self) -> "TurnMetrics":
+        return TurnMetrics(
+            intent=self.intent,
+            handler=self.handler,
+            outcome=self.outcome,
+            llm_calls=self.llm_calls,
+            llm_input_tokens=self.llm_input_tokens,
+            llm_output_tokens=self.llm_output_tokens,
+            pos_calls=self.pos_calls,
+            qdrant_calls=self.qdrant_calls,
+            nlu_duration_ms=self.nlu_duration_ms,
+            entity_resolution_ms=self.entity_resolution_ms,
+            handler_duration_ms=self.handler_duration_ms,
+            nlg_duration_ms=self.nlg_duration_ms,
+        )
 
 
 _current: ContextVar[TraceContext | None] = ContextVar("trace_context", default=None)
 _turn_metrics: ContextVar[TurnMetrics | None] = ContextVar("turn_metrics", default=None)
+_completed_turn_metrics: ContextVar[TurnMetrics | None] = ContextVar(
+    "completed_turn_metrics",
+    default=None,
+)
 
 
 def current_trace_context() -> TraceContext:
@@ -272,9 +296,13 @@ def record_turn_metrics(
     intent: str | None = None,
     handler: str | None = None,
     outcome: str | None = None,
+    llm_calls: int = 0,
+    llm_input_tokens: int | None = None,
+    llm_output_tokens: int | None = None,
     pos_calls: int = 0,
     qdrant_calls: int = 0,
     nlu_duration_ms: int | None = None,
+    entity_resolution_ms: int | None = None,
     handler_duration_ms: int | None = None,
     nlg_duration_ms: int | None = None,
 ) -> None:
@@ -287,14 +315,59 @@ def record_turn_metrics(
         metrics.handler = handler
     if outcome is not None:
         metrics.outcome = outcome
+    metrics.llm_calls += llm_calls
+    if llm_input_tokens is not None:
+        metrics.llm_input_tokens += llm_input_tokens
+    if llm_output_tokens is not None:
+        metrics.llm_output_tokens += llm_output_tokens
     metrics.pos_calls += pos_calls
     metrics.qdrant_calls += qdrant_calls
     if nlu_duration_ms is not None:
         metrics.nlu_duration_ms += nlu_duration_ms
+    if entity_resolution_ms is not None:
+        metrics.entity_resolution_ms += entity_resolution_ms
     if handler_duration_ms is not None:
         metrics.handler_duration_ms += handler_duration_ms
     if nlg_duration_ms is not None:
         metrics.nlg_duration_ms += nlg_duration_ms
+
+
+def store_completed_turn_metrics() -> None:
+    metrics = _turn_metrics.get()
+    _completed_turn_metrics.set(metrics.snapshot() if metrics is not None else None)
+
+
+def consume_completed_turn_metrics() -> TurnMetrics | None:
+    metrics = _completed_turn_metrics.get()
+    _completed_turn_metrics.set(None)
+    return metrics
+
+
+def turn_metrics_payload(
+    metrics: TurnMetrics,
+    *,
+    total_duration_ms: int,
+) -> dict[str, object]:
+    return {
+        "intent": metrics.intent or "unresolved",
+        "handler": metrics.handler or "none",
+        "outcome": metrics.outcome or "unknown",
+        "llm_calls": metrics.llm_calls,
+        "pos_api_calls": metrics.pos_calls,
+        "qdrant_calls": metrics.qdrant_calls,
+        "tokens": {
+            "input_tokens": metrics.llm_input_tokens,
+            "output_tokens": metrics.llm_output_tokens,
+            "total_tokens": metrics.llm_input_tokens + metrics.llm_output_tokens,
+        },
+        "timing": {
+            "nlu_ms": metrics.nlu_duration_ms,
+            "entity_resolution_ms": metrics.entity_resolution_ms,
+            "handler_ms": metrics.handler_duration_ms,
+            "nlg_ms": metrics.nlg_duration_ms,
+            "total_duration_ms": total_duration_ms,
+        },
+    }
 
 
 class TraceMiddleware:
@@ -327,7 +400,13 @@ class TraceMiddleware:
         status_code = 500
         event_started = "pos_request_received" if self.pos_events else "request_started"
         event_completed = "pos_request_completed" if self.pos_events else "request_completed"
-        _event(event_started, self.service, scope, method=scope.get("method"))
+        _event(
+            event_started,
+            self.service,
+            scope,
+            method=scope.get("method"),
+            _level=logging.DEBUG,
+        )
 
         async def send_with_trace(message: dict[str, Any]) -> None:
             nonlocal status_code
@@ -351,6 +430,7 @@ class TraceMiddleware:
                 scope,
                 status_code=status_code,
                 duration_ms=round((perf_counter() - started) * 1000),
+                _level=logging.DEBUG,
             )
         except Exception:
             _event(
@@ -369,9 +449,14 @@ class TraceMiddleware:
 def _event(event: str, service: str, scope: dict[str, Any], **fields: object) -> None:
 
     exc_info = bool(fields.pop("exc_info", False))
+    level = fields.pop("_level", None)
     trace_log(
         logging.getLogger("app.trace_middleware"),
-        logging.ERROR if exc_info else logging.INFO,
+        (
+            logging.ERROR
+            if exc_info
+            else (level if isinstance(level, int) else logging.INFO)
+        ),
         "TraceMiddleware",
         event,
         _exc_info=exc_info,
@@ -683,6 +768,7 @@ def _sanitize_value(key: str, value: object) -> object:
     if normalized_key in {
         "input_tokens",
         "output_tokens",
+        "total_tokens",
         "vector_candidate_count",
         "lexical_candidate_count",
     }:

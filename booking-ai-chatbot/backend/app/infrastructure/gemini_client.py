@@ -66,7 +66,7 @@ from time import perf_counter
 
 import httpx
 
-from app.infrastructure.context_store import elapsed_ms, trace_log
+from app.infrastructure.context_store import elapsed_ms, record_turn_metrics, trace_log
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -187,6 +187,13 @@ class GeminiClient:
                 fields["input_tokens"] = prompt_tokens
             if completion_tokens is not None:
                 fields["output_tokens"] = completion_tokens
+            if prompt_tokens is not None and completion_tokens is not None:
+                fields["total_tokens"] = prompt_tokens + completion_tokens
+            record_turn_metrics(
+                llm_calls=1,
+                llm_input_tokens=prompt_tokens,
+                llm_output_tokens=completion_tokens,
+            )
             trace_log(_LOGGER, logging.INFO, "LLMUsage", "completed", **fields)
             return parsed
         raise LLMGatewayUnavailableError("Gemini is unavailable.")

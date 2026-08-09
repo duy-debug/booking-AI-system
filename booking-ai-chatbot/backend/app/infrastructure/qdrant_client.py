@@ -1012,7 +1012,7 @@ class FAQManager:
             trace_log(
                 _LOGGER,
                 logging.INFO,
-                "Knowledge",
+                "[6] RAG",
                 "no_result",
                 operation="faq_retrieval",
                 candidate_count=len(documents),
@@ -1030,7 +1030,7 @@ class FAQManager:
         trace_log(
             _LOGGER,
             logging.INFO,
-            "Knowledge",
+            "[6] RAG",
             "completed",
             operation="faq_retrieval",
             candidate_count=len(documents),
@@ -1049,7 +1049,7 @@ class FAQManager:
         trace_log(
             _LOGGER,
             logging.WARNING,
-            "Knowledge",
+            "[6] RAG",
             "failed",
             operation="faq_retrieval",
             error_code=error_code,

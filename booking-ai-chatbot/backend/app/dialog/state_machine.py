@@ -245,7 +245,7 @@ class StateMachine:
         context.state = transition.target
         trace_log(
             logging.getLogger(__name__),
-            logging.INFO,
+            logging.DEBUG,
             "StateMachine",
             "state_transition_completed",
             previous_state=previous_state.value,
@@ -261,7 +261,7 @@ class StateMachine:
     ) -> None:
         trace_log(
             logging.getLogger(__name__),
-            logging.INFO,
+            logging.DEBUG,
             "StateMachine",
             "transition_resolved",
             current_state=context.state.value,

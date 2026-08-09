@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from datetime import time as clock_time
 from enum import StrEnum
@@ -60,7 +60,6 @@ from app.infrastructure.context_store import (
     bind_correlation_id,
     bind_trace_context,
     bind_turn,
-    current_turn_metrics,
     elapsed_ms,
     record_turn_metrics,
     reset_conversation,
@@ -68,6 +67,7 @@ from app.infrastructure.context_store import (
     reset_trace_context,
     reset_turn,
     reset_turn_metrics,
+    store_completed_turn_metrics,
     trace_log,
 )
 
@@ -220,6 +220,7 @@ class DialogController:
         message: str,
         idempotency_key: str | None = None,
         correlation_id: str | None = None,
+        entrypoint: str | None = None,
     ) -> "DialogResponse":
         """Own one complete turn from context load through response generation."""
         if self._runtime is None:
@@ -232,6 +233,7 @@ class DialogController:
                 idempotency_key=idempotency_key,
                 container=runtime,
                 correlation_id=correlation_id,
+                entrypoint=entrypoint,
             )
 
     # Chạy một turn đã parse sẵn qua StateMachine và ActionRegistry, chưa render response cuối.
@@ -662,6 +664,7 @@ async def _process_serialized_chat_message(
     idempotency_key: str | None,
     container: ApplicationContainer,
     correlation_id: str | None = None,
+    entrypoint: str | None = None,
 ) -> DialogResponse:
     # Gắn trace/conversation context rồi chạy pipeline message theo thứ tự an toàn.
     """Run the deterministic message pipeline without booking business rules."""
@@ -676,17 +679,19 @@ async def _process_serialized_chat_message(
         turn_id=context.turn_sequence,
     )
     metrics_token = begin_turn_metrics()
-    context_before = _context_snapshot(context)
     initial_state = context.state
     trace_log(
         logger,
         logging.INFO,
-        "ChatAPI",
-        "user_message_received",
-        current_state=initial_state.value,
+        "[1] REQUEST",
+        "request_started",
+        method="POST",
+        path=entrypoint or "unknown",
         message_length=len(message),
+        state=initial_state.value,
     )
-    trace_log(logger, logging.INFO, "DialogController", "turn_started", state=initial_state.value)
+    _trace_context_loaded(context)
+    trace_log(logger, logging.DEBUG, "DialogController", "turn_started", state=initial_state.value)
     if _local_debug_enabled("LOG_USER_MESSAGES"):
         trace_log(
             logger,
@@ -719,15 +724,15 @@ async def _process_serialized_chat_message(
             )
             _trace_context_saved(context)
         _log_instruction(response)
-        _trace_context_diff(context_before, context)
         trace_log(
             logger,
             logging.INFO,
-            "Response",
-            "prepared",
+            "[7] RESPONSE",
+            "response_ready",
             state=response.state.value,
             status=response.status.value,
-            quick_reply_count=len(response.quick_replies),
+            text=response.text,
+            quick_replies=list(response.quick_replies),
             instruction_template=response.instruction_template or "none",
         )
         if _local_debug_enabled("LOG_AI_MESSAGES"):
@@ -739,24 +744,7 @@ async def _process_serialized_chat_message(
                 function="handle_message",
                 assistant_message=response.text[:1000],
             )
-        trace_log(
-            logger,
-            logging.INFO,
-            "DialogController",
-            "turn_completed",
-            state=response.state.value,
-            status=response.status.value,
-            intent=current_turn_metrics().intent or "unresolved",
-            handler=current_turn_metrics().handler or "none",
-            outcome=current_turn_metrics().outcome or response.status.value,
-            state_transition=f"{initial_state.value}->{response.state.value}",
-            pos_calls=current_turn_metrics().pos_calls,
-            qdrant_calls=current_turn_metrics().qdrant_calls,
-            nlu_duration_ms=current_turn_metrics().nlu_duration_ms,
-            handler_duration_ms=current_turn_metrics().handler_duration_ms,
-            nlg_duration_ms=current_turn_metrics().nlg_duration_ms,
-            duration_ms=elapsed_ms(started_at),
-        )
+        store_completed_turn_metrics()
         return response
     except Exception as error:
         trace_log(
@@ -794,8 +782,6 @@ async def _process_bound_chat_message(
         state=context.state,
         context=context,
     )
-    resolver = "llm"
-
     # Stage entity đã nói sớm vào context để chỉ hỏi field còn thiếu.
     _stage_requested_entities(nlu_result, context)
 
@@ -809,21 +795,6 @@ async def _process_bound_chat_message(
     }:
         return _handled_response(context, _TERMINAL_CHANGE_TEXT)
 
-    trace_log(
-        logger,
-        logging.INFO,
-        "NLU",
-        "resolved",
-        intent=nlu_result.intent or "unresolved",
-        resolver=resolver,
-        entity=nlu_result.entity_kind.value if nlu_result.entity_kind else "none",
-        function="parse",
-        input_summary=f"state={context.state.value}, chars={len(message)}",
-        output_summary=(
-            f"status={nlu_result.resolution_status.value}, rule={nlu_result.matched_rule or 'none'}"
-        ),
-        status=nlu_result.resolution_status.value,
-    )
     record_turn_metrics(intent=nlu_result.intent or "unresolved")
 
     if nlu_result.intent in {"greeting", "thanks", "ask_why", "repeat_last_question"}:
@@ -870,19 +841,9 @@ async def _process_bound_chat_message(
         )
         query = faq_turn.payload["query"]
         assert isinstance(query, str)
-        knowledge_started = perf_counter()
         response = await container.faq_manager.answer(
             query=query,
             context=context,
-        )
-        trace_log(
-            logger,
-            logging.INFO,
-            "Knowledge",
-            "completed",
-            status=response.status.value,
-            source_count=response.metadata.get("source_count", 0),
-            duration_ms=elapsed_ms(knowledge_started),
         )
         return response
 
@@ -904,10 +865,11 @@ async def _process_bound_chat_message(
             state=context.state,
             context=context,
         )
+        resolution_duration_ms = elapsed_ms(resolution_started)
         trace_log(
             logger,
             logging.INFO,
-            "EntityResolver",
+            "[4] ENTITY RESOLUTION",
             "completed",
             entity=resolution.entity_kind.value,
             resolution_status=resolution.status.value,
@@ -917,8 +879,9 @@ async def _process_bound_chat_message(
             output_summary=f"matched={_matched_display_name(resolution)}",
             search_scope=context.state.value,
             error_code=resolution.failure_code or "none",
-            duration_ms=elapsed_ms(resolution_started),
+            duration_ms=resolution_duration_ms,
         )
+        record_turn_metrics(entity_resolution_ms=resolution_duration_ms)
         if _local_debug_enabled("LOG_USER_MESSAGES"):
             trace_log(
                 logger,
@@ -952,14 +915,6 @@ async def _process_bound_chat_message(
             idempotency_key=idempotency_key,
         )
 
-    trace_log(
-        logger,
-        logging.INFO,
-        "DialogCtrl",
-        "dispatch",
-        intent=turn.intent,
-        state=context.state.value,
-    )
     controller_started = perf_counter()
     result = await container.dialog_controller.handle_turn(context, turn)
     result = await _consume_requested_entities(
@@ -977,39 +932,17 @@ async def _process_bound_chat_message(
     trace_log(
         logger,
         logging.INFO,
-        "DialogCtrl",
-        "transition",
+        "[5] ROUTING",
+        "state_actions_completed",
         from_state=result.initial_state.value,
         to_state=result.final_state.value,
         intent=result.intent,
         status=result.status.value,
-        function="handle_turn",
-        input_summary=(
-            f"intent={turn.intent}, payload_keys={','.join(sorted(turn.payload)) or 'none'}"
-        ),
-        output_summary=f"actions={','.join(result.executed_actions) or 'none'}",
+        route="dialog",
+        actions=list(result.executed_actions),
         error_code=result.failure_code or "none",
         duration_ms=elapsed_ms(controller_started),
     )
-    trace_log(
-        logger,
-        logging.INFO,
-        "StateMachine",
-        "transition",
-        from_state=result.initial_state.value,
-        to_state=result.final_state.value,
-    )
-    if result.executed_actions:
-        trace_log(
-            logger,
-            logging.INFO,
-            "ActionRegistry",
-            "completed",
-            function="execute_actions",
-            input_summary=f"action_count={len(result.executed_actions)}",
-            output_summary=",".join(result.executed_actions),
-            status=result.status.value,
-        )
     if result.failure_code is not None:
         trace_log(
             logger,
@@ -1056,7 +989,7 @@ async def _consume_requested_entities(
         consumed = await container.dialog_controller.handle_turn(context, follow_up)
         trace_log(
             logger,
-            logging.INFO,
+            logging.DEBUG,
             "DialogCtrl",
             "prefilled_entity_consumed",
             intent=follow_up.intent,
@@ -1334,7 +1267,7 @@ async def _next_requested_turn(
     if resolution.status is not EntityResolutionStatus.RESOLVED:
         trace_log(
             logger,
-            logging.INFO,
+            logging.DEBUG,
             "EntityResolver",
             "prefilled_entity_not_consumed",
             entity=kind.value,
@@ -1361,7 +1294,7 @@ def _trace_route(
     trace_log(
         logger,
         logging.INFO,
-        "Router",
+        "[5] ROUTING",
         "dispatch",
         route=route,
         reason=reason,
@@ -1371,43 +1304,6 @@ def _trace_route(
 
 
 # Chụp snapshot context trước xử lý để so sánh diff sau turn.
-def _context_snapshot(context: BookingContext) -> dict[str, object]:
-    return {
-        item.name: getattr(context, item.name)
-        for item in fields(context)
-        if item.name not in {"conversation_id", "turn_sequence"}
-    }
-
-
-# Log các field changed/preserved/cleared mà không log toàn bộ BookingContext.
-def _trace_context_diff(before: Mapping[str, object], context: BookingContext) -> None:
-    after = _context_snapshot(context)
-    changed = sorted(name for name, value in after.items() if value != before[name])
-    cleared = sorted(name for name in changed if before[name] is not None and after[name] is None)
-    preserved = sorted(
-        name
-        for name, value in after.items()
-        if _is_meaningful_context_value(value) and value == before[name]
-    )
-    trace_log(
-        logger,
-        logging.INFO,
-        "ContextStore",
-        "context_updated",
-        function="handle_turn",
-        fields_changed=changed,
-        fields_preserved=preserved,
-        fields_cleared=cleared,
-        updated_fields=changed,
-        status="changed" if changed else "unchanged",
-    )
-
-
-# Xác định field có giá trị đáng ghi vào preserved diff hay không.
-def _is_meaningful_context_value(value: object) -> bool:
-    return value is not None and value is not False and value != () and value != "none"
-
-
 # Lấy tên hiển thị của entity đã resolve để trace mà không lộ raw payload.
 def _matched_display_name(resolution: EntityResolutionResult) -> str:
     for value in resolution.dispatch_payload.values():
@@ -1421,11 +1317,77 @@ def _matched_display_name(resolution: EntityResolutionResult) -> str:
 def _trace_context_saved(context: BookingContext) -> None:
     trace_log(
         logger,
-        logging.DEBUG,
-        "Context",
+        logging.INFO,
+        "[8] CONTEXT SAVE",
         "saved",
-        state=context.state.value,
+        snapshot=_context_log_snapshot(context),
     )
+
+
+# Log snapshot context đã load để turn hiện tại dùng làm đầu vào tích lũy.
+def _trace_context_loaded(context: BookingContext) -> None:
+    trace_log(
+        logger,
+        logging.INFO,
+        "[2] CONTEXT",
+        "loaded",
+        snapshot=_context_log_snapshot(context),
+    )
+
+
+# Chỉ log snapshot ngắn gọn phục vụ đọc flow, không dump toàn bộ object nội bộ.
+def _context_log_snapshot(context: BookingContext) -> dict[str, object]:
+    therapist = context.therapist_preference
+    therapist_summary: str | None = None
+    if therapist is not None:
+        therapist_summary = therapist.therapist_name or therapist.preference_type.value
+    available_slots = context.available_slots or ()
+    snapshot: dict[str, object] = {
+        "state": context.state.value,
+        "shop": context.shop.name if context.shop is not None else None,
+        "booking_date": context.booking_date.isoformat() if context.booking_date else None,
+        "start_time": (
+            context.start_time.isoformat(timespec="minutes") if context.start_time else None
+        ),
+        "num_customer": context.num_customer,
+        "duration_minutes": context.duration_minutes,
+        "main_course": context.main_course.name if context.main_course is not None else None,
+        "addons": [item.name for item in context.addons],
+        "course_selection_mode": context.course_selection_mode.value,
+        "therapist": therapist_summary,
+        "phone_confirmed": context.phone_confirmed,
+        "ng_list_status": context.ng_list_status,
+        "available_slot_count": len(available_slots),
+        "requested_shop_name": context.requested_shop_name,
+        "requested_booking_date": (
+            context.requested_booking_date.isoformat()
+            if context.requested_booking_date is not None
+            else None
+        ),
+        "requested_start_time": (
+            context.requested_start_time.isoformat(timespec="minutes")
+            if context.requested_start_time is not None
+            else None
+        ),
+        "requested_num_customer": context.requested_num_customer,
+        "requested_duration_minutes": context.requested_duration_minutes,
+        "requested_main_course_name": context.requested_main_course_name,
+        "requested_addon_name": context.requested_addon_name,
+        "requested_skip_addon": context.requested_skip_addon,
+        "requested_therapist_name": context.requested_therapist_name,
+        "requested_therapist_gender": context.requested_therapist_gender,
+        "last_failure_code": context.last_failure_code,
+    }
+    return {
+        key: value
+        for key, value in snapshot.items()
+        if not (
+            value is None
+            or value is False
+            or value == ()
+            or value == []
+        )
+    }
 
 
 # Tự tải gợi ý an toàn cho state mới để người dùng không phải hỏi danh sách thủ công.
@@ -1542,7 +1504,7 @@ async def _available_therapists(
 def _log_instruction(response: DialogResponse) -> None:
     trace_log(
         logger,
-        logging.INFO,
+        logging.DEBUG,
         "InstructionBuilder",
         "instruction_built",
         instruction_template=response.instruction_template or "none",
@@ -1905,14 +1867,14 @@ def _catalog_response(
 
 # Xác định field còn thiếu trước khi được phép gọi availability POS.
 def _missing_availability_field(context: BookingContext) -> str | None:
-    fields = (
+    required_fields = (
         (context.shop, "Bạn hãy chọn cửa hàng trước khi xem giờ trống."),
         (context.booking_date, "Bạn hãy chọn ngày trước khi xem giờ trống."),
         (context.num_customer, "Bạn hãy chọn số người trước khi xem giờ trống."),
         (context.duration_minutes, "Bạn hãy chọn thời lượng trước khi xem giờ trống."),
         (context.main_course, "Bạn hãy chọn liệu trình trước khi xem giờ trống."),
     )
-    return next((message for value, message in fields if value is None), None)
+    return next((message for value, message in required_fields if value is None), None)
 
 
 # Render kết quả entity resolution không dispatch được: ambiguous/not_found/unsupported/failure.

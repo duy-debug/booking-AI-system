@@ -617,7 +617,7 @@ class LLMNLU:
         trace_log(
             logging.getLogger(__name__),
             logging.INFO,
-            "LLMNLU",
+            "[3] NLU",
             "nlu_started",
             provider="gemini",
             current_state=state.value,
@@ -658,32 +658,6 @@ class LLMNLU:
                 error_code="invalid_nlu_output",
             )
             return _llm_unresolved("invalid_nlu_output")
-        trace_log(
-            logging.getLogger(__name__),
-            logging.INFO,
-            "NLUSchema",
-            "pydantic_validation_completed",
-            status="success",
-            candidate_count=len(candidates),
-        )
-        trace_log(
-            logging.getLogger(__name__),
-            logging.INFO,
-            "LLMNLU",
-            "nlu_completed",
-            candidates=[
-                {"intent": item.intent, "confidence": item.confidence} for item in candidates
-            ],
-            entity_fields=sorted(
-                {
-                    key
-                    for item in candidates
-                    for key, value in item.entities.items()
-                    if value is not None
-                }
-            ),
-            duration_ms=elapsed_ms(started_at),
-        )
         record_turn_metrics(nlu_duration_ms=elapsed_ms(started_at))
         # Chỉ chọn candidate tương thích với state hiện tại và đủ entity bắt buộc.
         selected = self._prioritizer.choose(
@@ -715,6 +689,22 @@ class LLMNLU:
                 error_code="invalid_nlu_output",
             )
             return _llm_unresolved("invalid_nlu_output")
+        trace_log(
+            logging.getLogger(__name__),
+            logging.INFO,
+            "[3] NLU",
+            "nlu_completed",
+            intent=output.intent,
+            confidence=output.confidence,
+            entities={
+                key: value
+                for key, value in output.entities.model_dump().items()
+                if value is not None
+            },
+            entity_kind=output.entity_kind or "none",
+            entity_query=output.entity_query or "none",
+            duration_ms=elapsed_ms(started_at),
+        )
         # Candidate đã chọn được map thành NLUResult để DialogController xử lý tiếp.
         return self._to_nlu_result(output, state, merged_entities)
 

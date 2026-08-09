@@ -1,6 +1,7 @@
 """Encode deterministic, JSON-backed Server-Sent Events."""
 
 import asyncio
+import inspect
 import json
 import logging
 import re
@@ -11,9 +12,11 @@ from typing import TYPE_CHECKING
 
 from app.infrastructure.context_store import (
     bind_trace_context,
+    consume_completed_turn_metrics,
     elapsed_ms,
     reset_trace_context,
     trace_log,
+    turn_metrics_payload,
 )
 
 if TYPE_CHECKING:
@@ -77,6 +80,7 @@ async def stream_chat_events(
     process_message: ProcessMessage,
     response_mapper: ResponseMapper,
     correlation_id: str | None = None,
+    entrypoint: str | None = None,
 ) -> AsyncIterator[str]:
     """Generate the complete SSE lifecycle around one controller call."""
     token = bind_trace_context(
@@ -90,10 +94,14 @@ async def stream_chat_events(
             process_message=process_message,
             response_mapper=response_mapper,
             correlation_id=correlation_id,
+            entrypoint=entrypoint,
         ):
             yield event
     finally:
-        reset_trace_context(token)
+        try:
+            reset_trace_context(token)
+        except ValueError:
+            logger.debug("trace_context_reset_skipped", exc_info=True)
 
 
 # Bao lỗi trong quá trình stream thành event error an toàn thay vì làm đứt kết nối thô.
@@ -104,12 +112,13 @@ async def _stream_bound_chat_events(
     process_message: ProcessMessage,
     response_mapper: ResponseMapper,
     correlation_id: str | None,
+    entrypoint: str | None,
 ) -> AsyncIterator[str]:
     started_at = perf_counter()
     chunk_count = 0
     bytes_sent = 0
     completed = False
-    trace_log(logger, logging.INFO, "SSETransport", "sse_started")
+    trace_log(logger, logging.DEBUG, "SSETransport", "sse_started")
     started_event = encode_sse_event(
         event=SSEEventType.STARTED,
         data={"conversation_id": request.conversation_id},
@@ -119,10 +128,13 @@ async def _stream_bound_chat_events(
     yield started_event
 
     try:
-        kwargs: dict[str, object] = {"request": request, "container": container}
-        if correlation_id is not None:
-            kwargs["correlation_id"] = correlation_id
-        dialog_response = await process_message(**kwargs)
+        dialog_response = await _call_process_message(
+            process_message=process_message,
+            request=request,
+            container=container,
+            correlation_id=correlation_id,
+            entrypoint=entrypoint,
+        )
         response = response_mapper(request.conversation_id, dialog_response)
         message_event = encode_sse_event(
             event=SSEEventType.MESSAGE,
@@ -163,9 +175,7 @@ async def _stream_bound_chat_events(
             logger,
             logging.WARNING,
             "SSETransport",
-            "sse_completed",
-            chunk_count=chunk_count,
-            bytes_sent=bytes_sent,
+            "sse_failed",
             duration_ms=elapsed_ms(started_at),
             status="error",
         )
@@ -177,15 +187,31 @@ async def _stream_bound_chat_events(
             bytes_sent += len(event.encode("utf-8"))
             yield event
         completed = True
+        metrics = consume_completed_turn_metrics()
         trace_log(
             logger,
             logging.INFO,
-            "SSETransport",
-            "sse_completed",
-            chunk_count=chunk_count,
-            bytes_sent=bytes_sent,
+            "[9] DELIVERY",
+            "completed",
+            channel="sse",
             duration_ms=elapsed_ms(started_at),
             client_disconnected=False,
+        )
+        if metrics is not None:
+            trace_log(
+                logger,
+                logging.INFO,
+                "[10] TURN METRICS",
+                "completed",
+                metrics=turn_metrics_payload(metrics, total_duration_ms=elapsed_ms(started_at)),
+            )
+        trace_log(
+            logger,
+            logging.DEBUG,
+            "SSETransport",
+            "sse_stream_stats",
+            chunk_count=chunk_count,
+            bytes_sent=bytes_sent,
         )
     except (asyncio.CancelledError, GeneratorExit):
         completed = True
@@ -208,3 +234,21 @@ async def _stream_bound_chat_events(
                 chunks_sent=chunk_count,
                 duration_ms=elapsed_ms(started_at),
             )
+
+
+# Chỉ truyền các tham số mà process_message thực sự khai báo để giữ tương thích với test double cũ.
+async def _call_process_message(
+    *,
+    process_message: ProcessMessage,
+    request: "ChatRequest",
+    container: "ApplicationContainer",
+    correlation_id: str | None,
+    entrypoint: str | None,
+) -> "DialogResponse":
+    parameters = inspect.signature(process_message).parameters
+    kwargs: dict[str, object] = {"request": request, "container": container}
+    if correlation_id is not None and "correlation_id" in parameters:
+        kwargs["correlation_id"] = correlation_id
+    if entrypoint is not None and "entrypoint" in parameters:
+        kwargs["entrypoint"] = entrypoint
+    return await process_message(**kwargs)
