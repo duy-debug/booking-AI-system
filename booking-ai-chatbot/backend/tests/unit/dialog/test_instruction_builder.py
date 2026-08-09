@@ -218,7 +218,25 @@ def test_confirmation_summary_formats_context_without_internal_identifiers() -> 
     assert response.quick_replies == ("Xác nhận", "Chỉnh sửa", "Hủy")
 
 
-def test_completed_response_uses_real_reservation_code() -> None:
+def test_completed_response_prefers_context_display_code() -> None:
+    context = ready_context(state=BookingState.COMPLETED)
+    context.booking = booking("RSV-2026-001")
+    context.reservation_code = str(BOOKING_ID)
+
+    response = InstructionBuilder().build_response(
+        result=turn_result("booking_complete", BookingState.COMPLETED),
+        context=context,
+    )
+
+    assert "Đặt lịch thành công" in response.text
+    assert str(BOOKING_ID) in response.text
+    assert "RSV-2026-001" not in response.text
+    assert "Tên khách hàng: An" in response.text
+    assert "Số điện thoại: 0901234567" in response.text
+    assert response.metadata == {"booking_created": True}
+
+
+def test_completed_response_without_context_code_falls_back_to_booking_code() -> None:
     context = ready_context(state=BookingState.COMPLETED)
     context.booking = booking("RSV-2026-001")
 
@@ -227,24 +245,8 @@ def test_completed_response_uses_real_reservation_code() -> None:
         context=context,
     )
 
-    assert "Đặt lịch thành công" in response.text
+    assert "Mã đặt lịch" in response.text
     assert "RSV-2026-001" in response.text
-    assert "Tên khách hàng: An" in response.text
-    assert "Số điện thoại: 0901234567" in response.text
-    assert response.metadata == {"booking_created": True}
-
-
-def test_completed_response_without_code_does_not_invent_one() -> None:
-    context = ready_context(state=BookingState.COMPLETED)
-    context.booking = booking()
-
-    response = InstructionBuilder().build_response(
-        result=turn_result("booking_complete", BookingState.COMPLETED),
-        context=context,
-    )
-
-    assert "Mã đặt lịch" not in response.text
-    assert "đã được ghi nhận" in response.text
     assert "Tên khách hàng: An" in response.text
     assert str(BOOKING_ID) not in response.text
 

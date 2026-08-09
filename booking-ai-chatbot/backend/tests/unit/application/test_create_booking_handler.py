@@ -272,7 +272,7 @@ async def test_final_check_precedes_create_and_requests_are_complete() -> None:
     assert result.data["create_result"] is fake.create_result
     assert result.context_updates["booking"] is BOOKING
     assert result.context_updates["booking_id"] == BOOKING_ID
-    assert result.context_updates["reservation_code"] == "RSV-001"
+    assert result.context_updates["reservation_code"] == str(BOOKING_ID)
     assert context.booking is None
     assert context.state is original_state
     assert context.last_failure_code == "create_booking"

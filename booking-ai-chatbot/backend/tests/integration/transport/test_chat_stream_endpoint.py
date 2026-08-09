@@ -443,11 +443,10 @@ def test_completed_booking_without_code_has_json_sse_parity_and_one_create_per_r
     assert regular.json()["metadata"] == {"booking_created": True}
     completion_text = cast(str, regular.json()["text"])
     assert "Đặt lịch thành công" in completion_text
-    assert "đã được ghi nhận" in completion_text
-    assert "Mã đặt lịch" not in completion_text
+    assert "Mã đặt lịch" in completion_text
     assert "booking code" not in completion_text.casefold()
     assert "reservation code" not in completion_text.casefold()
-    assert str(json_context.booking_id) not in completion_text
+    assert "33333333-3333-3333-3333-333333333333" in completion_text
     assert [event for event, _ in events] == ["started", "message", "completed"]
     assert events[1][1]["state"] == regular.json()["state"]
     assert events[1][1]["status"] == regular.json()["status"]

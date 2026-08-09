@@ -746,7 +746,8 @@ class InstructionBuilder:
                 "Thông tin đặt lịch chưa được xác nhận. Vui lòng thử lại hoặc liên hệ cửa hàng.",
                 metadata={"booking_created": False},
             )
-        reservation_code = context.booking.reservation_code or context.reservation_code
+        # Ưu tiên mã đã được application chuẩn hóa trước khi fallback về dữ liệu booking gốc.
+        reservation_code = context.reservation_code or context.booking.reservation_code
         lines = ["Đặt lịch thành công!"]
         if reservation_code:
             lines.append(f"Mã đặt lịch: {reservation_code}")

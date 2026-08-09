@@ -75,7 +75,9 @@ class CreateBookingHandler:
         )
         result = await self._booking_gateway.create_booking(create_request)
 
-        reservation_code = result.reservation_code or result.booking.reservation_code
+        # Tạm thời dùng booking_id làm mã hiển thị cho khách
+        # đến khi POS xác nhận mã tra cứu ổn định.
+        reservation_code = str(result.booking.booking_id)
         return HandlerResult(
             HandlerOutcome.SUCCESS,
             {"create_result": result},

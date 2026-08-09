@@ -601,11 +601,10 @@ async def test_booking_happy_path_reaches_completed_once_without_user_code(
     assert result.executed_actions == ("create_booking",)
     assert context.state is BookingState.COMPLETED
     assert context.booking is not None
-    assert context.reservation_code is None
+    assert context.reservation_code == str(context.booking.booking_id)
     assert "Đặt lịch thành công" in response.text
-    assert "đã được ghi nhận" in response.text
-    assert "Mã đặt lịch" not in response.text
-    assert str(context.booking.booking_id) not in response.text
+    assert "Mã đặt lịch" in response.text
+    assert str(context.booking.booking_id) in response.text
     assert response.metadata == {"booking_created": True}
     assert len(gateway.final_requests) == 1
     assert len(gateway.create_requests) == 1
