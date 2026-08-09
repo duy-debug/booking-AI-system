@@ -2036,7 +2036,13 @@ def _global_intent_response(intent: str, context: BookingContext) -> DialogRespo
     from app.dialog.instruction_builder import DialogResponse
 
     if intent == "greeting":
-        text = "Xin chào! Thông tin đặt lịch hiện tại của bạn vẫn được giữ."
+        if context.has_meaningful_booking_progress():
+            text = (
+                "Xin chào! Thông tin đặt lịch hiện tại của bạn vẫn được giữ. "
+                "Bạn vui lòng cung cấp thêm thông tin còn thiếu để tiếp tục nhé."
+            )
+        else:
+            text = "Xin chào! Mình có thể giúp bạn đặt lịch hoặc giải đáp thông tin dịch vụ."
     elif intent == "thanks":
         text = "Rất vui được hỗ trợ bạn."
     elif intent == "restart_booking":

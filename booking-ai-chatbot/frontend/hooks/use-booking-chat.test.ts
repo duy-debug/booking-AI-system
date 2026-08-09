@@ -9,6 +9,11 @@ describe("useBookingChat architecture", () => {
     expect(source).toContain("window.cancelAnimationFrame(frame)");
   });
 
+  it("renders welcome only for a brand-new session on mount", () => {
+    expect(source).toContain("const existingConversationId = loadConversationId(sessionStorage);");
+    expect(source).toContain("setMessages(existingConversationId ? [] : [welcomeMessage()]);");
+  });
+
   it("guards duplicate submission without frontend booking logic", () => {
     expect(source).toContain("inFlightRef.current");
     expect(source).not.toContain("idempotency_key");

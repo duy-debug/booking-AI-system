@@ -145,6 +145,49 @@ class BookingContext:
             addon.duration_minutes for addon in self.addons
         )
 
+    # Chỉ coi conversation là đang có tiến trình booking khi state đã rời idle
+    # hoặc đã có dữ liệu booking thực sự được thu thập.
+    def has_meaningful_booking_progress(self) -> bool:
+        """Return whether the conversation already carries booking progress worth resuming."""
+        if self.state is not BookingState.IDLE:
+            return True
+        return any(
+            (
+                self.shop is not None,
+                self.main_course is not None,
+                bool(self.addons),
+                self.customer is not None,
+                self.booking_date is not None,
+                self.start_time is not None,
+                self.num_customer is not None,
+                self.duration_minutes is not None,
+                self.therapist_preference is not None,
+                self.therapist_verified,
+                self.available_slots is not None,
+                self.phone is not None,
+                self.phone_confirmed,
+                self.customer_id is not None,
+                self.member_rank is not None,
+                self.ng_list_checked,
+                self.booking is not None,
+                self.reservation_code is not None,
+                self.booking_attempt_id is not None,
+                self.last_failure_code is not None,
+                self.requested_shop_name is not None,
+                self.requested_booking_date is not None,
+                self.requested_start_time is not None,
+                self.requested_num_customer is not None,
+                self.requested_duration_minutes is not None,
+                self.requested_main_course_name is not None,
+                self.requested_addon_name is not None,
+                self.requested_skip_addon,
+                self.requested_therapist_name is not None,
+                self.requested_therapist_gender is not None,
+                self.requested_phone is not None,
+                self.requested_customer_name is not None,
+            )
+        )
+
     # Kiểm tra context đã đủ field bắt buộc để gọi POS create booking chưa.
     def is_ready_to_create(self) -> bool:
         """Return whether all data required to create a booking is present."""

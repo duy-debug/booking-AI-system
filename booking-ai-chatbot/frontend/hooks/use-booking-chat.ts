@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatApiError, streamChat } from "@/services/chat-api";
 import {
   getOrCreateConversationId,
+  loadConversationId,
   resetConversationId,
   saveConversationSession,
 } from "@/services/chat-session";
@@ -32,9 +33,10 @@ export function useBookingChat() {
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
+      const existingConversationId = loadConversationId(sessionStorage);
       const id = getOrCreateConversationId(sessionStorage);
       setConversationId(id);
-      setMessages([welcomeMessage()]);
+      setMessages(existingConversationId ? [] : [welcomeMessage()]);
     });
     return () => {
       window.cancelAnimationFrame(frame);

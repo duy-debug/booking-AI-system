@@ -270,6 +270,16 @@ def unresolved_nlu() -> NLUResult:
     )
 
 
+def greeting_nlu() -> NLUResult:
+    return NLUResult(
+        intent="greeting",
+        payload={},
+        confidence=1.0,
+        source=NLUSource.DETERMINISTIC,
+        resolution_status=NLUResolutionStatus.RESOLVED,
+    )
+
+
 def change_nlu() -> NLUResult:
     return NLUResult(
         intent="change_info",
@@ -348,6 +358,54 @@ async def test_resolved_branch_runs_controller_renderer_and_save_once() -> None:
     assert len(fake.instruction_builder.calls) == 1
     assert fake.conversation_context_store.saved == [("conversation-a", context)]
     assert response.text == "Safe response"
+
+
+@pytest.mark.asyncio
+async def test_fresh_context_greeting_does_not_claim_booking_is_preserved() -> None:
+    context = BookingContext("conversation-a")
+    fake = FakeContainer(context=context, nlu_result=greeting_nlu())
+
+    response = await _process_controller_pipeline(
+        request=ChatRequest(conversation_id="conversation-a", message="xin chào"),
+        container=as_container(fake),
+    )
+
+    assert "Thông tin đặt lịch hiện tại" not in response.text
+    assert "đặt lịch" in response.text
+    assert context.state is BookingState.IDLE
+
+
+@pytest.mark.asyncio
+async def test_meaningful_context_greeting_mentions_booking_is_preserved() -> None:
+    context = BookingContext(
+        "conversation-a",
+        state=BookingState.SELECTING_DURATION,
+        shop=SHOP,
+    )
+    fake = FakeContainer(context=context, nlu_result=greeting_nlu())
+
+    response = await _process_controller_pipeline(
+        request=ChatRequest(conversation_id="conversation-a", message="xin chào"),
+        container=as_container(fake),
+    )
+
+    assert "Thông tin đặt lịch hiện tại của bạn vẫn được giữ" in response.text
+    assert context.state is BookingState.SELECTING_DURATION
+    assert context.shop == SHOP
+
+
+@pytest.mark.asyncio
+async def test_greeting_with_reused_looking_but_empty_context_stays_fresh() -> None:
+    context = BookingContext("conversation-reused")
+    fake = FakeContainer(context=context, nlu_result=greeting_nlu())
+
+    response = await _process_controller_pipeline(
+        request=ChatRequest(conversation_id="conversation-reused", message="xin chào"),
+        container=as_container(fake),
+    )
+
+    assert "Thông tin đặt lịch hiện tại" not in response.text
+    assert context.state is BookingState.IDLE
 
 
 @pytest.mark.asyncio
