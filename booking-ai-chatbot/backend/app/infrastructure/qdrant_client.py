@@ -270,7 +270,6 @@ class KnowledgeQdrantClient:
             operation="qdrant_search",
             collection=self._collection_name,
             vector_candidate_count=len(documents),
-            lexical_candidate_count=0,
             accepted_result_count=len(documents),
             top_score=documents[0].score if documents else None,
             duration_ms=elapsed_ms(started_at),

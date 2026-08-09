@@ -1734,13 +1734,8 @@ def _shop_catalog_response(
         return _handled_response(context, message)
     names = tuple(shop.name for shop in shops)
     lines = "\n".join(f"{index}. {name}" for index, name in enumerate(names, 1))
-    suffix = (
-        f"\nĐang hiển thị 8/{len(names)} kết quả; bạn có thể nhập tên hoặc khu vực."
-        if len(names) > 8
-        else ""
-    )
-    text = f"Komorebi hiện có các cửa hàng:\n{lines}{suffix}\nBạn muốn chọn cửa hàng nào?"
-    text = text.replace(suffix, "")
+    # Không thêm hậu tố đếm kết quả vì response hiện hiển thị toàn bộ danh sách đã nhận.
+    text = f"Komorebi hiện có các cửa hàng:\n{lines}\nBạn muốn chọn cửa hàng nào?"
     return _catalog_response(context, text, names, len(names))
 
 
