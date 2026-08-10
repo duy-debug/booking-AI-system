@@ -786,36 +786,36 @@ def _build_llm_messages(
 ) -> list[LLMMessage]:
     intents = ", ".join(sorted(allowed_intents)) or "none"
     system_prompt = (
-        "Classify one booking message. Return JSON only with keys intent, confidence, "
-        "entities, entity_kind, entity_query. "
-        f"Current state: {state.value}. Allowed intents: {intents}. "
-        "Treat the current state as conversational context only; it must not override the "
-        "semantic intent expressed by the user's message. "
-        f"Current business date: {current_datetime.date().isoformat()}. "
-        f"Current local time: {current_datetime.time().isoformat(timespec='minutes')}. "
-        f"Timezone: {business_timezone}. Locale: vi-VN. "
-        "Resolve hôm nay from current business date, ngày mai as +1 day, and "
-        "ngày kia as +2 days. Return booking_date as YYYY-MM-DD. "
-        "Extract every explicit entity, including secondary ones. Allowed entity keys: "
+        "Hãy phân loại một tin nhắn đặt lịch. Chỉ trả về JSON với các khóa intent, "
+        "confidence, entities, entity_kind, entity_query. "
+        f"Trạng thái hiện tại: {state.value}. Các intent được phép: {intents}. "
+        "Hãy xem trạng thái hiện tại chỉ như ngữ cảnh hội thoại; nó không được lấn át ý định "
+        "ngữ nghĩa mà người dùng diễn đạt. "
+        f"Ngày nghiệp vụ hiện tại: {current_datetime.date().isoformat()}. "
+        f"Giờ địa phương hiện tại: {current_datetime.time().isoformat(timespec='minutes')}. "
+        f"Múi giờ: {business_timezone}. Ngôn ngữ: vi-VN. "
+        "Hiểu hôm nay theo ngày nghiệp vụ hiện tại, ngày mai là +1 ngày, và "
+        "ngày kia là +2 ngày. Trả về booking_date theo định dạng YYYY-MM-DD. "
+        "Hãy trích xuất mọi entity được nói rõ, kể cả entity phụ. Các entity key được phép là: "
         "number_of_people, duration_minutes, booking_date, start_time, phone, confirmation, "
         "therapist_gender, therapist_name, customer_name, change_target, query, shop_name, "
-        "service_name, main_course_name, addon_name, skip_addon. main_course_name is the "
-        "primary course; addon_name is optional; service_name means type unclear. Set "
-        "skip_addon=true only for an explicit decline. Use change_info for booking edits, "
-        "ask_question for FAQ, and list/search intents only for discovery. search_shops "
-        "stores location in query. Shop/course/therapist selections use entity_kind and "
-        "entity_query; never invent IDs. When the user expresses a concrete desired booking "
-        "start time, classify the semantic intent as select_time and extract start_time. "
-        "Understand natural, conversational, abbreviated, and contextual time expressions. "
-        "Normalize only after the meaning is understood, and do not invent missing time "
-        "information. For change_info, infer change_target from the semantic concept being "
-        "modified using only these targets: shop, date, people, duration, service, time, "
-        "therapist, phone. If the user wants to edit the current draft booking but does not "
-        "name a field, use intent=change_info with change_target null. Do not guess a "
-        "target. change_info means modifying the current draft booking across any draft state "
-        "where the flow allows it. Requests to modify, reschedule, or cancel an "
-        "already-created booking are different intents and must not collapse into "
-        "change_info. Example: "
+        "service_name, main_course_name, addon_name, skip_addon. main_course_name là "
+        "liệu trình chính; addon_name là tùy chọn; service_name nghĩa là chưa rõ loại. Chỉ đặt "
+        "skip_addon=true khi người dùng từ chối add-on rõ ràng. Dùng change_info cho "
+        "yêu cầu chỉnh sửa booking draft hiện tại, ask_question cho FAQ, và các intent list/search "
+        "chỉ cho discovery. search_shops lưu vị trí trong query. Việc chọn "
+        "shop/course/therapist phải dùng entity_kind và entity_query; tuyệt đối không tự tạo ID. "
+        "Khi người dùng thể hiện một giờ bắt đầu đặt lịch cụ thể, hãy phân loại ý định ngữ nghĩa "
+        "là select_time và trích xuất start_time. Hãy hiểu đúng các cách nói giờ tự nhiên, "
+        "mang tính hội thoại, viết tắt hoặc phụ thuộc ngữ cảnh. Chỉ chuẩn hóa sau khi đã hiểu "
+        "đúng nghĩa, và không được tự bịa thông tin giờ còn thiếu. Với change_info, hãy suy ra "
+        "change_target từ khái niệm ngữ nghĩa mà người dùng muốn sửa, chỉ dùng các giá trị: "
+        "shop, date, people, duration, service, time, therapist, phone. Nếu người dùng muốn "
+        "chỉnh sửa booking draft hiện tại nhưng chưa nêu rõ trường nào, hãy dùng "
+        "intent=change_info với change_target là null. Không được đoán target. change_info có "
+        "nghĩa là chỉnh sửa booking draft hiện tại ở các draft state mà flow cho phép. "
+        "Các yêu cầu sửa, dời lịch hoặc hủy một booking đã được tạo trước đó là intent khác và "
+        "không được gộp vào change_info. Ví dụ: "
         '{"intent":"select_people","confidence":0.9,'
         '"entities":{"number_of_people":2},"entity_kind":null,'
         '"entity_query":null}.'
@@ -831,13 +831,14 @@ _INTENT_TOOL: dict[str, object] = {
     "function": {
         "name": "extract_intent_candidates",
         "description": (
-            "Extract state-aware booking intents and primitive entities. Treat state as "
-            "conversational context, not as a rule that overrides the message meaning. "
-            "Interpret time semantically, then normalize an explicit booking time into "
-            "24-hour HH:MM. For draft-booking edits, set change_target to one of shop, "
-            "date, people, duration, service, time, therapist, phone; keep it null only "
-            "when the user asks to edit the current draft booking without naming a field. "
-            "Do not collapse requests about an already-created booking into change_info."
+            "Trích xuất intent đặt lịch theo ngữ cảnh state và các entity nguyên thủy. Xem "
+            "state như ngữ cảnh hội thoại, không phải quy tắc lấn át ý nghĩa của câu người "
+            "dùng. Hãy hiểu thời gian theo ngữ nghĩa trước, rồi mới chuẩn hóa giờ đặt lịch "
+            "cụ thể sang HH:MM theo định dạng 24 giờ. Với các yêu cầu sửa booking draft, "
+            "hãy đặt change_target thành một trong các giá trị shop, date, people, duration, "
+            "service, time, therapist, phone; chỉ để null khi người dùng muốn sửa booking "
+            "draft hiện tại nhưng chưa nói rõ trường nào. Không được gộp các yêu cầu liên "
+            "quan đến booking đã được tạo trước đó vào change_info."
         ),
         "parameters": {
             "type": "object",
@@ -865,8 +866,8 @@ _INTENT_TOOL: dict[str, object] = {
                                     "start_time": {
                                         "type": ["string", "null"],
                                         "description": (
-                                            "Explicit booking time normalized to 24-hour HH:MM, "
-                                            "for example 10:00 or 19:00."
+                                            "Giờ đặt lịch được nói rõ, đã chuẩn hóa sang "
+                                            "HH:MM theo định dạng 24 giờ, ví dụ 10:00 hoặc 19:00."
                                         ),
                                     },
                                     "phone": {"type": ["string", "null"]},
@@ -888,8 +889,9 @@ _INTENT_TOOL: dict[str, object] = {
                                             None,
                                         ],
                                         "description": (
-                                            "Booking field the user wants to edit. Leave null "
-                                            "only for a generic edit request with no field."
+                                            "Trường booking mà người dùng muốn chỉnh sửa. "
+                                            "Chỉ để null cho yêu cầu sửa chung chung mà "
+                                            "chưa nêu rõ trường."
                                         ),
                                     },
                                     "query": {"type": ["string", "null"]},

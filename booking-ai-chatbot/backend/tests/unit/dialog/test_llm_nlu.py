@@ -456,8 +456,8 @@ async def test_llm_change_output_maps_semantic_targets_without_backend_inference
     assert result.payload == expected_payload
     assert gateway.calls == 1
     prompt = gateway.messages[0].content
-    assert "infer change_target from the semantic concept being modified" in prompt
-    assert "Do not guess a target." in prompt
+    assert "hãy suy ra change_target từ khái niệm ngữ nghĩa mà người dùng muốn sửa" in prompt
+    assert "Không được đoán target." in prompt
     assert text not in prompt
 
 
@@ -499,7 +499,7 @@ async def test_existing_booking_change_from_idle_is_not_collapsed_into_change_in
     assert result.payload == {}
     assert gateway.calls == 1
     assert (
-        "Requests to modify, reschedule, or cancel an already-created booking"
+        "Các yêu cầu sửa, dời lịch hoặc hủy một booking đã được tạo trước đó"
         in gateway.messages[0].content
     )
 
@@ -736,10 +736,11 @@ async def test_select_time_prompt_uses_semantic_guidance_instead_of_exact_uttera
     assert result.payload == {"start_time": time(10, 0)}
     assert gateway.calls == 1
     prompt = gateway.messages[0].content
-    assert "Treat the current state as conversational context only" in prompt
-    assert "When the user expresses a concrete desired booking start time" in prompt
+    assert "Hãy xem trạng thái hiện tại chỉ như ngữ cảnh hội thoại" in prompt
+    assert "Khi người dùng thể hiện một giờ bắt đầu đặt lịch cụ thể" in prompt
     assert (
-        "Understand natural, conversational, abbreviated, and contextual time expressions."
+        "Hãy hiểu đúng các cách nói giờ tự nhiên, mang tính hội thoại, "
+        "viết tắt hoặc phụ thuộc ngữ cảnh."
         in prompt
     )
     assert "In selecting_time" not in prompt
@@ -909,13 +910,13 @@ async def test_prompt_is_state_aware_short_and_contains_no_context_data() -> Non
     prompt = gateway.messages[0].content
     assert "selecting_people" in prompt
     assert "select_people" in prompt
-    assert "JSON only" in prompt
+    assert "Chỉ trả về JSON" in prompt
     assert "BookingContext" not in prompt
     assert "API key" not in prompt
     assert "UUID" not in prompt
     assert "Asia/Ho_Chi_Minh" in prompt
-    assert "Locale: vi-VN" in prompt
-    assert len(prompt) < 2300
+    assert "Ngôn ngữ: vi-VN" in prompt
+    assert len(prompt) < 2350
 
 
 @pytest.mark.asyncio
@@ -948,4 +949,4 @@ async def test_relative_date_prompt_is_grounded_in_fixed_business_date(
     result = await nlu.parse(text=phrase, state=BookingState.SELECTING_DATE)
 
     assert result.payload == {"booking_date": date.fromisoformat(resolved_date)}
-    assert "Current business date: 2026-08-06" in gateway.messages[0].content
+    assert "Ngày nghiệp vụ hiện tại: 2026-08-06" in gateway.messages[0].content
