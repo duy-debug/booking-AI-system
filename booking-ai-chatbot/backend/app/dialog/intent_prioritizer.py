@@ -118,8 +118,18 @@ def _entity_complete(
     requirements: Mapping[str, str],
 ) -> int:
     intent = _canonical_intent(candidate.intent)
-    if intent in {"select_store", "select_course", "select_therapist"}:
+    if intent in {"select_store", "select_therapist"}:
         return int(bool(candidate.entity_kind and candidate.entity_query))
+    if intent == "select_course":
+        if candidate.entity_kind and candidate.entity_query:
+            return 1
+        return int(
+            any(
+                isinstance(candidate.entities.get(key), str)
+                and candidate.entities[key].strip()
+                for key in ("service_name", "main_course_name", "addon_name")
+            )
+        )
     required = requirements.get(intent)
     return 1 if required is None or candidate.entities.get(required) is not None else 0
 

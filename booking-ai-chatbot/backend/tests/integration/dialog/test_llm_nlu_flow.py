@@ -3,7 +3,9 @@
 import json
 from collections.abc import AsyncIterator
 from datetime import date
+from decimal import Decimal
 from typing import cast
+from uuid import UUID
 
 import httpx
 import pytest
@@ -19,6 +21,7 @@ from app.dialog.nlu import (
     NLUResult,
 )
 from app.domain.booking_context import BookingContext
+from app.domain.booking_models import Course, CourseSelection, CourseType, Shop
 from app.domain.booking_state import BookingState
 from app.domain.outcomes import HandlerOutcome, HandlerResult
 from app.infrastructure.context_store import Settings
@@ -29,6 +32,18 @@ from app.infrastructure.gemini_client import (
 )
 from app.transport.chat_api import _process_chat_message
 from app.transport.schemas import ChatRequest
+
+SHOP = Shop(
+    shop_id=UUID("11111111-1111-1111-1111-111111111111"),
+    name="Komorebi Tân Bình",
+)
+MAIN_COURSE = Course(
+    course_id=UUID("22222222-2222-2222-2222-222222222222"),
+    name="Massage thư giãn toàn thân 60 phút",
+    duration_minutes=60,
+    price=Decimal("500000"),
+    course_type=CourseType.MAIN,
+)
 
 
 class FakeLLMGateway:
@@ -326,6 +341,67 @@ async def test_llm_shop_query_goes_through_entity_resolver_without_domain_object
     assert context.shop is None
     assert "Không tìm thấy cửa hàng" in response.text
     assert external_requests == []
+
+
+@pytest.mark.asyncio
+async def test_llm_course_name_goes_through_entity_resolver_and_reaches_controller(
+    runtime: tuple[ApplicationContainer, FakeLLMGateway, list[httpx.Request]],
+) -> None:
+    container, gateway, external_requests = runtime
+    controller = spy_controller(container)
+    context = await container.conversation_context_store.get_copy("conversation-a")
+    context.state = BookingState.SELECTING_SERVICE
+    context.shop = SHOP
+    context.duration_minutes = 60
+    await container.conversation_context_store.save("conversation-a", context)
+
+    class CourseResolverSpy:
+        def __init__(self) -> None:
+            self.calls: list[NLUResult] = []
+
+        async def resolve(
+            self,
+            *,
+            nlu_result: NLUResult,
+            state: BookingState,
+            context: BookingContext,
+        ) -> EntityResolutionResult:
+            self.calls.append(nlu_result)
+            return EntityResolutionResult(
+                status=EntityResolutionStatus.RESOLVED,
+                entity_kind=NLUEntityKind.COURSE,
+                dispatch_intent="select_course",
+                dispatch_payload={"course_selection": CourseSelection(MAIN_COURSE)},
+                matched_count=1,
+            )
+
+    resolver = CourseResolverSpy()
+    container.entity_resolution_coordinator = cast(EntityResolutionCoordinator, resolver)
+    gateway.content = output(
+        "select_course",
+        entities={"service_name": "Massage thư giãn toàn thân 60 phút"},
+    )
+
+    response = await _process_chat_message(
+        request=request("tôi chọn liệu trình Massage thư giãn toàn thân 60 phút"),
+        container=container,
+    )
+
+    assert gateway.calls == 1
+    assert len(resolver.calls) == 1
+    assert resolver.calls[0].resolution_status.value == "entity_resolution_required"
+    assert resolver.calls[0].entity_kind is NLUEntityKind.COURSE
+    assert resolver.calls[0].entity_query == "Massage thư giãn toàn thân 60 phút"
+    assert len(controller.calls) == 1
+    assert controller.calls[0].intent == "select_course"
+    assert controller.calls[0].payload == {"course_selection": CourseSelection(MAIN_COURSE)}
+    assert response.state in {BookingState.SELECTING_TIME, BookingState.SELECTING_SERVICE}
+    assert len(external_requests) == 1
+    assert (
+        str(external_requests[0].url)
+        == "http://pos.test/api/shops/11111111-1111-1111-1111-111111111111/courses"
+        "?is_active=true&course_type=addon"
+    )
 
 
 @pytest.mark.asyncio

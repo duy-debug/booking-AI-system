@@ -167,6 +167,27 @@ def test_change_duration_clears_course_but_preserves_shop() -> None:
     assert context.start_time is None
 
 
+def test_set_duration_clears_stale_failure_code_after_valid_update() -> None:
+    context = BookingContext(
+        conversation_id="conversation-1",
+        last_failure_code="duration_not_multiple_15",
+    )
+
+    context.set_duration(60)
+
+    assert context.duration_minutes == 60
+    assert context.last_failure_code is None
+
+
+def test_change_duration_clears_stale_failure_code_after_valid_update() -> None:
+    context = make_change_context()
+    context.last_failure_code = "duration_not_multiple_15"
+
+    context.change_duration(90)
+
+    assert context.last_failure_code is None
+
+
 def test_change_course_preserves_shop_and_invalidates_availability() -> None:
     context = make_change_context()
 

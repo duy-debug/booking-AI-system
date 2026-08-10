@@ -291,10 +291,12 @@ class BookingContext:
         if value <= 0 or value % 15 != 0:
             raise InvalidDurationError("Booking duration must be positive and divisible by 15.")
         if value == self.duration_minutes:
+            self.last_failure_code = None
             return
         self.clear_booking_attempt()
         self.duration_minutes = value
         self.last_unavailable_date = None
+        self.last_failure_code = None
         self._clear_course_and_availability()
         self.course_selection_mode = CourseSelectionMode.MAIN
 
@@ -439,6 +441,7 @@ class BookingContext:
             raise InvalidDurationError("Booking duration must be positive and divisible by 15.")
         self.duration_minutes = value
         self.last_unavailable_date = None
+        self.last_failure_code = None
         self.main_course = None
         self.addons = ()
         self._clear_availability_and_therapist()

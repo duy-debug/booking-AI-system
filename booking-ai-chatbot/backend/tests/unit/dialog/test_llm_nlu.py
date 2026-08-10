@@ -569,6 +569,33 @@ async def test_shop_query_maps_to_entity_resolution_without_domain_object() -> N
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("entities", "expected_query"),
+    [
+        ({"service_name": "Massage thư giãn toàn thân"}, "Massage thư giãn toàn thân"),
+        ({"main_course_name": "Massage đá nóng 60 phút"}, "Massage đá nóng 60 phút"),
+        ({"addon_name": "Ngâm chân thảo dược"}, "Ngâm chân thảo dược"),
+    ],
+)
+async def test_course_entities_bridge_to_entity_resolution_request(
+    entities: dict[str, object],
+    expected_query: str,
+) -> None:
+    fallback, _ = fallback_for(structured(intent="select_course", entities=entities))
+
+    result = await fallback.parse(
+        text="tôi chọn liệu trình này",
+        state=BookingState.SELECTING_SERVICE,
+    )
+
+    assert result.resolution_status is NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED
+    assert result.intent is None
+    assert result.payload == {}
+    assert result.entity_kind is NLUEntityKind.COURSE
+    assert result.entity_query == expected_query
+
+
+@pytest.mark.asyncio
 async def test_therapist_gender_becomes_an_entity_query() -> None:
     fallback, _ = fallback_for(
         structured(

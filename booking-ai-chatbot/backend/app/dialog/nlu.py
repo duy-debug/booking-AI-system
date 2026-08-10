@@ -950,6 +950,14 @@ def _llm_entity_reference(
         if entity_kind is NLUEntityKind.THERAPIST:
             entity_query = _normalize_therapist_query(entity_query)
         return entity_kind, entity_query
+    if output.intent.strip() == "select_course":
+        course_query = (
+            _non_empty_text(output.entities.main_course_name)
+            or _non_empty_text(output.entities.service_name)
+            or _non_empty_text(output.entities.addon_name)
+        )
+        if course_query is not None:
+            return NLUEntityKind.COURSE, course_query
     if output.intent.strip() == "select_therapist":
         therapist_name = _non_empty_text(output.entities.therapist_name)
         if therapist_name is not None:
