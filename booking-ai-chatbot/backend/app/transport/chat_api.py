@@ -1,4 +1,4 @@
-"""Expose JSON and streaming HTTP transports for dialog messages."""
+# Expose các HTTP endpoint JSON và SSE cho message hội thoại của chatbot.
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ _SAFE_METADATA_KEYS = frozenset(
 
 # Lấy ApplicationContainer đã được khởi tạo trong lifespan để transport không tự tạo dependency.
 def get_application_container(request: Request) -> ApplicationContainer:
-    """Return the single container created by the FastAPI lifespan."""
+    # Lấy `ApplicationContainer` duy nhất đã được tạo trong vòng đời FastAPI.
     container = getattr(request.app.state, "application_container", None)
     if not isinstance(container, ApplicationContainer):
         raise RuntimeError("Application container is unavailable.")
@@ -59,7 +59,7 @@ async def chat(
     http_request: Request,
     container: Annotated[ApplicationContainer, Depends(get_application_container)],
 ) -> ChatResponse:
-    """Process one non-streaming chat message."""
+    # Xử lý một request chat dạng JSON và trả một `ChatResponse` đầy đủ.
     started_at = perf_counter()
     try:
         response = await _process_chat_message(
@@ -106,7 +106,7 @@ async def chat_stream(
     http_request: Request,
     container: Annotated[ApplicationContainer, Depends(get_application_container)],
 ) -> StreamingResponse:
-    """Stream one dialog response as business-level SSE events."""
+    # Stream một response hội thoại dưới dạng SSE theo tầng nghiệp vụ.
     return StreamingResponse(
         _stream_chat_events(
             request=request,
@@ -126,7 +126,7 @@ async def _process_chat_message(
     correlation_id: str | None = None,
     entrypoint: str | None = None,
 ) -> DialogResponse:
-    """Delegate one complete business turn to DialogController."""
+    # Đẩy toàn bộ một turn nghiệp vụ xuống `DialogController` để xử lý.
     parameters = inspect.signature(container.dialog_controller.handle_message).parameters
     if "entrypoint" in parameters:
         return await container.dialog_controller.handle_message(
@@ -151,7 +151,7 @@ def _stream_chat_events(
     container: ApplicationContainer,
     correlation_id: str | None = None,
 ) -> AsyncIterator[str]:
-    """Delegate SSE lifecycle generation to the SSE transport module."""
+    # Tạo generator SSE dùng chung business pipeline với endpoint JSON.
     async def process_stream_message(
         *,
         request: ChatRequest,
@@ -181,6 +181,8 @@ def _stream_chat_events(
 
 # Chuyển DialogResponse nội bộ thành schema public trả về frontend.
 def _to_chat_response(conversation_id: str, response: DialogResponse) -> ChatResponse:
+    # Chỉ expose các field public mà frontend cần.
+    # Không đẩy internal object hay raw context ra ngoài response public.
     return ChatResponse(
         conversation_id=conversation_id,
         text=response.text,
@@ -196,6 +198,7 @@ def _to_chat_response(conversation_id: str, response: DialogResponse) -> ChatRes
 def _safe_metadata(
     metadata: Mapping[str, object],
 ) -> dict[str, bool | int | float | str | None]:
+    # Lọc metadata nội bộ để chỉ giữ các giá trị an toàn có thể trả ra public API.
     safe: dict[str, bool | int | float | str | None] = {}
     for key, value in metadata.items():
         if key in _SAFE_METADATA_KEYS and (value is None or type(value) in {bool, int, float, str}):

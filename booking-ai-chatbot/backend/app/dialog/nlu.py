@@ -152,7 +152,7 @@ class NLUResolutionStatus(StrEnum):
 
 
 class NLUEntityKind(StrEnum):
-    """Identifies an entity query that needs an authoritative resolver."""
+    """Đánh dấu loại entity cần được resolver authoritative xử lý tiếp."""
 
     SHOP = "shop"
     COURSE = "course"
@@ -160,12 +160,12 @@ class NLUEntityKind(StrEnum):
 
 
 class NLUResultNotDispatchableError(Exception):
-    """Raised when an NLU result cannot safely become a dialog turn."""
+    """Phát sinh khi kết quả NLU chưa đủ an toàn để dispatch vào dialog flow."""
 
 
 @dataclass(frozen=True, slots=True)
 class StateIntentPolicy:
-    """Contains immutable named-intent and wildcard availability by state."""
+    """Giữ policy bất biến về intent hợp lệ theo từng state của flow."""
 
     allowed_intents: Mapping[BookingState, frozenset[str]]
     wildcard_states: frozenset[BookingState]
@@ -212,7 +212,7 @@ def build_state_intent_policy(
     enable_faq: bool = False,
     enable_discovery: bool = False,
 ) -> StateIntentPolicy:
-    """Copy named intents and wildcard availability from an already loaded flow."""
+    """Tạo policy intent từ flow JSON để NLU không route ra ngoài state machine."""
     allowed: dict[BookingState, frozenset[str]] = {}
     wildcard_states: set[BookingState] = set()
     for state, definition in flow.states.items():
@@ -232,7 +232,7 @@ def build_state_intent_policy(
 
 @dataclass(frozen=True, slots=True)
 class NLUResult:
-    """Contains one immutable parsed intent and its typed entities."""
+    """Kết quả NLU canonical dùng cho các bước điều phối phía sau."""
 
     intent: str | None
     payload: Mapping[str, object]
@@ -563,7 +563,12 @@ _LLM_NO_PAYLOAD_INTENTS = frozenset(
 
 
 class LLMNLU:
-    """Parse every message using validated Gemini structured output."""
+    """
+    Phân tích câu người dùng bằng LLM NLU và trả về structured semantics.
+
+    Đây là nơi duy nhất hiểu raw user text. State chỉ được dùng như ngữ cảnh hội
+    thoại để hỗ trợ phân tích, không tự quyết định intent thay cho LLM.
+    """
 
     # Nhận LLM gateway, policy state và prioritizer để biến text thành NLUResult canonical.
     def __init__(
@@ -603,7 +608,7 @@ class LLMNLU:
         context: BookingContext | None = None,
     ) -> NLUResult:
         # Dùng LLM tool calling để nhận diện intent và trích xuất entity có cấu trúc.
-        """Call the gateway once and return a policy-safe NLU result."""
+        """Gọi LLM một lần, validate output và trả về NLUResult an toàn cho flow."""
         started_at = perf_counter()
         current_datetime = self._now_provider()
         if current_datetime.tzinfo is None:
@@ -1325,7 +1330,12 @@ class EntityResolutionResult:
 
 
 class EntityResolutionCoordinator:
-    """Coordinate safe shop, course and therapist entity resolution."""
+    """
+    Resolve entity query từ NLU sang domain payload hoặc candidate ambiguity an toàn.
+
+    Coordinator này chỉ chạy khi NLU chưa thể dispatch trực tiếp vì còn cần
+    tra cứu authoritative như shop, course hoặc therapist.
+    """
 
     # Nhận các search handler thật để resolve tên shop/course/therapist qua nguồn nghiệp vụ.
     def __init__(
@@ -1347,7 +1357,7 @@ class EntityResolutionCoordinator:
         state: BookingState,
         context: BookingContext,
     ) -> EntityResolutionResult:
-        """Resolve one valid entity query without mutating dialog context."""
+        """Resolve một entity query hợp lệ mà không làm thay đổi `BookingContext`."""
         kind, query, change_target = _validate_resolution_request(nlu_result, state)
         if kind is NLUEntityKind.SHOP:
             return await self._resolve_shop(query, change=change_target == "shop")
@@ -1366,7 +1376,7 @@ class EntityResolutionCoordinator:
         result: EntityResolutionResult,
         selection_key: str,
     ) -> EntityResolutionResult:
-        """Resolve an existing ambiguous candidate without another lookup."""
+        """Chọn lại một candidate ambiguous đã có mà không phải gọi POS/handler lần nữa."""
         if result.status is not EntityResolutionStatus.AMBIGUOUS:
             raise InvalidCandidateSelectionError(
                 "Candidate selection requires an ambiguous resolution result."

@@ -1,4 +1,4 @@
-"""Registry and sequential executor for declarative dialog actions."""
+"""Đăng ký và chạy tuần tự các action khai báo của luồng hội thoại."""
 
 import logging
 import re
@@ -54,7 +54,7 @@ T = TypeVar("T")
 
 @dataclass(slots=True)
 class ActionExecutionContext:
-    """Contains parsed input and mutable booking data for one action execution."""
+    """Gói dữ liệu đầu vào và `BookingContext` mutable cho một action cụ thể."""
 
     booking_context: BookingContext
     intent: str
@@ -64,7 +64,7 @@ class ActionExecutionContext:
 
 @dataclass(frozen=True, slots=True)
 class ActionResult:
-    """Contains the output produced by one successful action."""
+    """Kết quả đầu ra của một action đã chạy thành công."""
 
     action_name: str
     output: object | None = None
@@ -72,7 +72,7 @@ class ActionResult:
 
 @dataclass(frozen=True, slots=True)
 class ActionExecutionReport:
-    """Contains results from a successfully completed action sequence."""
+    """Tập kết quả của cả chuỗi action sau khi chạy xong không có lỗi."""
 
     results: tuple[ActionResult, ...]
 
@@ -88,7 +88,7 @@ class ActionExecutionReport:
 
 
 class FailureCodeProvider(Protocol):
-    """Maps a root exception to a stable public failure code."""
+    """Ánh xạ exception gốc thành failure code ổn định cho tầng dialog."""
 
     def __call__(self, error: Exception) -> str:
         """Return a stable snake_case failure code."""
@@ -168,7 +168,12 @@ def _require_payload_value(
 
 
 class ActionRegistry:
-    """Registers explicit action bindings and executes them sequentially."""
+    """
+    Dispatcher thực tế của action name trong `booking_flow.json`.
+
+    Lớp này map tên action sang handler thật hoặc domain action, chạy tuần tự
+    trên working context và rollback local context nếu một action trong chuỗi bị lỗi.
+    """
 
     # Đăng ký action declarative và handler thật được inject từ composition root.
     def __init__(

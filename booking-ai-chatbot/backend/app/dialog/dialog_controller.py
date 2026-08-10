@@ -1,4 +1,4 @@
-"""Own complete message and parsed-turn dialog orchestration."""
+# Điều phối trọn một lượt hội thoại từ message đầu vào đến response cuối.
 
 from __future__ import annotations
 
@@ -128,24 +128,28 @@ _TERMINAL_CHANGE_TEXT = (
 
 
 class DialogControllerError(Exception):
-    """Base exception for dialog orchestration errors."""
+    # Lỗi gốc của tầng điều phối dialog.
+    pass
 
 
 class InvalidDialogTurnError(DialogControllerError):
-    """Raised when a parsed dialog turn violates the input contract."""
+    # Phát sinh khi một turn đã parse sẵn không đúng contract đầu vào.
+    pass
 
 
 class AutoTransitionLimitError(DialogControllerError):
-    """Raised when one turn exceeds its auto-transition limit."""
+    # Phát sinh khi một turn chạy quá số auto transition cho phép.
+    pass
 
 
 class AutoTransitionCycleError(DialogControllerError):
-    """Raised when an auto-transition signature repeats in one turn."""
+    # Phát sinh khi auto transition bị lặp vòng trong cùng một turn.
+    pass
 
 
 @dataclass(frozen=True, slots=True)
 class DialogTurnInput:
-    """Contains an already parsed intent and its typed payload."""
+    # Biểu diễn intent/payload đã được chuẩn hóa và sẵn sàng cho dialog flow.
 
     intent: str
     payload: Mapping[str, object]
@@ -160,7 +164,7 @@ class DialogTurnInput:
 
 
 class DialogTurnStatus(StrEnum):
-    """Describes whether a parsed dialog turn completed or recovered."""
+    # Mô tả turn đã thành công, recovery được hay thất bại chưa xử lý.
 
     SUCCESS = "success"
     FAILURE_HANDLED = "failure_handled"
@@ -169,7 +173,7 @@ class DialogTurnStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class DialogTurnResult:
-    """Contains orchestration metadata without rendering a response."""
+    # Kết quả điều phối turn trước khi dựng câu trả lời cuối cùng.
 
     status: DialogTurnStatus
     initial_state: BookingState
@@ -184,7 +188,10 @@ class DialogTurnResult:
 
 
 class DialogController:
-    """Coordinates state resolution, action execution and state commits."""
+    # Điều phối một lượt hội thoại hoàn chỉnh của chatbot.
+    # Controller này nhận message từ transport, tải `BookingContext`, gọi NLU,
+    # route sang nhánh entity resolution / FAQ / dialog flow, chạy state + action,
+    # dựng response và lưu lại context nếu turn xử lý thành công.
 
     # Nhận StateMachine, ActionRegistry và change rules để điều phối một dialog turn.
     def __init__(
@@ -207,7 +214,7 @@ class DialogController:
 
     # Bind composition graph sau khi toàn bộ dependency đã được tạo ở application container.
     def bind_runtime(self, runtime: "ApplicationContainer") -> None:
-        """Bind the completed composition graph once for message orchestration."""
+        # Bind toàn bộ dependency runtime sau khi composition root đã hoàn tất.
         if self._runtime is not None and self._runtime is not runtime:
             raise RuntimeError("DialogController runtime is already bound.")
         self._runtime = runtime
@@ -222,7 +229,7 @@ class DialogController:
         correlation_id: str | None = None,
         entrypoint: str | None = None,
     ) -> "DialogResponse":
-        """Own one complete turn from context load through response generation."""
+        # Chạy trọn một turn từ load context đến response generation và save context.
         if self._runtime is None:
             raise RuntimeError("DialogController runtime is not bound.")
         runtime = self._runtime
@@ -242,7 +249,7 @@ class DialogController:
         booking_context: BookingContext,
         turn: DialogTurnInput,
     ) -> DialogTurnResult:
-        """Execute one already parsed dialog turn without rendering output."""
+        # Chạy một turn đã parse sẵn qua state machine và action registry.
         initial_state = booking_context.state
         if initial_state is BookingState.COMPLETED and turn.intent == "confirm":
             return self._success_result(
@@ -667,7 +674,7 @@ async def _process_serialized_chat_message(
     entrypoint: str | None = None,
 ) -> DialogResponse:
     # Gắn trace/conversation context rồi chạy pipeline message theo thứ tự an toàn.
-    """Run the deterministic message pipeline without booking business rules."""
+    # Chạy pipeline xử lý message theo thứ tự an toàn mà không đổi business rules.
     token = bind_conversation(conversation_id)
     correlation_token = bind_correlation_id(correlation_id)
     started_at = perf_counter()
@@ -775,7 +782,7 @@ async def _process_bound_chat_message(
     context: BookingContext,
 ) -> DialogResponse:
     # Xử lý turn khi trace context đã bind: NLU -> route -> entity/action -> response.
-    """Process a turn after its safe logging context has been bound."""
+    # Xử lý turn sau khi safe logging context đã được bind.
     # Phân tích câu người dùng bằng LLM NLU thành NLUResult canonical.
     nlu_result = await container.llm_nlu.parse(
         text=message,
@@ -978,7 +985,7 @@ async def _consume_requested_entities(
     result: DialogTurnResult,
     idempotency_key: str | None,
 ) -> DialogTurnResult:
-    """Consume validated pending slots in workflow order through production actions."""
+    # Tiêu thụ các slot chờ đã validate theo đúng thứ tự workflow production.
     consumed = result
     for _ in range(12):
         if consumed.status is not DialogTurnStatus.SUCCESS:
@@ -1005,7 +1012,7 @@ async def _consume_requested_entities(
 
 
 def _stage_requested_entities(result: NLUResult, context: BookingContext) -> None:
-    """Store safe secondary LLM entities until their workflow state is reached."""
+    # Lưu các entity phụ do LLM trích xuất cho tới khi workflow đi tới đúng state.
     if result.intent not in {
         "start_booking",
         "select_store",
@@ -1404,7 +1411,7 @@ async def _with_proactive_suggestions(
     container: ApplicationContainer,
     context: BookingContext,
 ) -> DialogResponse:
-    """Load safe choices for the state the customer has just entered."""
+    # Tải các lựa chọn an toàn cho state mà khách hàng vừa đi vào.
     from app.dialog.instruction_builder import DialogResponse
 
     try:
@@ -1559,7 +1566,7 @@ async def _handle_discovery(
     container: ApplicationContainer,
     context: BookingContext,
 ) -> DialogResponse:
-    """Run one read-only catalog operation without selecting an entity."""
+    # Chạy một thao tác catalog chỉ đọc mà không chọn thực thể cụ thể.
     try:
         if nlu_result.intent in {"list_shops", "search_shops"}:
             query = nlu_result.payload.get("location_query")
@@ -2068,7 +2075,7 @@ def _with_state_recovery_suggestions(
     response: DialogResponse,
     context: BookingContext,
 ) -> DialogResponse:
-    """Add verified next-step choices without replacing the failure explanation."""
+    # Bổ sung quick replies an toàn mà không ghi đè phần giải thích lỗi.
     from app.dialog.instruction_builder import DialogResponse
 
     return DialogResponse(
@@ -2083,7 +2090,7 @@ def _with_state_recovery_suggestions(
 
 # Sinh quick replies dựa trên state và dữ liệu context đã validate.
 def _state_recovery_quick_replies(context: BookingContext) -> tuple[str, ...]:
-    """Return safe choices derived from the current state and validated context."""
+    # Sinh các lựa chọn an toàn dựa trên state hiện tại và context đã validate.
     if context.state is BookingState.SELECTING_SHOP:
         names = tuple(shop.name for shop in context.suggested_shops)
         return names or ("Xem danh sách cửa hàng",)

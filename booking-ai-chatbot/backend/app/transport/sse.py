@@ -1,4 +1,4 @@
-"""Encode deterministic, JSON-backed Server-Sent Events."""
+# Mã hóa và stream các event SSE dạng JSON cho response hội thoại.
 
 import asyncio
 import inspect
@@ -33,7 +33,7 @@ _EVENT_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
 
 
 class SSEEventType(StrEnum):
-    """Names the business-level events emitted by the chat stream."""
+    # Các event tầng nghiệp vụ mà endpoint SSE của chatbot phát ra.
 
     STARTED = "started"
     MESSAGE = "message"
@@ -42,11 +42,13 @@ class SSEEventType(StrEnum):
 
 
 class InvalidSSEEventError(ValueError):
-    """Raised when an SSE event name or data object is invalid."""
+    # Phát sinh khi tên event hoặc payload SSE không hợp lệ.
+    pass
 
 
 class SSESerializationError(TypeError):
-    """Raised when an SSE data object is not JSON serializable."""
+    # Phát sinh khi payload SSE không thể serialize thành JSON.
+    pass
 
 
 # Mã hóa một event SSE thành đúng định dạng text/event-stream gửi về frontend.
@@ -55,7 +57,7 @@ def encode_sse_event(
     event: str,
     data: Mapping[str, object],
 ) -> str:
-    """Return one compact SSE frame containing a JSON object."""
+    # Tạo một frame SSE gọn, chứa đúng một object JSON hợp lệ.
     if not isinstance(event, str) or not _EVENT_NAME_PATTERN.fullmatch(event):
         raise InvalidSSEEventError("SSE event name is invalid.")
     if not isinstance(data, Mapping):
@@ -82,7 +84,7 @@ async def stream_chat_events(
     correlation_id: str | None = None,
     entrypoint: str | None = None,
 ) -> AsyncIterator[str]:
-    """Generate the complete SSE lifecycle around one controller call."""
+    # Phát đầy đủ vòng đời SSE cho một lần gọi `process_message`.
     token = bind_trace_context(
         trace_id=correlation_id,
         session_id=request.conversation_id,
@@ -114,6 +116,7 @@ async def _stream_bound_chat_events(
     correlation_id: str | None,
     entrypoint: str | None,
 ) -> AsyncIterator[str]:
+    # Chạy một turn nghiệp vụ rồi phát tuần tự các event started/message/completed.
     started_at = perf_counter()
     chunk_count = 0
     bytes_sent = 0

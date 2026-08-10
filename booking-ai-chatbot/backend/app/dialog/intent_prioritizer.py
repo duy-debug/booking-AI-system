@@ -1,4 +1,4 @@
-"""Choose one state-compatible intent from structured LLM candidates."""
+"""Chọn intent phù hợp nhất từ các candidate structured mà LLM trả về."""
 
 import logging
 from collections.abc import Mapping, Sequence
@@ -12,11 +12,13 @@ from app.infrastructure.context_store import trace_log
 
 
 class IntentPolicy(Protocol):
+    """Contract tối thiểu để kiểm tra một intent có hợp lệ với state hay không."""
+
     def is_allowed(self, state: BookingState, intent: str) -> bool: ...
 
 
 class IntentCandidate(BaseModel):
-    """One strictly validated intent hypothesis returned by Gemini."""
+    """Một giả thuyết intent đã được validate shape từ output của Gemini."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -28,7 +30,13 @@ class IntentCandidate(BaseModel):
 
 
 class IntentPrioritizer:
-    """Prefer compatible and complete candidates before raw confidence."""
+    """
+    Chọn candidate cuối cùng để đưa sang dialog flow.
+
+    Lớp này thuộc tầng NLU hậu xử lý: nó không đọc raw text mà chỉ so sánh
+    các candidate đã có structured output, ưu tiên intent hợp state và đủ entity
+    cần thiết trước khi nhìn vào confidence thuần.
+    """
 
     _REQUIRED_ENTITY = {
         "select_people": "number_of_people",
@@ -53,7 +61,7 @@ class IntentPrioritizer:
         state: BookingState,
         context: BookingContext | None = None,
     ) -> IntentCandidate | None:
-        """Return the best valid candidate without mutating booking context."""
+        """Trả về candidate tốt nhất mà không làm thay đổi `BookingContext`."""
         compatible = [
             candidate
             for candidate in candidates

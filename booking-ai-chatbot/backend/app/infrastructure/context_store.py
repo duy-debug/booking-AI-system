@@ -1,4 +1,4 @@
-"""Runtime configuration consumed by the application composition root."""
+# Cấu hình runtime và tiện ích context/trace dùng chung cho toàn bộ ứng dụng.
 # ruff: noqa: E402
 
 from copy import deepcopy
@@ -13,7 +13,7 @@ def _default_env_path() -> Path:
 
 
 def load_runtime_environment(env_file: Path | None = None) -> Path:
-    """Load backend-local defaults without overriding the process environment."""
+    # Nạp file `.env` cục bộ của backend mà không ghi đè biến môi trường hệ thống.
     resolved_path = (env_file or _default_env_path()).resolve()
     load_dotenv(dotenv_path=resolved_path, override=False)
     return resolved_path
@@ -29,7 +29,7 @@ def _default_change_handlers_path() -> Path:
 
 @dataclass(frozen=True, slots=True)
 class Settings:
-    """Contains the runtime values required to assemble the booking application."""
+    # Chứa các giá trị cấu hình cần để ghép đầy đủ chatbot ở composition root.
 
     pos_base_url: str
     pos_timeout_seconds: float = 10.0
@@ -55,7 +55,7 @@ class Settings:
     rag_hybrid_score_threshold: float = 0.45
 
 
-"""Central masking and redaction for observability data."""
+# Che dữ liệu nhạy cảm và rút gọn payload dùng cho logging/observability.
 
 import re
 from collections.abc import Mapping
@@ -81,7 +81,7 @@ _SECRET_KEYS = frozenset(
 
 
 def mask_phone(value: str) -> str:
-    """Preserve a small useful prefix/suffix without exposing a phone."""
+    # Che số điện thoại nhưng vẫn giữ một phần prefix/suffix để tiện đối chiếu log.
     digits = "".join(character for character in value if character.isdigit())
     if len(digits) < 7:
         return "***"
@@ -89,7 +89,7 @@ def mask_phone(value: str) -> str:
 
 
 def mask_email(value: str) -> str:
-    """Mask the local part of an email address."""
+    # Che phần local của email trước khi đưa vào log hoặc metadata quan sát.
     match = _EMAIL.fullmatch(value.strip())
     if match is None:
         return "***"
@@ -97,7 +97,7 @@ def mask_email(value: str) -> str:
 
 
 def redact_headers(headers: Mapping[str, str]) -> dict[str, str]:
-    """Return headers with credentials removed and trace metadata preserved."""
+    # Loại bỏ credential khỏi headers nhưng vẫn giữ metadata trace an toàn.
     return {
         key: "***" if _is_secret_key(key) else sanitize_text(value)
         for key, value in headers.items()
@@ -105,12 +105,12 @@ def redact_headers(headers: Mapping[str, str]) -> dict[str, str]:
 
 
 def sanitize_dict(values: Mapping[str, object]) -> dict[str, object]:
-    """Recursively sanitize a mapping without serializing arbitrary objects."""
+    # Làm sạch đệ quy một mapping trước khi log mà không ép serialize object tùy ý.
     return {str(key): sanitize_value(str(key), value) for key, value in values.items()}
 
 
 def sanitize_value(key: str, value: object) -> object:
-    """Sanitize one structured value according to its field name."""
+    # Làm sạch một giá trị structured dựa trên tên field nghiệp vụ của nó.
     normalized = key.casefold().replace("-", "_")
     if _is_secret_key(normalized) or "idempotency" in normalized:
         return "***"
@@ -130,7 +130,7 @@ def sanitize_value(key: str, value: object) -> object:
 
 
 def sanitize_text(value: str) -> str:
-    """Remove bearer credentials and mask phones/emails in free text."""
+    # Che token, phone, email trong text tự do trước khi text đi vào log.
     protected: list[str] = []
     sanitized = _UUID.sub(
         lambda match: _protect(match.group(0), protected),
@@ -146,7 +146,7 @@ def sanitize_text(value: str) -> str:
 
 
 def sanitize_exception_data(error: BaseException) -> dict[str, str]:
-    """Return safe exception metadata without raw provider payloads."""
+    # Trả về metadata exception an toàn mà không lộ raw payload từ provider ngoài.
     return {
         "exception_type": type(error).__name__,
         "exception_message": sanitize_text(str(error)),
@@ -171,7 +171,7 @@ def _restore(value: str, protected: list[str]) -> str:
     return value
 
 
-"""Async-safe trace identity and FastAPI/ASGI header propagation."""
+# Quản lý trace context an toàn cho async và propagate header qua FastAPI/ASGI.
 
 import logging
 import re
@@ -233,6 +233,7 @@ _completed_turn_metrics: ContextVar[TurnMetrics | None] = ContextVar(
 
 
 def current_trace_context() -> TraceContext:
+    # Trả trace context hiện tại; nếu chưa bind thì dùng giá trị mặc định an toàn.
     return _current.get() or TraceContext()
 
 
@@ -243,7 +244,7 @@ def bind_trace_context(
     session_id: str | None = None,
     turn_id: int | None = None,
 ) -> Token[TraceContext | None]:
-    """Bind supplied fields while inheriting omitted parent trace fields."""
+    # Bind trace fields mới nhưng vẫn kế thừa field cha nếu caller không truyền vào.
     parent = current_trace_context()
     return _current.set(
         TraceContext(
@@ -371,7 +372,7 @@ def turn_metrics_payload(
 
 
 class TraceMiddleware:
-    """Bind trace headers for the complete ASGI response, including streaming."""
+    # Gắn trace headers cho toàn bộ vòng đời response ASGI, kể cả streaming.
 
     def __init__(self, app: Any, *, service: str, pos_events: bool = False) -> None:
         self.app = app
@@ -480,7 +481,7 @@ def _parse_turn(value: str | None) -> int | None:
     return parsed if parsed > 0 else None
 
 
-"""Centralized, security-conscious application logging configuration."""
+# Cấu hình logging tập trung và che dữ liệu nhạy cảm cho toàn ứng dụng.
 
 import hashlib
 import json
@@ -538,47 +539,47 @@ _service_name = "booking-chatbot"
 
 
 class SafeConsoleFormatter(std_logging.Formatter):
-    """Apply the shared redaction rules to human-readable console output."""
+    # Áp dụng các quy tắc che dữ liệu chung cho console log dễ đọc.
 
     def format(self, record: std_logging.LogRecord) -> str:
         return _sanitize_text(super().format(record))
 
 
 def mask_conversation_id(conversation_id: str) -> str:
-    """Return a stable non-reversible marker without exposing the identifier."""
+    # Trả về marker ổn định nhưng không thể suy ngược ra conversation_id gốc.
     return hashlib.sha256(conversation_id.encode("utf-8")).hexdigest()[:8]
 
 
 def bind_conversation(conversation_id: str) -> Token[str]:
-    """Bind one masked conversation marker for nested adapter logs."""
+    # Bind marker conversation đã được che cho các log lồng nhau.
     return _conversation_marker.set(mask_conversation_id(conversation_id))
 
 
 def reset_conversation(token: Token[str]) -> None:
-    """Restore the prior conversation logging context."""
+    # Khôi phục conversation logging context trước đó.
     _conversation_marker.reset(token)
 
 
 def bind_turn(turn_sequence: int) -> Token[int | None]:
-    """Bind a positive conversation-local turn number for nested trace logs."""
+    # Bind số turn dương trong conversation cho các trace log lồng nhau.
     if type(turn_sequence) is not int or turn_sequence < 1:
         raise ValueError("Turn sequence must be a positive integer.")
     return _turn_marker.set(turn_sequence)
 
 
 def reset_turn(token: Token[int | None]) -> None:
-    """Restore the prior turn logging context."""
+    # Khôi phục turn logging context trước đó.
     _turn_marker.reset(token)
 
 
 def bind_correlation_id(correlation_id: str | None) -> Token[str]:
-    """Bind a safe correlation marker supplied by the current transport."""
+    # Bind correlation marker an toàn do transport hiện tại cung cấp.
     marker = mask_conversation_id(correlation_id) if correlation_id else "-"
     return _correlation_marker.set(marker)
 
 
 def reset_correlation_id(token: Token[str]) -> None:
-    """Restore the prior correlation logging context."""
+    # Khôi phục correlation logging context trước đó.
     _correlation_marker.reset(token)
 
 
@@ -589,7 +590,7 @@ def trace_log(
     event: str,
     **fields: object,
 ) -> None:
-    """Write one safe component trace with structured fields."""
+    # Ghi một trace an toàn của component với structured fields.
     marker = _conversation_marker.get()
     correlation = _correlation_marker.get()
     turn = _turn_marker.get()
@@ -640,12 +641,12 @@ def trace_log(
 
 
 def elapsed_ms(started_at: float) -> int:
-    """Return monotonic elapsed milliseconds for external/lifecycle logs."""
+    # Trả số mili giây đã trôi qua theo đồng hồ monotonic cho lifecycle log.
     return max(0, round((perf_counter() - started_at) * 1000))
 
 
 class JsonFormatter(std_logging.Formatter):
-    """Format one LogRecord as one redacted UTF-8-friendly JSON object."""
+    # Format một LogRecord thành JSON đã che dữ liệu và giữ UTF-8.
 
     def format(self, record: std_logging.LogRecord) -> str:
         payload: dict[str, object] = {
@@ -683,7 +684,7 @@ def configure_logging(
     backup_count: int = 5,
     service: str = "booking-chatbot",
 ) -> None:
-    """Replace process logging handlers with one centralized configuration."""
+    # Thay toàn bộ logging handler của process bằng cấu hình tập trung.
     global _service_name
     normalized_level = _validate_level(level)
     normalized_format = _validate_format(log_format)
@@ -829,32 +830,34 @@ def _sanitize_text(value: str) -> str:
     return sanitized
 
 
-"""In-process storage for booking conversation contexts."""
+# Lưu `BookingContext` trong memory theo `conversation_id`.
 
 from app.domain.booking_context import BookingContext
 
 
 class ContextStore:
-    """Store booking contexts in memory by conversation identifier."""
+    # Lưu `BookingContext` ngay trong process hiện tại.
+    # Mọi thao tác đọc đều trả về bản sao để phần orchestration có thể mutate
+    # working copy mà không làm bẩn snapshot đang được lưu.
 
     def __init__(self) -> None:
         self._contexts: dict[str, BookingContext] = {}
 
     async def get(self, conversation_id: str) -> BookingContext | None:
-        """Return an isolated copy without exposing the stored snapshot."""
+        # Trả về bản sao của context đã lưu mà không lộ snapshot gốc trong store.
         context = self._contexts.get(conversation_id)
         return deepcopy(context) if context is not None else None
 
     async def save(self, context: BookingContext) -> None:
-        """Store an isolated snapshot using its conversation identifier."""
+        # Lưu một snapshot tách biệt theo đúng conversation identifier của context.
         self._contexts[context.conversation_id] = deepcopy(context)
 
     async def delete(self, conversation_id: str) -> None:
-        """Delete a context when it exists."""
+        # Xóa context của conversation nếu nó đang tồn tại trong store.
         self._contexts.pop(conversation_id, None)
 
     async def get_copy(self, conversation_id: str) -> BookingContext:
-        """Return a working copy or create and snapshot a new context."""
+        # Trả về working copy hoặc tạo context mới rồi snapshot vào store.
         context = self._contexts.get(conversation_id)
         if context is None:
             context = BookingContext(conversation_id=conversation_id)
@@ -862,5 +865,5 @@ class ContextStore:
         return deepcopy(context)
 
     def __len__(self) -> int:
-        """Return the number of stored contexts."""
+        # Trả về số conversation context đang được giữ trong memory.
         return len(self._contexts)

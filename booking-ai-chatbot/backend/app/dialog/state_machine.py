@@ -1,4 +1,4 @@
-"""Resolve conditional declarative booking conversation transitions."""
+# Giải quyết các transition khai báo của luồng hội thoại đặt lịch.
 
 import logging
 import operator
@@ -23,16 +23,18 @@ from app.infrastructure.context_store import trace_log
 
 
 class FailureSource(Protocol):
-    """Exposes declarative failure routes to the resolver."""
+    # Lộ ra các nhánh `on_fail` để state machine có thể chọn nhánh recovery.
 
     @property
     def on_fail(self) -> tuple[FlowFailure, ...]:
-        """Return failure routes in declaration order."""
+        # Trả các nhánh failure theo đúng thứ tự khai báo trong flow.
         ...
 
 
 class StateMachine:
-    """Evaluates conditions and resolves transitions without executing actions."""
+    # Tính toán transition hợp lệ từ flow JSON mà không tự chạy business action.
+    # Lớp này chỉ đọc `BookingContext`, intent đã được NLU chuẩn hóa và các
+    # điều kiện declarative trong flow để quyết định đi tiếp sang state nào.
 
     _COLLECTION_TYPES = (tuple, list, set, frozenset)
 
@@ -166,7 +168,7 @@ class StateMachine:
         context: BookingContext,
         intent: str,
     ) -> FlowTransition:
-        """Resolve the first matching exact candidate, then wildcard fallback."""
+        # Chọn transition đầu tiên khớp state hiện tại, rồi mới fallback wildcard.
         state = self.get_state_definition(context.state)
         if state.terminal:
             raise InvalidBookingStateError(
@@ -220,7 +222,7 @@ class StateMachine:
         self,
         context: BookingContext,
     ) -> FlowAutoTransition | None:
-        """Return the first matching auto transition without applying it."""
+        # Trả về auto transition đầu tiên khớp điều kiện nhưng chưa commit state.
         state = self.get_state_definition(context.state)
         if state.terminal:
             return None
@@ -240,7 +242,7 @@ class StateMachine:
         transition: FlowTransition | FlowAutoTransition,
     ) -> None:
         # State Machine là nguồn duy nhất commit state transition của booking flow.
-        """Commit only the resolved target state."""
+        # Chỉ commit state đích đã được resolve.
         previous_state = context.state
         context.state = transition.target
         trace_log(
@@ -276,7 +278,7 @@ class StateMachine:
         transition: FailureSource,
         failure_code: str,
     ) -> FlowFailure | None:
-        """Resolve an exact failure code before canonical fallback routes."""
+        # Ưu tiên resolve theo mã lỗi exact trước khi fallback sang nhánh chung.
         exact = next(
             (failure for failure in transition.on_fail if failure.condition == failure_code),
             None,
@@ -300,7 +302,7 @@ class StateMachine:
         context: BookingContext,
         failure: FlowFailure,
     ) -> None:
-        """Commit only a resolved failure target."""
+        # Chỉ commit failure target đã được resolve.
         context.state = failure.target
 
     # Giữ alias cũ cho caller/test nhưng vẫn không tự commit state.
@@ -309,7 +311,7 @@ class StateMachine:
         context: BookingContext,
         intent: str,
     ) -> FlowTransition:
-        """Compatibility alias for resolve_transition; does not commit state."""
+        # Giữ alias tương thích cho caller cũ nhưng không tự commit state.
         return self.resolve_transition(context, intent)
 
     # Kiểm tra intent có route hợp lệ ở state hiện tại mà không làm đổi context.
@@ -318,7 +320,7 @@ class StateMachine:
         context: BookingContext,
         intent: str,
     ) -> bool:
-        """Return whether a matching transition exists without mutating context."""
+        # Kiểm tra có transition phù hợp hay không mà không mutate context.
         try:
             self.resolve_transition(context, intent)
         except InvalidBookingStateError:
@@ -330,7 +332,7 @@ class StateMachine:
         self,
         current_state: BookingState,
     ) -> tuple[str, ...]:
-        """Return unique configured intents in first-seen insertion order."""
+        # Trả danh sách intent duy nhất theo đúng thứ tự xuất hiện trong flow.
         return tuple(
             dict.fromkeys(
                 transition.intent
@@ -340,7 +342,7 @@ class StateMachine:
 
     # Lấy định nghĩa state đã parse hoặc fail fast nếu flow thiếu state.
     def get_state_definition(self, state: BookingState) -> FlowState:
-        """Return the flow definition for a booking state."""
+        # Trả định nghĩa flow của state hiện tại hoặc fail fast nếu flow thiếu state.
         try:
             return self._flow.states[state]
         except KeyError as exc:
@@ -353,7 +355,7 @@ class StateMachine:
         self,
         state: BookingState,
     ) -> tuple[FlowAutoTransition, ...]:
-        """Return parsed auto transitions without evaluating them."""
+        # Trả toàn bộ auto transition đã parse mà chưa đánh giá điều kiện.
         return self.get_state_definition(state).auto_transitions
 
     # Lấy cấu hình tách luồng phone/customer mà không tự chạy logic phone.
@@ -361,5 +363,5 @@ class StateMachine:
         self,
         state: BookingState,
     ) -> PhoneSplitConfig | None:
-        """Return phone split configuration without executing phone logic."""
+        # Trả cấu hình tách luồng phone mà không chạy logic phone.
         return self.get_state_definition(state).phone_split_mode

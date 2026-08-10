@@ -1,4 +1,4 @@
-"""HTTP adapter for the verified subset of the POS booking contract."""
+"""Adapter HTTP gọi POS theo contract production đã được xác minh."""
 
 import logging
 from collections.abc import Mapping
@@ -79,7 +79,12 @@ class _ParsedReservation:
 
 
 class PosApiClient:
-    """Implement verified BookingGateway operations over an injected HTTP client."""
+    """
+    Cầu nối từ chatbot sang POS backend.
+
+    Lớp này nhận request dạng domain/application, gọi HTTP sang POS, kiểm tra
+    shape response và map dữ liệu/lỗi về dạng ổn định để chatbot xử lý tiếp.
+    """
 
     # Cấu hình HTTP client, base URL và auth header an toàn cho mọi call sang POS.
     def __init__(

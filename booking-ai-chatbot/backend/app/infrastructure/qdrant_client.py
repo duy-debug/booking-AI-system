@@ -966,7 +966,12 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class FAQManager:
-    """Own the FAQ retrieval policy without mutating booking context."""
+    """
+    Điều phối nhánh FAQ/RAG của chatbot mà không làm thay đổi `BookingContext`.
+
+    Lớp này gọi knowledge gateway, lọc kết quả theo ngưỡng relevance rồi nhờ
+    `InstructionBuilder` dựng response an toàn cho intent hỏi đáp.
+    """
 
     def __init__(
         self,
@@ -992,7 +997,7 @@ class FAQManager:
         query: str,
         context: BookingContext,
     ) -> DialogResponse:
-        """Retrieve and render one FAQ answer while preserving booking state."""
+        """Tra cứu knowledge và render một câu trả lời FAQ mà không đổi booking state."""
         started_at = perf_counter()
         gateway = self._knowledge_gateway
         if gateway is None:
@@ -1046,6 +1051,7 @@ class FAQManager:
 
     @staticmethod
     def _log_failure(error_code: str, started_at: float) -> None:
+        """Ghi log failure chuẩn hóa cho các lỗi RAG mà không làm đứt flow hội thoại."""
         trace_log(
             _LOGGER,
             logging.WARNING,

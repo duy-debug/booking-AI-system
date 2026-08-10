@@ -1,4 +1,4 @@
-"""Generate the final grounded assistant text through Gemini."""
+"""Diễn đạt response cuối cùng của chatbot bằng Gemini từ dữ liệu đã được kiểm chứng."""
 
 import logging
 import os
@@ -13,7 +13,13 @@ logger = logging.getLogger(__name__)
 
 
 class ResponseGenerator:
-    """Use Gemini for NLG while preserving backend-owned response metadata."""
+    """
+    Lớp NLG của chatbot.
+
+    Nó nhận response draft từ `InstructionBuilder`, dựng prompt grounded cho Gemini
+    và chỉ viết lại câu trả lời tự nhiên; nó không được tự đổi business outcome,
+    state hay dữ liệu booking.
+    """
 
     # Nhận LLM gateway và InstructionBuilder để diễn đạt response nhưng không đổi business outcome.
     def __init__(self, llm_gateway: LLMGateway, instruction_builder: InstructionBuilder) -> None:
