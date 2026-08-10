@@ -23,30 +23,43 @@ README này mô tả flow hiện tại theo code trong repository, không giữ 
 
 ```mermaid
 flowchart TD
-  U[User] --> FE[Next.js frontend]
-  FE --> FAPI[Frontend API routes]
-  FAPI --> BAPI[FastAPI /api/v1/chat or /api/v1/chat/stream]
-  BAPI --> CTX[ConversationContextStore.get_copy]
-  CTX --> NLU[LLMNLU.parse]
-  NLU --> FC[Gemini tool calling / structured output]
-  FC --> PV[Pydantic validation]
-  PV --> IP[IntentPrioritizer]
-  IP --> POL[StateIntentPolicy]
-  POL --> SM[StateMachine]
-  SM --> DC[DialogController.handle_turn]
-  DC --> AR[ActionRegistry]
-  AR --> H[Handlers]
-  H --> POS[PosApiClient -> POS backend]
-  DC --> ER[EntityResolutionCoordinator]
-  ER --> POS
-  DC --> FAQ[FAQManager]
-  FAQ --> QD[KnowledgeQdrantClient -> Qdrant]
-  DC --> IB[InstructionBuilder]
-  IB --> RG[ResponseGenerator]
-  RG --> LLMNLG[Gemini NLG]
-  LLMNLG --> SSE[SSE or JSON response]
-  SSE --> FE2[Frontend UI]
-  FE2 --> U
+  U[User] --> FE[Next.js Frontend]
+  FE --> API[FastAPI Chat API]
+
+  API --> CTX[Conversation Context]
+  CTX --> NLU[LLM NLU]
+
+  NLU --> FC[Function Calling]
+  FC --> VAL[Schema Validation]
+  VAL --> IP[Intent Prioritizer]
+
+  IP --> ER{Need Entity Resolution?}
+
+  ER -- Yes --> RES[Entity Resolution]
+  ER -- No --> SM[State Machine]
+  RES --> SM
+
+  SM --> ACTION[Action Processing]
+
+  ACTION --> POS[POS Client]
+  POS --> POSBE[POS Backend]
+
+  ACTION --> KB[Knowledge / FAQ]
+  KB --> QD[Qdrant]
+
+  POSBE --> RESULT[Outcome + Data]
+  QD --> RESULT
+  ACTION --> RESULT
+
+  RESULT --> CTXUP[Update Booking Context]
+  CTXUP --> TRANS[State Transition]
+
+  TRANS --> INST[Instruction Builder]
+  INST --> NLG[LLM NLG]
+
+  NLG --> SAVE[Save Conversation Context]
+  SAVE --> RESP[SSE / JSON Response]
+  RESP --> FE
 ```
 
 Luồng booking hiện tại tuân theo nguyên tắc:
@@ -58,6 +71,8 @@ Luồng booking hiện tại tuân theo nguyên tắc:
 - Qdrant chỉ đi qua nhánh FAQ/RAG, không chạy cho mọi request.
 
 ## Chat request flow
+
+Hệ thống chatbot được xây dựng theo kiến trúc hội thoại có trạng thái. Câu hỏi của người dùng trước tiên được xử lý bởi LLM NLU để nhận diện ý định và trích xuất các thực thể cần thiết. Kết quả từ LLM được chuẩn hóa thông qua Function Calling/Structured Output và kiểm tra bằng Pydantic trước khi đưa vào tầng điều phối hội thoại. Intent Prioritizer lựa chọn ý định phù hợp dựa trên kết quả NLU, độ tin cậy và ngữ cảnh hội thoại, trong khi State Machine kiểm tra tính hợp lệ của intent đối với trạng thái hiện tại. Sau đó Router lựa chọn Handler tương ứng. Handler sử dụng dữ liệu trong `BookingContext`, thực hiện các kiểm tra đầu vào và gọi POS Backend hoặc hệ thống Knowledge Base thông qua Qdrant khi cần. Kết quả từ các hệ thống bên ngoài được chuyển thành outcome và dữ liệu nghiệp vụ; `BookingContext` chỉ được cập nhật khi kết quả xử lý hợp lệ. State Machine tiếp tục xác định trạng thái kế tiếp dựa trên outcome. Cuối cùng, Instruction Resolver và NLG Builder tổng hợp instruction, kết quả nghiệp vụ, dữ liệu POS/Qdrant, trạng thái mới, `BookingContext` và lịch sử hội thoại cần thiết để LLM NLG tạo câu trả lời tự nhiên. Response được trả về frontend thông qua JSON hoặc SSE streaming và hiển thị cho người dùng.
 
 Flow end-to-end hiện tại:
 
