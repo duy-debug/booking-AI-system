@@ -1,4 +1,6 @@
-# Điều phối trọn một lượt hội thoại từ message đầu vào đến response cuối.
+"""
+Điều phối trọn một lượt hội thoại từ message đầu vào đến response cuối.
+"""
 
 from __future__ import annotations
 
@@ -128,28 +130,38 @@ _TERMINAL_CHANGE_TEXT = (
 
 
 class DialogControllerError(Exception):
-    # Lỗi gốc của tầng điều phối dialog.
+    """
+    Lỗi gốc của tầng điều phối dialog.
+    """
     pass
 
 
 class InvalidDialogTurnError(DialogControllerError):
-    # Phát sinh khi một turn đã parse sẵn không đúng contract đầu vào.
+    """
+    Phát sinh khi một turn đã parse sẵn không đúng contract đầu vào.
+    """
     pass
 
 
 class AutoTransitionLimitError(DialogControllerError):
-    # Phát sinh khi một turn chạy quá số auto transition cho phép.
+    """
+    Phát sinh khi một turn chạy quá số auto transition cho phép.
+    """
     pass
 
 
 class AutoTransitionCycleError(DialogControllerError):
-    # Phát sinh khi auto transition bị lặp vòng trong cùng một turn.
+    """
+    Phát sinh khi auto transition bị lặp vòng trong cùng một turn.
+    """
     pass
 
 
 @dataclass(frozen=True, slots=True)
 class DialogTurnInput:
-    # Biểu diễn intent/payload đã được chuẩn hóa và sẵn sàng cho dialog flow.
+    """
+    Biểu diễn intent/payload đã được chuẩn hóa và sẵn sàng cho dialog flow.
+    """
 
     intent: str
     payload: Mapping[str, object]
@@ -164,7 +176,9 @@ class DialogTurnInput:
 
 
 class DialogTurnStatus(StrEnum):
-    # Mô tả turn đã thành công, recovery được hay thất bại chưa xử lý.
+    """
+    Mô tả turn đã thành công, recovery được hay thất bại chưa xử lý.
+    """
 
     SUCCESS = "success"
     FAILURE_HANDLED = "failure_handled"
@@ -173,7 +187,9 @@ class DialogTurnStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class DialogTurnResult:
-    # Kết quả điều phối turn trước khi dựng câu trả lời cuối cùng.
+    """
+    Kết quả điều phối turn trước khi dựng câu trả lời cuối cùng.
+    """
 
     status: DialogTurnStatus
     initial_state: BookingState
@@ -188,10 +204,12 @@ class DialogTurnResult:
 
 
 class DialogController:
-    # Điều phối một lượt hội thoại hoàn chỉnh của chatbot.
-    # Controller này nhận message từ transport, tải `BookingContext`, gọi NLU,
-    # route sang nhánh entity resolution / FAQ / dialog flow, chạy state + action,
-    # dựng response và lưu lại context nếu turn xử lý thành công.
+    """
+    Điều phối một lượt hội thoại hoàn chỉnh của chatbot.
+    Controller này nhận message từ transport, tải `BookingContext`, gọi NLU,
+    route sang nhánh entity resolution / FAQ / dialog flow, chạy state + action,
+    dựng response và lưu lại context nếu turn xử lý thành công.
+    """
 
     # Nhận StateMachine, ActionRegistry và change rules để điều phối một dialog turn.
     def __init__(
@@ -214,7 +232,9 @@ class DialogController:
 
     # Bind composition graph sau khi toàn bộ dependency đã được tạo ở application container.
     def bind_runtime(self, runtime: "ApplicationContainer") -> None:
-        # Bind toàn bộ dependency runtime sau khi composition root đã hoàn tất.
+        """
+        Bind toàn bộ dependency runtime sau khi composition root đã hoàn tất.
+        """
         if self._runtime is not None and self._runtime is not runtime:
             raise RuntimeError("DialogController runtime is already bound.")
         self._runtime = runtime
@@ -1012,7 +1032,9 @@ async def _consume_requested_entities(
 
 
 def _stage_requested_entities(result: NLUResult, context: BookingContext) -> None:
-    # Lưu các entity phụ do LLM trích xuất cho tới khi workflow đi tới đúng state.
+    """
+    Lưu các entity phụ do LLM trích xuất cho tới khi workflow đi tới đúng state.
+    """
     if result.intent not in {
         "start_booking",
         "select_store",
@@ -2090,7 +2112,9 @@ def _with_state_recovery_suggestions(
 
 # Sinh quick replies dựa trên state và dữ liệu context đã validate.
 def _state_recovery_quick_replies(context: BookingContext) -> tuple[str, ...]:
-    # Sinh các lựa chọn an toàn dựa trên state hiện tại và context đã validate.
+    """
+    Sinh các lựa chọn an toàn dựa trên state hiện tại và context đã validate.
+    """
     if context.state is BookingState.SELECTING_SHOP:
         names = tuple(shop.name for shop in context.suggested_shops)
         return names or ("Xem danh sách cửa hàng",)

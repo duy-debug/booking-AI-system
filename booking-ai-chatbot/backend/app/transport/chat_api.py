@@ -1,4 +1,6 @@
-# Expose các HTTP endpoint JSON và SSE cho message hội thoại của chatbot.
+"""
+Expose các HTTP endpoint JSON và SSE cho message hội thoại của chatbot.
+"""
 
 from __future__ import annotations
 
@@ -45,7 +47,9 @@ _SAFE_METADATA_KEYS = frozenset(
 
 # Lấy ApplicationContainer đã được khởi tạo trong lifespan để transport không tự tạo dependency.
 def get_application_container(request: Request) -> ApplicationContainer:
-    # Lấy `ApplicationContainer` duy nhất đã được tạo trong vòng đời FastAPI.
+    """
+    Lấy `ApplicationContainer` duy nhất đã được tạo trong vòng đời FastAPI.
+    """
     container = getattr(request.app.state, "application_container", None)
     if not isinstance(container, ApplicationContainer):
         raise RuntimeError("Application container is unavailable.")
@@ -181,8 +185,10 @@ def _stream_chat_events(
 
 # Chuyển DialogResponse nội bộ thành schema public trả về frontend.
 def _to_chat_response(conversation_id: str, response: DialogResponse) -> ChatResponse:
-    # Chỉ expose các field public mà frontend cần.
-    # Không đẩy internal object hay raw context ra ngoài response public.
+    """
+    Chỉ expose các field public mà frontend cần.
+    Không đẩy internal object hay raw context ra ngoài response public.
+    """
     return ChatResponse(
         conversation_id=conversation_id,
         text=response.text,

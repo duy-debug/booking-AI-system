@@ -1,4 +1,4 @@
-"""Validated HTTP schemas shared by JSON and SSE chat transports."""
+"""Khai báo schema HTTP dùng chung cho hai nhánh JSON và SSE của chatbot."""
 
 from typing import Self
 
@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 class ChatRequest(BaseModel):
-    """Contains one user message and its transport-owned conversation identity."""
+    """Chứa một message người dùng cùng conversation identity do transport quản lý."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -17,7 +17,7 @@ class ChatRequest(BaseModel):
     @field_validator("conversation_id", mode="before")
     @classmethod
     def normalize_conversation_id(cls, value: object) -> object:
-        """Trim the identifier while leaving authoritative checks to the store."""
+        """Chuẩn hóa khoảng trắng đầu cuối và để tầng store kiểm tra contract cuối cùng."""
         if not isinstance(value, str):
             return value
         normalized = value.strip()
@@ -28,7 +28,7 @@ class ChatRequest(BaseModel):
     @field_validator("message", mode="before")
     @classmethod
     def normalize_message(cls, value: object) -> object:
-        """Trim only outer message whitespace without changing its content."""
+        """Chỉ cắt khoảng trắng đầu cuối của message mà không đổi nội dung bên trong."""
         if not isinstance(value, str):
             return value
         normalized = value.strip()
@@ -38,14 +38,14 @@ class ChatRequest(BaseModel):
 
     @model_validator(mode="after")
     def reject_empty_idempotency_key(self) -> Self:
-        """Reject an explicitly empty key without normalizing supplied values."""
+        """Từ chối idempotency key rỗng nếu client truyền vào một cách tường minh."""
         if self.idempotency_key == "":
             raise ValueError("idempotency_key must not be empty")
         return self
 
 
 class ChatResponse(BaseModel):
-    """Contains UI-safe output from one non-streaming dialog turn."""
+    """Chứa dữ liệu phản hồi an toàn để frontend hiển thị cho một lượt chat JSON."""
 
     conversation_id: str
     text: str

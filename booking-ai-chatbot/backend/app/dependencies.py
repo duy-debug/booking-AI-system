@@ -1,4 +1,4 @@
-"""Assemble and own the application's runtime dependency graph."""
+"""Lắp ghép và quản lý toàn bộ dependency runtime của ứng dụng chatbot."""
 
 import asyncio
 import re
@@ -57,23 +57,23 @@ _RAW_PHONE_PATTERN = re.compile(r"\+?\d{9,15}")
 
 
 class ConversationContextError(Exception):
-    """Base error for conversation context lifecycle failures."""
+    """Lỗi cơ sở cho các vấn đề ở vòng đời lưu và tải conversation context."""
 
 
 class InvalidConversationIdError(ConversationContextError):
-    """Raised when a conversation identifier is unsafe or malformed."""
+    """Phát sinh khi conversation identifier không an toàn hoặc sai định dạng."""
 
 
 class InvalidCachedContextError(ConversationContextError):
-    """Raised when cached data violates the booking-context contract."""
+    """Phát sinh khi dữ liệu cache không còn đúng contract của BookingContext."""
 
 
 class InvalidConversationContextError(ConversationContextError):
-    """Raised when a context cannot be saved under the supplied identifier."""
+    """Phát sinh khi context không thể được lưu dưới conversation identifier đã cho."""
 
 
 class RuntimeFlowValidationError(ValueError):
-    """Raised when composed runtime bindings cannot execute the loaded flow."""
+    """Phát sinh khi dependency đã compose không thể phục vụ runtime flow đang được nạp."""
 
 
 @dataclass(slots=True)
@@ -83,7 +83,7 @@ class _ConversationLockEntry:
 
 
 class ConversationContextStore:
-    """Coordinates booking-context persistence in the in-process cache."""
+    """Điều phối việc lưu, tải và khóa BookingContext trong in-process cache."""
 
     # Khởi tạo lock theo conversation để nhiều request cùng session không ghi đè context.
     def __init__(self, *, cache: ContextStore) -> None:
@@ -97,7 +97,7 @@ class ConversationContextStore:
         self,
         conversation_id: str,
     ) -> AsyncIterator[None]:
-        """Serialize one conversation without blocking unrelated sessions."""
+        """Khóa theo conversation để các request cùng phiên không ghi đè context của nhau."""
         normalized_id = _validate_conversation_id(conversation_id)
         async with self._lock_registry_guard:
             entry = self._conversation_locks.get(normalized_id)
@@ -117,7 +117,7 @@ class ConversationContextStore:
 
     # Lấy bản sao BookingContext để controller xử lý trên working copy có thể rollback.
     async def get_copy(self, conversation_id: str) -> BookingContext:
-        """Load an isolated working context or create one on a cache miss."""
+        """Lấy working copy tách biệt của BookingContext hoặc tạo mới nếu cache chưa có."""
         normalized_id = _validate_conversation_id(conversation_id)
         context = await self._cache.get(normalized_id)
         if context is None:
@@ -138,7 +138,7 @@ class ConversationContextStore:
         conversation_id: str,
         context: BookingContext,
     ) -> None:
-        """Commit an isolated snapshot under the conversation key."""
+        """Lưu snapshot đã kiểm tra của BookingContext dưới đúng conversation key."""
         normalized_id = _validate_conversation_id(conversation_id)
         if not isinstance(context, BookingContext):
             raise InvalidConversationContextError("Conversation context must be a BookingContext.")
@@ -150,7 +150,7 @@ class ConversationContextStore:
 
     # Reset một conversation về context mới nhưng vẫn giữ conversation_id ổn định.
     async def reset(self, conversation_id: str) -> BookingContext:
-        """Replace cached state with a new idle context for the conversation."""
+        """Reset conversation về một idle context mới nhưng vẫn giữ nguyên conversation_id."""
         normalized_id = _validate_conversation_id(conversation_id)
         context = BookingContext(conversation_id=normalized_id)
         await self._cache.save(context)
@@ -159,7 +159,7 @@ class ConversationContextStore:
 
 @dataclass(slots=True)
 class ApplicationContainer:
-    """Own the assembled application dependencies and their resource lifecycle."""
+    """Chứa toàn bộ dependency đã được wire và quản lý tài nguyên sống theo app lifespan."""
 
     http_client: httpx.AsyncClient
     booking_gateway: BookingGateway
@@ -188,7 +188,7 @@ class ApplicationContainer:
 
     # Trả về handler đã wire sẵn để các fallback path không tự tạo dependency mới.
     def handler(self, handler_type: type[object]) -> object:
-        """Return one already-composed handler by its concrete application type."""
+        """Trả về handler đã được compose sẵn theo đúng concrete type của application layer."""
         for configured in self._handlers:
             if isinstance(configured, handler_type):
                 return configured
@@ -196,7 +196,7 @@ class ApplicationContainer:
 
     # Đóng các tài nguyên async dùng chung như HTTP client khi app shutdown.
     async def close(self) -> None:
-        """Close only resources created and owned by this container."""
+        """Đóng các tài nguyên async do chính container tạo và sở hữu."""
         if self._closed:
             return
         self._closed = True
@@ -215,7 +215,7 @@ async def create_application_container(
     llm_gateway: LLMGateway | None = None,
     knowledge_gateway: KnowledgeGateway | None = None,
 ) -> ApplicationContainer:
-    """Build an isolated application object graph from validated runtime settings."""
+    """Tạo toàn bộ object graph production từ runtime settings đã qua kiểm tra."""
     _validate_settings(settings)
     owns_http_client = http_client is None
     client = http_client or httpx.AsyncClient(
@@ -359,7 +359,7 @@ async def create_application_container(
 async def application_container_lifespan(
     settings: Settings,
 ) -> AsyncIterator[ApplicationContainer]:
-    """Yield one container and reliably release its owned resources."""
+    """Cấp ra một ApplicationContainer và đảm bảo đóng tài nguyên khi lifespan kết thúc."""
     container = await create_application_container(settings)
     try:
         yield container
@@ -375,7 +375,7 @@ def validate_runtime_flow(
     *,
     change_rules: Mapping[str, ChangeRule] | None = None,
 ) -> None:
-    """Fail fast when declarative flow references cannot be served at runtime."""
+    """Kiểm tra sớm flow khai báo có thể được phục vụ đầy đủ bởi runtime hiện tại hay không."""
     declared_actions: list[str] = []
     declared_templates: list[str] = []
     declared_intents: set[str] = set()

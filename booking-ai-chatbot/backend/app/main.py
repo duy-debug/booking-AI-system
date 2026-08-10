@@ -1,4 +1,4 @@
-"""Create the FastAPI application and own its dependency lifespan."""
+"""Khởi tạo ứng dụng FastAPI và quản lý vòng đời dependency của chatbot."""
 
 import os
 from collections.abc import AsyncIterator
@@ -42,7 +42,7 @@ def _enabled_qdrant_port(enabled: bool) -> int:
 
 # Tạo FastAPI app, wire middleware và mount toàn bộ transport endpoint của chatbot.
 def create_app(settings: Settings) -> FastAPI:
-    """Create one application whose container lives for the app lifespan."""
+    """Tạo một ứng dụng FastAPI với container sống theo đúng lifespan của app."""
 
     @asynccontextmanager
     # Khởi tạo và đóng ApplicationContainer theo vòng đời thật của FastAPI.

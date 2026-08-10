@@ -1,4 +1,6 @@
-# Giải quyết các transition khai báo của luồng hội thoại đặt lịch.
+"""
+Giải quyết các transition khai báo của luồng hội thoại đặt lịch.
+"""
 
 import logging
 import operator
@@ -23,18 +25,24 @@ from app.infrastructure.context_store import trace_log
 
 
 class FailureSource(Protocol):
-    # Lộ ra các nhánh `on_fail` để state machine có thể chọn nhánh recovery.
+    """
+    Lộ ra các nhánh `on_fail` để state machine có thể chọn nhánh recovery.
+    """
 
     @property
     def on_fail(self) -> tuple[FlowFailure, ...]:
-        # Trả các nhánh failure theo đúng thứ tự khai báo trong flow.
+        """
+        Trả các nhánh failure theo đúng thứ tự khai báo trong flow.
+        """
         ...
 
 
 class StateMachine:
-    # Tính toán transition hợp lệ từ flow JSON mà không tự chạy business action.
-    # Lớp này chỉ đọc `BookingContext`, intent đã được NLU chuẩn hóa và các
-    # điều kiện declarative trong flow để quyết định đi tiếp sang state nào.
+    """
+    Tính toán transition hợp lệ từ flow JSON mà không tự chạy business action.
+    Lớp này chỉ đọc `BookingContext`, intent đã được NLU chuẩn hóa và các
+    điều kiện declarative trong flow để quyết định đi tiếp sang state nào.
+    """
 
     _COLLECTION_TYPES = (tuple, list, set, frozenset)
 
@@ -342,7 +350,9 @@ class StateMachine:
 
     # Lấy định nghĩa state đã parse hoặc fail fast nếu flow thiếu state.
     def get_state_definition(self, state: BookingState) -> FlowState:
-        # Trả định nghĩa flow của state hiện tại hoặc fail fast nếu flow thiếu state.
+        """
+        Trả định nghĩa flow của state hiện tại hoặc fail fast nếu flow thiếu state.
+        """
         try:
             return self._flow.states[state]
         except KeyError as exc:

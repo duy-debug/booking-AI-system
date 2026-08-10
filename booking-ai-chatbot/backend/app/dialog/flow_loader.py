@@ -1,4 +1,4 @@
-"""Load and validate declarative booking dialog flow definitions."""
+"""Đọc và kiểm tra các định nghĩa flow hội thoại đặt lịch ở dạng khai báo."""
 
 import json
 import re
@@ -15,7 +15,7 @@ _FORBIDDEN_FAILURE_ACTIONS = frozenset({"create_booking"})
 
 @dataclass(frozen=True, slots=True)
 class FlowCondition:
-    """Represents a parsed condition that is not evaluated by the loader."""
+    """Biểu diễn một điều kiện đã parse nhưng chưa được đánh giá ở tầng loader."""
 
     field: str | None = None
     op: str = ""
@@ -26,7 +26,7 @@ class FlowCondition:
 
 @dataclass(frozen=True, slots=True)
 class FlowFailure:
-    """Defines a declarative failure route."""
+    """Khai báo một nhánh recovery khi action hoặc transition thất bại."""
 
     condition: str
     target: BookingState
@@ -36,7 +36,7 @@ class FlowFailure:
 
 @dataclass(frozen=True, slots=True)
 class FlowTransition:
-    """Defines an intent-driven transition to another booking state."""
+    """Khai báo một transition sang state khác được kích hoạt bởi intent."""
 
     intent: str
     target: BookingState
@@ -47,7 +47,7 @@ class FlowTransition:
 
 @dataclass(frozen=True, slots=True)
 class FlowAutoTransition:
-    """Defines a condition-driven transition for future evaluation."""
+    """Khai báo một auto transition sẽ được state machine đánh giá sau này."""
 
     condition: FlowCondition
     target: BookingState
@@ -57,7 +57,7 @@ class FlowAutoTransition:
 
 @dataclass(frozen=True, slots=True)
 class FlowOnEnter:
-    """Defines declarative behavior when entering a state."""
+    """Khai báo hành vi sẽ chạy ngay khi context vừa đi vào một state."""
 
     instruction_template: str | None = None
     actions: tuple[str, ...] = ()
@@ -66,7 +66,7 @@ class FlowOnEnter:
 
 @dataclass(frozen=True, slots=True)
 class PhoneSplitConfig:
-    """Contains configuration reserved for a future phone split runtime."""
+    """Chứa cấu hình cho nhánh tách luồng nhập số điện thoại nếu flow có khai báo."""
 
     segment_count: int
     max_full_resets: int
@@ -75,7 +75,7 @@ class PhoneSplitConfig:
 
 @dataclass(frozen=True, slots=True)
 class FlowState:
-    """Defines dialog behavior configured for one booking state."""
+    """Chứa toàn bộ hành vi flow được cấu hình cho một booking state cụ thể."""
 
     description: str | None
     on_enter: FlowOnEnter
@@ -87,7 +87,7 @@ class FlowState:
 
 @dataclass(frozen=True, slots=True)
 class FlowDefinition:
-    """Contains a validated booking dialog flow definition."""
+    """Chứa định nghĩa flow booking đã được parse và kiểm tra hợp lệ."""
 
     version: str
     name: str
@@ -98,7 +98,7 @@ class FlowDefinition:
 
 @dataclass(frozen=True, slots=True)
 class ChangeRule:
-    """Defines one declarative in-progress booking change route."""
+    """Khai báo một quy tắc chỉnh sửa draft booking đang diễn ra."""
 
     reset_action: str
     next_state: BookingState
@@ -107,20 +107,20 @@ class ChangeRule:
 
 
 class InvalidFlowDefinitionError(ValueError):
-    """Raised when a booking flow definition is invalid."""
+    """Phát sinh khi định nghĩa booking flow không hợp lệ."""
 
 
 class InvalidFlowConditionError(ValueError):
-    """Raised when a flow condition has an invalid runtime configuration."""
+    """Phát sinh khi một flow condition có cấu hình runtime không hợp lệ."""
 
 
 class FlowLoader:
-    """Loads and validates booking dialog flow definitions."""
+    """Đọc file flow và kiểm tra toàn bộ contract khai báo trước khi chạy runtime."""
 
     @staticmethod
     # Đọc booking_flow.json và validate toàn bộ state/transition trước runtime.
     def load(path: Path) -> FlowDefinition:
-        """Load a UTF-8 JSON flow definition from a filesystem path."""
+        """Đọc định nghĩa flow JSON UTF-8 từ filesystem và parse thành FlowDefinition."""
         with path.open("r", encoding="utf-8") as flow_file:
             raw: object = json.load(flow_file)
         root = _object(raw, "Flow root must be a JSON object.")
@@ -143,7 +143,7 @@ class FlowLoader:
     @staticmethod
     # Đọc mapping change target -> reset action để DialogController xử lý chỉnh sửa booking.
     def load_change_handlers(path: Path) -> dict[str, ChangeRule]:
-        """Load the compact target-to-change-rule mapping."""
+        """Đọc bảng ánh xạ ngắn gọn từ change_target sang ChangeRule."""
         with path.open("r", encoding="utf-8") as handlers_file:
             raw: object = json.load(handlers_file)
         document = _object(raw, "Change handlers root must be a JSON object.")

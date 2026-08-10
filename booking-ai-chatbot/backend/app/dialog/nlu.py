@@ -923,7 +923,9 @@ _INTENT_TOOL: dict[str, object] = {
 
 # Parse structured/tool response của Gemini thành danh sách IntentCandidate hợp lệ.
 def _parse_llm_candidates(response: LLMResponse) -> list[IntentCandidate]:
-    # Runtime mới ưu tiên tool/function calling candidates.
+    """
+    Runtime mới ưu tiên tool/function calling candidates.
+    """
     if response.tool_calls:
         call = response.tool_calls[0]
         if call.name != "extract_intent_candidates":

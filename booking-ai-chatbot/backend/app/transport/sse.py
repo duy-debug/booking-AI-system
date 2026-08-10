@@ -1,4 +1,6 @@
-# Mã hóa và stream các event SSE dạng JSON cho response hội thoại.
+"""
+Mã hóa và stream các event SSE dạng JSON cho response hội thoại.
+"""
 
 import asyncio
 import inspect
@@ -33,7 +35,9 @@ _EVENT_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
 
 
 class SSEEventType(StrEnum):
-    # Các event tầng nghiệp vụ mà endpoint SSE của chatbot phát ra.
+    """
+    Các event tầng nghiệp vụ mà endpoint SSE của chatbot phát ra.
+    """
 
     STARTED = "started"
     MESSAGE = "message"
@@ -42,12 +46,16 @@ class SSEEventType(StrEnum):
 
 
 class InvalidSSEEventError(ValueError):
-    # Phát sinh khi tên event hoặc payload SSE không hợp lệ.
+    """
+    Phát sinh khi tên event hoặc payload SSE không hợp lệ.
+    """
     pass
 
 
 class SSESerializationError(TypeError):
-    # Phát sinh khi payload SSE không thể serialize thành JSON.
+    """
+    Phát sinh khi payload SSE không thể serialize thành JSON.
+    """
     pass
 
 
