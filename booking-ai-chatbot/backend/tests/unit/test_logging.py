@@ -182,6 +182,32 @@ def test_console_trace_includes_bound_turn_sequence(
     assert "[NLU #3] resolved" in output
 
 
+def _emit_trace_from_helper() -> None:
+    trace_log(
+        logging.getLogger("app.trace"),
+        logging.INFO,
+        "Turn",
+        "started",
+        caller="ConversationContextStore.get_copy()",
+    )
+
+
+def test_trace_log_uses_logging_caller_metadata_and_preserves_business_caller(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.INFO, logger="app.trace"):
+        _emit_trace_from_helper()
+
+    record = caplog.records[-1]
+    assert record.funcName == "_emit_trace_from_helper"
+    assert getattr(record, "emitter", "") == (
+        "tests/unit/test_logging.py :: _emit_trace_from_helper()"
+    )
+    assert getattr(record, "caller", "") == "ConversationContextStore.get_copy()"
+    assert "emitter=tests/unit/test_logging.py :: _emit_trace_from_helper()" in caplog.text
+    assert "caller=ConversationContextStore.get_copy()" in caplog.text
+
+
 def test_redaction_masks_phone_but_preserves_uuid(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

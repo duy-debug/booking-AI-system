@@ -616,7 +616,7 @@ class LLMNLU:
         )
         trace_log(
             logging.getLogger(__name__),
-            logging.INFO,
+            logging.DEBUG,
             "[3] NLU",
             "nlu_started",
             provider="gemini",

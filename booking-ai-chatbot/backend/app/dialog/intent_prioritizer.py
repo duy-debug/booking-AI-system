@@ -80,7 +80,7 @@ class IntentPrioritizer:
         )
         trace_log(
             logging.getLogger(__name__),
-            logging.INFO,
+            logging.DEBUG,
             "[3] NLU",
             "intent_selected",
             current_state=state.value,

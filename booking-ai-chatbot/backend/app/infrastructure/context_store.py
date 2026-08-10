@@ -594,14 +594,22 @@ def trace_log(
     correlation = _correlation_marker.get()
     turn = _turn_marker.get()
     exc_info = fields.pop("_exc_info", False) is True
+    stacklevel = int(fields.pop("_stacklevel", 2))
     safe_fields = {key: _sanitize_value(key, value) for key, value in fields.items()}
     trace_context = current_trace_context()
     service = safe_fields.pop("service", _service_name)
+    pathname, lineno, func_name, _stack_info = logger.findCaller(
+        stack_info=False,
+        stacklevel=stacklevel,
+    )
+    emitter_path = _project_relative_path(pathname)
+    emitter = f"{emitter_path} :: {func_name}()"
     details = " ".join(f"{key}={value}" for key, value in safe_fields.items())
     component_marker = f"{component} #{turn}" if turn is not None else component
     message = f"[conv:{marker}] [{component_marker}] {event}"
     if trace_context.trace_id != "-":
         message = f"[trace:{trace_context.trace_id[:16]}] {message}"
+    message = f"{message} emitter={emitter}"
     if details:
         message = f"{message} {details}"
     if correlation != "-":
@@ -620,9 +628,14 @@ def trace_log(
             "component": component,
             "event": event,
             "turn_sequence": turn,
+            "emitter": emitter,
+            "emitter_path": emitter_path,
+            "emitter_func": func_name,
+            "emitter_lineno": lineno,
             **safe_fields,
         },
         exc_info=exc_info,
+        stacklevel=stacklevel,
     )
 
 
@@ -751,6 +764,14 @@ def _normalize_json_path(json_path: str | Path | None) -> Path | None:
     if isinstance(json_path, Path):
         return json_path
     raise ValueError("JSON log path must be a filesystem path.")
+
+
+def _project_relative_path(pathname: str) -> str:
+    path = Path(pathname).resolve()
+    try:
+        return path.relative_to(Path(__file__).resolve().parents[2]).as_posix()
+    except ValueError:
+        return path.name
 
 
 def _sanitize_value(key: str, value: object) -> object:

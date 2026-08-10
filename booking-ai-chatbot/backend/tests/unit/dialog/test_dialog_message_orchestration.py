@@ -431,11 +431,19 @@ async def test_turn_trace_logs_lifecycle_intent_transition_without_raw_content(
 
     output = caplog.text
     assert "[[1] REQUEST #1] request_started" in output
+    assert "emitter=app/dialog/dialog_controller.py :: _process_serialized_chat_message()" in output
     assert "[[2] CONTEXT #1] loaded" in output
+    assert "emitter=app/dialog/dialog_controller.py :: _trace_context_loaded()" in output
+    assert "caller=ConversationContextStore.get_copy()" in output
     assert "turn_failed" not in output
-    assert "[[5] ROUTING #1] dispatch route=dialog" in output
+    assert "[[5] ROUTING #1] dispatch" in output
+    assert "emitter=app/dialog/dialog_controller.py :: _trace_route()" in output
+    assert "caller=_process_bound_chat_message()" in output
     assert "[[5] ROUTING #1] state_actions_completed" in output
+    assert "emitter=app/dialog/dialog_controller.py :: _process_bound_chat_message()" in output
     assert "[[8] CONTEXT SAVE #1] saved" in output
+    assert "emitter=app/dialog/dialog_controller.py :: _trace_context_saved()" in output
+    assert "caller=ConversationContextStore.save()" in output
     assert "[[7] RESPONSE #1] response_ready" in output
     assert "instruction_template=greeting" in output
     assert "private-conversation-id" not in output

@@ -1296,6 +1296,7 @@ def _trace_route(
         logging.INFO,
         "[5] ROUTING",
         "dispatch",
+        caller="_process_bound_chat_message()",
         route=route,
         reason=reason,
         intent=result.intent or "unresolved",
@@ -1320,6 +1321,7 @@ def _trace_context_saved(context: BookingContext) -> None:
         logging.INFO,
         "[8] CONTEXT SAVE",
         "saved",
+        caller="ConversationContextStore.save()",
         snapshot=_context_log_snapshot(context),
     )
 
@@ -1331,6 +1333,7 @@ def _trace_context_loaded(context: BookingContext) -> None:
         logging.INFO,
         "[2] CONTEXT",
         "loaded",
+        caller="ConversationContextStore.get_copy()",
         snapshot=_context_log_snapshot(context),
     )
 

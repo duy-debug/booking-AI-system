@@ -109,6 +109,7 @@ class PosApiClient:
 
         payload = await self._request_json(
             operation="search_shops",
+            caller="search_shops",
             method="GET",
             path="/api/shops",
         )
@@ -126,6 +127,7 @@ class PosApiClient:
     ) -> list[ShopTherapist]:
         payload = await self._request_json(
             operation="search_shop_therapists",
+            caller="search_shop_therapists",
             method="GET",
             path=f"/api/shops/{shop_id}/therapists",
             params={"is_active": str(is_active).lower()},
@@ -148,6 +150,7 @@ class PosApiClient:
             params["course_type"] = request.course_type.value
         payload = await self._request_json(
             operation="search_courses",
+            caller="search_courses",
             method="GET",
             path=f"/api/shops/{request.shop_id}/courses",
             params=params,
@@ -168,6 +171,7 @@ class PosApiClient:
         params = _availability_params(request)
         payload = await self._request_json(
             operation="get_available_slots",
+            caller="get_available_slots",
             method="GET",
             path=f"/api/shops/{request.shop_id}/available-slots",
             params=params,
@@ -202,6 +206,7 @@ class PosApiClient:
             params["gender"] = request.gender.value
         payload = await self._request_json(
             operation="search_available_therapists",
+            caller="search_available_therapists",
             method="GET",
             path=f"/api/shops/{request.shop_id}/available-therapists",
             params=params,
@@ -231,6 +236,7 @@ class PosApiClient:
         """Verify membership and NG eligibility for a phone at one shop."""
         payload = await self._request_json(
             operation="verify_customer",
+            caller="verify_customer",
             method="POST",
             path="/api/booking-eligibility-checks",
             json_body={"shop_id": str(request.shop_id), "phone": request.phone},
@@ -248,6 +254,7 @@ class PosApiClient:
         params["start_time"] = request.start_time.isoformat(timespec="minutes")
         payload = await self._request_json(
             operation="check_final_availability",
+            caller="check_final_availability",
             method="GET",
             path=f"/api/shops/{request.shop_id}/available-slots",
             params=params,
@@ -281,6 +288,7 @@ class PosApiClient:
         body = _create_booking_body(request)
         payload = await self._request_json(
             operation="create_booking",
+            caller="create_booking",
             method="POST",
             path="/api/bookings",
             headers={"Idempotency-Key": request.idempotency_key},
@@ -320,6 +328,7 @@ class PosApiClient:
         self,
         *,
         operation: str,
+        caller: str,
         method: str,
         path: str,
         params: Mapping[str, str] | None = None,
@@ -338,7 +347,7 @@ class PosApiClient:
             "PosApiClient",
             "pos_api_started",
             operation=operation,
-            function="_request_json",
+            caller=f"PosApiClient.{caller}()",
             method=method,
             path=path,
             target_service="pos-backend",
@@ -430,6 +439,7 @@ class PosApiClient:
             "PosApiClient",
             "pos_api_completed",
             operation=operation,
+            caller=f"PosApiClient.{caller}()",
             method=method,
             path=path,
             status_code=response.status_code,
