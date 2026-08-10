@@ -95,7 +95,7 @@ def test_json_formatter_is_valid_one_line_unicode_with_extra_fields() -> None:
     assert set(("timestamp", "level", "logger", "message")) <= set(payload)
 
 
-def test_json_formatter_serializes_and_redacts_exception() -> None:
+def test_json_formatter_serializes_exception_with_runtime_values() -> None:
     try:
         raise RuntimeError("failure for 0901234567")
     except RuntimeError as error:
@@ -105,11 +105,10 @@ def test_json_formatter_serializes_and_redacts_exception() -> None:
     payload = json.loads(rendered)
 
     assert "RuntimeError" in payload["exception"]
-    assert "0901234567" not in rendered
-    assert "[REDACTED_PHONE]" in rendered
+    assert "0901234567" in rendered
 
 
-def test_json_formatter_redacts_sensitive_message_and_nested_extra() -> None:
+def test_json_formatter_preserves_nested_runtime_values() -> None:
     rendered = JsonFormatter().format(
         record(
             "Authorization: Bearer private-token phone 0901234567",
@@ -121,12 +120,12 @@ def test_json_formatter_redacts_sensitive_message_and_nested_extra() -> None:
     )
     payload = json.loads(rendered)
 
-    assert "private-token" not in rendered
-    assert "top-secret" not in rendered
-    assert "0901234567" not in rendered
-    assert "0912345678" not in rendered
-    assert payload["api_key"] == "[REDACTED]"
-    assert payload["metadata"] == {"phone": "[REDACTED]", "safe": "visible"}
+    assert "private-token" in rendered
+    assert "top-secret" in rendered
+    assert "0901234567" in rendered
+    assert "0912345678" in rendered
+    assert payload["api_key"] == "top-secret"
+    assert payload["metadata"] == {"phone": "0912345678", "safe": "visible"}
 
 
 def test_conversation_marker_is_short_stable_and_non_reversible() -> None:
@@ -139,7 +138,7 @@ def test_conversation_marker_is_short_stable_and_non_reversible() -> None:
     assert marker not in conversation_id
 
 
-def test_console_trace_redacts_phone_authorization_and_idempotency(
+def test_console_trace_preserves_runtime_field_values(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     configure_logging(level="INFO", log_format="console")
@@ -153,15 +152,17 @@ def test_console_trace_redacts_phone_authorization_and_idempotency(
             phone="0901234567",
             authorization="Bearer private-token",
             idempotency_key="full-idempotency-key",
+            num_customer=1,
         )
     finally:
         reset_conversation(token)
     output = capsys.readouterr().out
 
     assert "conversation-private-value" not in output
-    assert "0901234567" not in output
-    assert "private-token" not in output
-    assert "full-idempotency-key" not in output
+    assert "0901234567" in output
+    assert "private-token" in output
+    assert "full-idempotency-key" in output
+    assert "num_customer=1" in output
     assert "[conv:" in output
     assert "[Turn] started" in output
 
@@ -208,7 +209,7 @@ def test_trace_log_uses_logging_caller_metadata_and_preserves_business_caller(
     assert "caller=ConversationContextStore.get_copy()" in caplog.text
 
 
-def test_redaction_masks_phone_but_preserves_uuid(
+def test_console_logging_preserves_phone_and_uuid(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     configure_logging(level="INFO", log_format="console")
@@ -217,21 +218,35 @@ def test_redaction_masks_phone_but_preserves_uuid(
     )
 
     output = capsys.readouterr().out
-    assert "0901234567" not in output
-    assert "[REDACTED_PHONE]" in output
+    assert "0901234567" in output
     assert "11111111-1111-1111-1111-111111111111" in output
 
 
-def test_console_redaction_preserves_iso_timestamp(
+def test_console_logging_keeps_runtime_values_visible(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     configure_logging(level="INFO", log_format="console")
-
-    logging.getLogger("app.trace").info("timestamp-safe")
+    trace_log(
+        logging.getLogger("app.trace"),
+        logging.INFO,
+        "Snapshot",
+        "values_visible",
+        requested_start_time="07:00",
+        booking_date="2026-08-11",
+        duration_minutes=60,
+        shop_name="Komorebi Tân Bình",
+        state="selecting_time",
+        intent="select_time",
+    )
     output = capsys.readouterr().out
 
-    assert "[REDACTED_PHONE]" not in output
-    assert "timestamp-safe" in output
+    assert "REDACTED" not in output
+    assert "requested_start_time=07:00" in output
+    assert "booking_date=2026-08-11" in output
+    assert "duration_minutes=60" in output
+    assert "shop_name=Komorebi Tân Bình" in output
+    assert "state=selecting_time" in output
+    assert "intent=select_time" in output
 
 
 def test_optional_json_file_uses_rotation_utf8_and_creates_parent(

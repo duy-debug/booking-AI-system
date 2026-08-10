@@ -13,9 +13,6 @@ from app.infrastructure.context_store import (
     TraceMiddleware,
     bind_trace_context,
     current_trace_context,
-    mask_email,
-    mask_phone,
-    redact_headers,
     reset_trace_context,
 )
 from app.infrastructure.pos_api_client import PosApiClient
@@ -101,10 +98,3 @@ def test_json_log_has_mandatory_trace_fields() -> None:
     assert payload["component"] == "app.test"
     assert payload["event"] == "log_record"
     assert payload["trace_id"] == "trace-json"
-
-
-def test_shared_sensitive_data_masks_customer_and_credentials() -> None:
-    assert mask_phone("0912345678") == "091***5678"
-    assert mask_email("duy@example.com") == "d***@example.com"
-    headers = redact_headers({"Authorization": "Bearer private", "X-Trace-ID": "trace-safe"})
-    assert headers == {"Authorization": "***", "X-Trace-ID": "trace-safe"}

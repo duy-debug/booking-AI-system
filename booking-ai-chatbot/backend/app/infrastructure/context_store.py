@@ -58,136 +58,6 @@ class Settings:
     rag_hybrid_score_threshold: float = 0.45
 
 
-# Che dữ liệu nhạy cảm và rút gọn payload dùng cho logging/observability.
-
-import re
-from collections.abc import Mapping
-
-_PHONE = re.compile(r"(?<!\d)\+?\d(?:[ -]?\d){8,14}(?!\d)")
-_EMAIL = re.compile(r"\b([^\s@])[^\s@]*@([^\s@]+)\b")
-_BEARER = re.compile(r"(?i)\bBearer\s+[^\s,;]+")
-_UUID = re.compile(
-    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
-)
-_SECRET_KEYS = frozenset(
-    {
-        "authorization",
-        "api_key",
-        "access_token",
-        "refresh_token",
-        "password",
-        "cookie",
-        "secret",
-    }
-)
-
-
-def mask_phone(value: str) -> str:
-    """
-    Che số điện thoại nhưng vẫn giữ một phần prefix/suffix để tiện đối chiếu log.
-    """
-    digits = "".join(character for character in value if character.isdigit())
-    if len(digits) < 7:
-        return "***"
-    return f"{digits[:3]}***{digits[-4:]}"
-
-
-def mask_email(value: str) -> str:
-    """
-    Che phần local của email trước khi đưa vào log hoặc metadata quan sát.
-    """
-    match = _EMAIL.fullmatch(value.strip())
-    if match is None:
-        return "***"
-    return f"{match.group(1)}***@{match.group(2)}"
-
-
-def redact_headers(headers: Mapping[str, str]) -> dict[str, str]:
-    """
-    Loại bỏ credential khỏi headers nhưng vẫn giữ metadata trace an toàn.
-    """
-    return {
-        key: "***" if _is_secret_key(key) else sanitize_text(value)
-        for key, value in headers.items()
-    }
-
-
-def sanitize_dict(values: Mapping[str, object]) -> dict[str, object]:
-    """
-    Làm sạch đệ quy một mapping trước khi log mà không ép serialize object tùy ý.
-    """
-    return {str(key): sanitize_value(str(key), value) for key, value in values.items()}
-
-
-def sanitize_value(key: str, value: object) -> object:
-    """
-    Làm sạch một giá trị structured dựa trên tên field nghiệp vụ của nó.
-    """
-    normalized = key.casefold().replace("-", "_")
-    if _is_secret_key(normalized) or "idempotency" in normalized:
-        return "***"
-    if "phone" in normalized:
-        return mask_phone(str(value)) if value is not None else None
-    if "email" in normalized:
-        return mask_email(str(value)) if value is not None else None
-    if isinstance(value, str):
-        return sanitize_text(value)
-    if isinstance(value, Mapping):
-        return sanitize_dict(value)
-    if isinstance(value, list | tuple | set | frozenset):
-        return [sanitize_value(key, item) for item in value]
-    if value is None or isinstance(value, bool | int | float):
-        return value
-    return str(value)
-
-
-def sanitize_text(value: str) -> str:
-    """
-    Che token, phone, email trong text tự do trước khi text đi vào log.
-    """
-    protected: list[str] = []
-    sanitized = _UUID.sub(
-        lambda match: _protect(match.group(0), protected),
-        value,
-    )
-    sanitized = _BEARER.sub("Bearer ***", sanitized)
-    sanitized = _PHONE.sub(lambda match: mask_phone(match.group(0)), sanitized)
-    sanitized = _EMAIL.sub(
-        lambda match: f"{match.group(1)}***@{match.group(2)}",
-        sanitized,
-    )
-    return _restore(sanitized, protected)
-
-
-def sanitize_exception_data(error: BaseException) -> dict[str, str]:
-    """
-    Trả về metadata exception an toàn mà không lộ raw payload từ provider ngoài.
-    """
-    return {
-        "exception_type": type(error).__name__,
-        "exception_message": sanitize_text(str(error)),
-    }
-
-
-def _is_secret_key(key: str) -> bool:
-    normalized = key.casefold().replace("-", "_")
-    return normalized in _SECRET_KEYS or any(
-        part in normalized for part in ("api_key", "token", "password", "secret")
-    )
-
-
-def _protect(value: str, protected: list[str]) -> str:
-    protected.append(value)
-    return f"\x00UUID{len(protected) - 1}\x00"
-
-
-def _restore(value: str, protected: list[str]) -> str:
-    for index, original in enumerate(protected):
-        value = value.replace(f"\x00UUID{index}\x00", original)
-    return value
-
-
 # Quản lý trace context an toàn cho async và propagate header qua FastAPI/ASGI.
 
 import logging
@@ -511,44 +381,14 @@ import re
 import sys
 from collections.abc import Mapping
 from contextvars import ContextVar, Token
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
+from enum import Enum
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 _CONSOLE_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 _VALID_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 _VALID_FORMATS = {"console", "json"}
-_PHONE_PATTERN = re.compile(
-    r"(?<![\d-])"
-    r"(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
-    r"(?!\d{4}-\d{2}-\d{2})\+?\d(?:[ -]?\d){8,14}(?!\d)"
-)
-_BEARER_PATTERN = re.compile(r"(?i)\bBearer\s+[^\s,;]+")
-_UUID_PATTERN = re.compile(
-    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
-)
-_SECRET_ASSIGNMENT_PATTERN = re.compile(
-    r"(?i)\b(api[_-]?key|authorization|idempotency[_-]?key|password|secret|token)"
-    r"\s*[:=]\s*[^\s,;]+"
-)
-_SENSITIVE_KEY_PARTS = {
-    "api_key",
-    "authorization",
-    "booking_api_service_key",
-    "content",
-    "customer",
-    "idempotency",
-    "password",
-    "payload",
-    "phone",
-    "qdrant_api_key",
-    "request",
-    "response",
-    "secret",
-    "token",
-    "vector",
-}
 _RESERVED_RECORD_FIELDS = frozenset(std_logging.LogRecord("", 0, "", 0, "", (), None).__dict__) | {
     "message",
     "asctime",
@@ -561,11 +401,11 @@ _service_name = "booking-chatbot"
 
 class SafeConsoleFormatter(std_logging.Formatter):
     """
-    Áp dụng các quy tắc che dữ liệu chung cho console log dễ đọc.
+    Render console log trực tiếp để terminal hiển thị đúng dữ liệu runtime hiện tại.
     """
 
     def format(self, record: std_logging.LogRecord) -> str:
-        return _sanitize_text(super().format(record))
+        return super().format(record)
 
 
 def mask_conversation_id(conversation_id: str) -> str:
@@ -627,22 +467,23 @@ def trace_log(
     event: str,
     **fields: object,
 ) -> None:
-    # Ghi một trace an toàn của component với structured fields.
+    # Ghi một trace runtime với structured fields đã được chuẩn hóa kiểu log.
     marker = _conversation_marker.get()
     correlation = _correlation_marker.get()
     turn = _turn_marker.get()
     exc_info = fields.pop("_exc_info", False) is True
-    stacklevel = int(fields.pop("_stacklevel", 2))
-    safe_fields = {key: _sanitize_value(key, value) for key, value in fields.items()}
+    raw_stacklevel = fields.pop("_stacklevel", 2)
+    stacklevel = raw_stacklevel if type(raw_stacklevel) is int else 2
+    log_fields = {key: _log_value(value) for key, value in fields.items()}
     trace_context = current_trace_context()
-    service = safe_fields.pop("service", _service_name)
+    service = log_fields.pop("service", _service_name)
     pathname, lineno, func_name, _stack_info = logger.findCaller(
         stack_info=False,
         stacklevel=stacklevel,
     )
     emitter_path = _project_relative_path(pathname)
     emitter = f"{emitter_path} :: {func_name}()"
-    details = " ".join(f"{key}={value}" for key, value in safe_fields.items())
+    details = " ".join(f"{key}={value}" for key, value in log_fields.items())
     component_marker = f"{component} #{turn}" if turn is not None else component
     message = f"[conv:{marker}] [{component_marker}] {event}"
     if trace_context.trace_id != "-":
@@ -670,7 +511,7 @@ def trace_log(
             "emitter_path": emitter_path,
             "emitter_func": func_name,
             "emitter_lineno": lineno,
-            **safe_fields,
+            **log_fields,
         },
         exc_info=exc_info,
         stacklevel=stacklevel,
@@ -686,7 +527,7 @@ def elapsed_ms(started_at: float) -> int:
 
 class JsonFormatter(std_logging.Formatter):
     """
-    Format một LogRecord thành JSON đã che dữ liệu và giữ UTF-8.
+    Format một LogRecord thành JSON giữ nguyên dữ liệu runtime và UTF-8.
     """
 
     def format(self, record: std_logging.LogRecord) -> str:
@@ -705,14 +546,14 @@ class JsonFormatter(std_logging.Formatter):
                 current_trace_context().trace_id,
             ),
             "logger": record.name,
-            "message": _sanitize_text(record.getMessage()),
+            "message": record.getMessage(),
         }
         for key, value in record.__dict__.items():
             if key in _RESERVED_RECORD_FIELDS or key.startswith("_"):
                 continue
-            payload[key] = _sanitize_value(key, value)
+            payload[key] = _log_value(value)
         if record.exc_info is not None:
-            payload["exception"] = _sanitize_text(self.formatException(record.exc_info))
+            payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
@@ -816,59 +657,25 @@ def _project_relative_path(pathname: str) -> str:
         return path.name
 
 
-def _sanitize_value(key: str, value: object) -> object:
-    normalized_key = key.casefold().replace("-", "_")
-    if normalized_key in {
-        "payload_keys",
-        "request_keys",
-        "response_keys",
-        "content_length",
-        "response_length",
-        "message_length",
-        "prompt_chars",
-    }:
+def _log_value(value: object) -> object:
+    # Chuẩn hóa giá trị log đệ quy để console và JSON cùng hiển thị dữ liệu thật.
+    if value is None or isinstance(value, bool | int | float | str):
         return value
-    if normalized_key in {
-        "input_tokens",
-        "output_tokens",
-        "total_tokens",
-        "vector_candidate_count",
-        "lexical_candidate_count",
-    }:
-        return value if type(value) is int and value >= 0 else "[REDACTED]"
-    if any(part in normalized_key for part in _SENSITIVE_KEY_PARTS):
-        return "[REDACTED]"
-    if isinstance(value, str):
-        return _sanitize_text(value)
+    if isinstance(value, datetime):
+        return value.isoformat(timespec="seconds")
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, time):
+        return value.isoformat(timespec="minutes")
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, Path):
+        return str(value)
     if isinstance(value, Mapping):
-        return {
-            str(nested_key): _sanitize_value(str(nested_key), nested_value)
-            for nested_key, nested_value in value.items()
-        }
-    if isinstance(value, list | tuple):
-        return [_sanitize_value(key, item) for item in value]
-    if value is None or isinstance(value, bool | int | float):
-        return value
+        return {str(key): _log_value(nested_value) for key, nested_value in value.items()}
+    if isinstance(value, list | tuple | set | frozenset):
+        return [_log_value(item) for item in value]
     return str(value)
-
-
-def _sanitize_text(value: str) -> str:
-    protected: list[str] = []
-
-    def protect_uuid(match: re.Match[str]) -> str:
-        protected.append(match.group(0))
-        return f"\x00UUID{len(protected) - 1}\x00"
-
-    sanitized = _UUID_PATTERN.sub(protect_uuid, value)
-    sanitized = _BEARER_PATTERN.sub("Bearer [REDACTED]", sanitized)
-    sanitized = _SECRET_ASSIGNMENT_PATTERN.sub(
-        lambda match: f"{match.group(1)}=[REDACTED]",
-        sanitized,
-    )
-    sanitized = _PHONE_PATTERN.sub("[REDACTED_PHONE]", sanitized)
-    for index, uuid_value in enumerate(protected):
-        sanitized = sanitized.replace(f"\x00UUID{index}\x00", uuid_value)
-    return sanitized
 
 
 # Lưu `BookingContext` trong memory theo `conversation_id`.
