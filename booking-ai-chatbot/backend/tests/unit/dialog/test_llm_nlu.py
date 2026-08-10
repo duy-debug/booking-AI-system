@@ -69,6 +69,24 @@ def policy() -> StateIntentPolicy:
     )
 
 
+def draft_change_policy() -> StateIntentPolicy:
+    allowed = {
+        BookingState.SELECTING_SHOP: frozenset({"change_info", "unknown"}),
+        BookingState.SELECTING_DURATION: frozenset({"change_info", "unknown"}),
+        BookingState.SELECTING_SERVICE: frozenset({"change_info", "unknown"}),
+        BookingState.SELECTING_TIME: frozenset({"change_info", "select_time", "unknown"}),
+        BookingState.SELECTING_THERAPIST: frozenset({"change_info", "unknown"}),
+        BookingState.COLLECTING_PHONE: frozenset({"change_info", "provide_phone", "unknown"}),
+        BookingState.AWAITING_CONFIRMATION: frozenset(
+            {"change_info", "confirm", "deny", "unknown"}
+        ),
+    }
+    return StateIntentPolicy(
+        {state: intents | {"ask_question"} for state, intents in allowed.items()},
+        frozenset(),
+    )
+
+
 def structured(
     *,
     intent: str,
@@ -360,6 +378,133 @@ async def test_llm_change_output_maps_target_and_primitive_value() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "state",
+    [
+        BookingState.SELECTING_SHOP,
+        BookingState.SELECTING_DURATION,
+        BookingState.SELECTING_SERVICE,
+        BookingState.SELECTING_TIME,
+        BookingState.SELECTING_THERAPIST,
+        BookingState.COLLECTING_PHONE,
+        BookingState.AWAITING_CONFIRMATION,
+    ],
+)
+async def test_llm_change_info_is_supported_across_draft_states_when_policy_allows_it(
+    state: BookingState,
+) -> None:
+    gateway = FakeLLMGateway(
+        LLMResponse(
+            content=structured(
+                intent="change_booking_field",
+                entities={"change_target": "duration"},
+            )
+        )
+    )
+    fallback = LLMNLU(llm_gateway=gateway, intent_policy=draft_change_policy())
+
+    result = await fallback.parse(
+        text="mình muốn chỉnh lại độ dài lịch hẹn",
+        state=state,
+    )
+
+    assert result.intent == "change_info"
+    assert result.payload == {"change_target": "duration"}
+    assert result.resolution_status is NLUResolutionStatus.RESOLVED
+    assert gateway.calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("text", "raw_entities", "expected_payload"),
+    [
+        (
+            "mình muốn điều chỉnh độ dài buổi hẹn",
+            {"change_target": "duration"},
+            {"change_target": "duration"},
+        ),
+        (
+            "dời khung giờ giúp mình nhé",
+            {"change_target": "time"},
+            {"change_target": "time"},
+        ),
+        (
+            "cập nhật lại số liên hệ cho mình",
+            {"change_target": "phone"},
+            {"change_target": "phone"},
+        ),
+    ],
+)
+async def test_llm_change_output_maps_semantic_targets_without_backend_inference(
+    text: str,
+    raw_entities: dict[str, object],
+    expected_payload: dict[str, object],
+) -> None:
+    fallback, gateway = fallback_for(
+        structured(
+            intent="change_booking_field",
+            entities=raw_entities,
+        )
+    )
+
+    result = await fallback.parse(
+        text=text,
+        state=BookingState.AWAITING_CONFIRMATION,
+    )
+
+    assert result.intent == "change_info"
+    assert result.payload == expected_payload
+    assert gateway.calls == 1
+    prompt = gateway.messages[0].content
+    assert "infer change_target from the semantic concept being modified" in prompt
+    assert "Do not guess a target." in prompt
+    assert text not in prompt
+
+
+@pytest.mark.asyncio
+async def test_llm_change_output_allows_generic_change_without_target() -> None:
+    fallback, gateway = fallback_for(
+        structured(
+            intent="change_booking_field",
+            entities={"change_target": None},
+        )
+    )
+
+    text = "mình cần chỉnh lại vài thông tin của lịch hẹn này"
+    result = await fallback.parse(text=text, state=BookingState.AWAITING_CONFIRMATION)
+
+    assert result.intent == "change_info"
+    assert result.payload == {}
+    assert result.resolution_status is NLUResolutionStatus.RESOLVED
+    assert gateway.calls == 1
+    assert text not in gateway.messages[0].content
+
+
+@pytest.mark.asyncio
+async def test_existing_booking_change_from_idle_is_not_collapsed_into_change_info() -> None:
+    fallback, gateway = fallback_for(
+        structured(
+            intent="change_booking_field",
+            entities={"change_target": None},
+        )
+    )
+
+    result = await fallback.parse(
+        text="mình muốn dời lịch đã tạo sang ngày khác",
+        state=BookingState.IDLE,
+    )
+
+    assert result.resolution_status is NLUResolutionStatus.UNRESOLVED
+    assert result.intent is None
+    assert result.payload == {}
+    assert gateway.calls == 1
+    assert (
+        "Requests to modify, reschedule, or cancel an already-created booking"
+        in gateway.messages[0].content
+    )
+
+
+@pytest.mark.asyncio
 async def test_llm_change_shop_query_stays_domain_neutral() -> None:
     fallback, _ = fallback_for(
         structured(
@@ -558,6 +703,8 @@ async def test_therapist_none_becomes_entity_query() -> None:
         ("08:00", time(8, 0)),
         ("9:30", time(9, 30)),
         ("09:30", time(9, 30)),
+        ("10:00", time(10, 0)),
+        ("19:00", time(19, 0)),
     ],
 )
 async def test_select_time_accepts_single_or_double_digit_hour_formats(
@@ -574,6 +721,100 @@ async def test_select_time_accepts_single_or_double_digit_hour_formats(
     assert result.payload == {"start_time": expected}
     assert result.resolution_status is NLUResolutionStatus.RESOLVED
     assert gateway.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_select_time_prompt_uses_semantic_guidance_instead_of_exact_utterance_mapping(
+) -> None:
+    fallback, gateway = fallback_for(
+        structured(intent="select_time", entities={"start_time": "10:00"})
+    )
+
+    result = await fallback.parse(text="vậy tôi chọn 10h", state=BookingState.SELECTING_TIME)
+
+    assert result.intent == "select_time"
+    assert result.payload == {"start_time": time(10, 0)}
+    assert gateway.calls == 1
+    prompt = gateway.messages[0].content
+    assert "Treat the current state as conversational context only" in prompt
+    assert "When the user expresses a concrete desired booking start time" in prompt
+    assert (
+        "Understand natural, conversational, abbreviated, and contextual time expressions."
+        in prompt
+    )
+    assert "In selecting_time" not in prompt
+    assert "In awaiting_confirmation" not in prompt
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("text", "llm_time", "expected"),
+    [
+        ("chốt cho mình khung chín rưỡi sáng", "09:30", time(9, 30)),
+        ("mình lấy lịch tầm bảy giờ tối nhé", "19:00", time(19, 0)),
+    ],
+)
+async def test_select_time_semantic_paraphrases_do_not_need_verbatim_prompt_examples(
+    text: str,
+    llm_time: str,
+    expected: time,
+) -> None:
+    fallback, gateway = fallback_for(
+        structured(intent="select_time", entities={"start_time": llm_time})
+    )
+
+    result = await fallback.parse(text=text, state=BookingState.SELECTING_TIME)
+
+    assert result.intent == "select_time"
+    assert result.payload == {"start_time": expected}
+    assert result.resolution_status is NLUResolutionStatus.RESOLVED
+    assert gateway.calls == 1
+    assert text not in gateway.messages[0].content
+
+
+@pytest.mark.asyncio
+async def test_selecting_time_state_does_not_force_select_time_when_message_means_change_info(
+) -> None:
+    gateway = FakeLLMGateway(
+        LLMResponse(
+            content=structured(
+                intent="change_booking_field",
+                entities={"change_target": "duration"},
+            )
+        )
+    )
+    fallback = LLMNLU(llm_gateway=gateway, intent_policy=draft_change_policy())
+
+    result = await fallback.parse(
+        text="mình muốn chỉnh lại độ dài lịch hẹn",
+        state=BookingState.SELECTING_TIME,
+    )
+
+    assert result.intent == "change_info"
+    assert result.payload == {"change_target": "duration"}
+    assert result.resolution_status is NLUResolutionStatus.RESOLVED
+
+
+@pytest.mark.asyncio
+async def test_selecting_time_state_allows_unrelated_intent_when_semantics_match() -> None:
+    gateway = FakeLLMGateway(
+        LLMResponse(
+            content=structured(
+                intent="ask_question",
+                entities={"query": "Chi nhánh này có chỗ gửi xe không?"},
+            )
+        )
+    )
+    fallback = LLMNLU(llm_gateway=gateway, intent_policy=draft_change_policy())
+
+    result = await fallback.parse(
+        text="chi nhánh này có chỗ gửi xe không",
+        state=BookingState.SELECTING_TIME,
+    )
+
+    assert result.intent == "ask_question"
+    assert result.payload == {"query": "Chi nhánh này có chỗ gửi xe không?"}
+    assert result.resolution_status is NLUResolutionStatus.RESOLVED
 
 
 @pytest.mark.asyncio
@@ -674,7 +915,7 @@ async def test_prompt_is_state_aware_short_and_contains_no_context_data() -> Non
     assert "UUID" not in prompt
     assert "Asia/Ho_Chi_Minh" in prompt
     assert "Locale: vi-VN" in prompt
-    assert len(prompt) < 1300
+    assert len(prompt) < 2300
 
 
 @pytest.mark.asyncio

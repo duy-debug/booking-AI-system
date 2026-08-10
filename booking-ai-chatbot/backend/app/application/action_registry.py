@@ -1003,6 +1003,7 @@ class ActionRegistry:
         return ActionResult("create_booking", result.data["create_result"])
 
 
+
 # Chuyển HandlerResult không thành công thành lỗi để StateMachine đi failure path.
 def _ensure_success(result: HandlerResult) -> None:
     if result.outcome is HandlerOutcome.SUCCESS:

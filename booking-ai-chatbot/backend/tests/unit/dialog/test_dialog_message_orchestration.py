@@ -291,6 +291,17 @@ def change_nlu() -> NLUResult:
     )
 
 
+def generic_change_nlu() -> NLUResult:
+    return NLUResult(
+        intent="change_info",
+        payload={},
+        confidence=1.0,
+        source=NLUSource.LLM,
+        resolution_status=NLUResolutionStatus.RESOLVED,
+        matched_rule="change_booking_field",
+    )
+
+
 def faq_nlu(query: str) -> NLUResult:
     return NLUResult(
         intent="ask_question",
@@ -823,6 +834,31 @@ async def test_failed_change_is_rendered_without_saving_partial_context() -> Non
     assert context.num_customer == 1
     assert len(fake.dialog_controller.calls) == 1
     assert fake.conversation_context_store.saved == [("conversation-a", context)]
+
+
+@pytest.mark.asyncio
+async def test_generic_change_request_returns_change_menu_without_dispatching_turn() -> None:
+    context = BookingContext(
+        "conversation-a",
+        state=BookingState.AWAITING_CONFIRMATION,
+    )
+    fake = FakeContainer(context=context, nlu_result=generic_change_nlu())
+
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
+
+    assert fake.dialog_controller.calls == []
+    assert response.state is BookingState.AWAITING_CONFIRMATION
+    assert response.quick_replies == (
+        "Đổi cửa hàng",
+        "Đổi ngày",
+        "Đổi số người",
+        "Đổi thời lượng",
+        "Đổi liệu trình",
+        "Đổi giờ",
+        "Đổi kỹ thuật viên",
+        "Đổi số điện thoại",
+    )
+    assert "Bạn muốn chỉnh sửa thông tin nào?" in response.text
 
 
 def test_request_validation_trims_only_contract_fields() -> None:

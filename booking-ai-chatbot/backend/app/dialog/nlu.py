@@ -442,6 +442,8 @@ def _validate_dispatch_payload(
 
 # Validate change payload để chỉnh sửa booking luôn có target và value đúng kiểu.
 def _validate_change_payload(payload: Mapping[str, object]) -> None:
+    if not payload:
+        return
     target = payload.get("change_target")
     value_contracts: dict[str, tuple[str, type[object]]] = {
         "shop": ("shop", Shop),
@@ -787,6 +789,8 @@ def _build_llm_messages(
         "Classify one booking message. Return JSON only with keys intent, confidence, "
         "entities, entity_kind, entity_query. "
         f"Current state: {state.value}. Allowed intents: {intents}. "
+        "Treat the current state as conversational context only; it must not override the "
+        "semantic intent expressed by the user's message. "
         f"Current business date: {current_datetime.date().isoformat()}. "
         f"Current local time: {current_datetime.time().isoformat(timespec='minutes')}. "
         f"Timezone: {business_timezone}. Locale: vi-VN. "
@@ -800,7 +804,18 @@ def _build_llm_messages(
         "skip_addon=true only for an explicit decline. Use change_info for booking edits, "
         "ask_question for FAQ, and list/search intents only for discovery. search_shops "
         "stores location in query. Shop/course/therapist selections use entity_kind and "
-        "entity_query; never invent IDs. Example: "
+        "entity_query; never invent IDs. When the user expresses a concrete desired booking "
+        "start time, classify the semantic intent as select_time and extract start_time. "
+        "Understand natural, conversational, abbreviated, and contextual time expressions. "
+        "Normalize only after the meaning is understood, and do not invent missing time "
+        "information. For change_info, infer change_target from the semantic concept being "
+        "modified using only these targets: shop, date, people, duration, service, time, "
+        "therapist, phone. If the user wants to edit the current draft booking but does not "
+        "name a field, use intent=change_info with change_target null. Do not guess a "
+        "target. change_info means modifying the current draft booking across any draft state "
+        "where the flow allows it. Requests to modify, reschedule, or cancel an "
+        "already-created booking are different intents and must not collapse into "
+        "change_info. Example: "
         '{"intent":"select_people","confidence":0.9,'
         '"entities":{"number_of_people":2},"entity_kind":null,'
         '"entity_query":null}.'
@@ -815,7 +830,15 @@ _INTENT_TOOL: dict[str, object] = {
     "type": "function",
     "function": {
         "name": "extract_intent_candidates",
-        "description": "Extract state-aware booking intents and primitive entities.",
+        "description": (
+            "Extract state-aware booking intents and primitive entities. Treat state as "
+            "conversational context, not as a rule that overrides the message meaning. "
+            "Interpret time semantically, then normalize an explicit booking time into "
+            "24-hour HH:MM. For draft-booking edits, set change_target to one of shop, "
+            "date, people, duration, service, time, therapist, phone; keep it null only "
+            "when the user asks to edit the current draft booking without naming a field. "
+            "Do not collapse requests about an already-created booking into change_info."
+        ),
         "parameters": {
             "type": "object",
             "additionalProperties": False,
@@ -839,13 +862,36 @@ _INTENT_TOOL: dict[str, object] = {
                                     "number_of_people": {"type": ["integer", "null"]},
                                     "duration_minutes": {"type": ["integer", "null"]},
                                     "booking_date": {"type": ["string", "null"]},
-                                    "start_time": {"type": ["string", "null"]},
+                                    "start_time": {
+                                        "type": ["string", "null"],
+                                        "description": (
+                                            "Explicit booking time normalized to 24-hour HH:MM, "
+                                            "for example 10:00 or 19:00."
+                                        ),
+                                    },
                                     "phone": {"type": ["string", "null"]},
                                     "confirmation": {"type": ["boolean", "null"]},
                                     "therapist_gender": {"type": ["string", "null"]},
                                     "therapist_name": {"type": ["string", "null"]},
                                     "customer_name": {"type": ["string", "null"]},
-                                    "change_target": {"type": ["string", "null"]},
+                                    "change_target": {
+                                        "type": ["string", "null"],
+                                        "enum": [
+                                            "shop",
+                                            "date",
+                                            "people",
+                                            "duration",
+                                            "service",
+                                            "time",
+                                            "therapist",
+                                            "phone",
+                                            None,
+                                        ],
+                                        "description": (
+                                            "Booking field the user wants to edit. Leave null "
+                                            "only for a generic edit request with no field."
+                                        ),
+                                    },
                                     "query": {"type": ["string", "null"]},
                                     "shop_name": {"type": ["string", "null"]},
                                     "service_name": {"type": ["string", "null"]},
@@ -937,14 +983,13 @@ def _llm_direct_payload(
         return {"name": name} if name else None
     return None
 
-
 # Map change target/value từ LLM thành payload chỉnh sửa booking an toàn.
 def _llm_change_payload(
     entities: LLMNLUEntities,
 ) -> dict[str, object] | None:
     target = entities.change_target
     if target is None:
-        return None
+        return {}
     payload: dict[str, object] = {"change_target": target}
     if target == "people" and entities.number_of_people is not None:
         payload["num_customer"] = entities.number_of_people
@@ -967,6 +1012,7 @@ def _llm_change_payload(
     return payload
 
 
+
 # Parse ngày ISO từ LLM thành date chuẩn, trả None nếu provider gửi sai format.
 def _llm_date_payload(value: str) -> dict[str, object] | None:
     if not _LLM_ISO_DATE_PATTERN.fullmatch(value):
@@ -987,6 +1033,7 @@ def _llm_time_payload(value: str) -> dict[str, object] | None:
         return {"start_time": time.fromisoformat(normalized)}
     except ValueError:
         return None
+
 
 
 # Gom entity từ các candidate phụ để controller có thể tiêu thụ field đã nói sớm.

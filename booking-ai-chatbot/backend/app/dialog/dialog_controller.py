@@ -847,6 +847,10 @@ async def _process_bound_chat_message(
         )
         return response
 
+    if nlu_result.intent == "change_info" and not nlu_result.payload:
+        _trace_route("change_info_menu", "llm_generic_change", nlu_result, context)
+        return _change_menu_response(context)
+
     if nlu_result.resolution_status is NLUResolutionStatus.UNRESOLVED:
         _trace_route("unresolved_recovery", "unresolved_recovery", nlu_result, context)
         return _handled_response(
