@@ -212,7 +212,7 @@ async def test_entity_query_uses_llm_once(
     context.state = BookingState.SELECTING_SHOP
     await container.conversation_context_store.save("conversation-a", context)
     gateway.content = output(
-        "select_shop",
+        "select_store",
         entity_kind="shop",
         entity_query="Tokyo",
     )
@@ -323,7 +323,7 @@ async def test_llm_shop_query_goes_through_entity_resolver_without_domain_object
     context.state = BookingState.SELECTING_SHOP
     await container.conversation_context_store.save("conversation-a", context)
     gateway.content = output(
-        "select_shop",
+        "select_store",
         entity_kind="shop",
         entity_query="quận 1",
     )
@@ -340,6 +340,62 @@ async def test_llm_shop_query_goes_through_entity_resolver_without_domain_object
     assert resolver.calls[0].payload == {}
     assert context.shop is None
     assert "Không tìm thấy cửa hàng" in response.text
+    assert external_requests == []
+
+
+@pytest.mark.asyncio
+async def test_llm_shop_name_reaches_resolver_and_selects_shop(
+    runtime: tuple[ApplicationContainer, FakeLLMGateway, list[httpx.Request]],
+) -> None:
+    container, gateway, external_requests = runtime
+    controller = spy_controller(container)
+    context = await container.conversation_context_store.get_copy("conversation-a")
+    context.state = BookingState.SELECTING_SHOP
+    await container.conversation_context_store.save("conversation-a", context)
+
+    class ShopResolverSpy:
+        def __init__(self) -> None:
+            self.calls: list[NLUResult] = []
+
+        async def resolve(
+            self,
+            *,
+            nlu_result: NLUResult,
+            state: BookingState,
+            context: BookingContext,
+        ) -> EntityResolutionResult:
+            self.calls.append(nlu_result)
+            return EntityResolutionResult(
+                status=EntityResolutionStatus.RESOLVED,
+                entity_kind=NLUEntityKind.SHOP,
+                dispatch_intent="select_store",
+                dispatch_payload={"shop": SHOP},
+                matched_count=1,
+            )
+
+    resolver = ShopResolverSpy()
+    container.entity_resolution_coordinator = cast(EntityResolutionCoordinator, resolver)
+    gateway.content = output(
+        "select_store",
+        entities={"shop_name": "Komorebi Tân Bình"},
+    )
+
+    response = await _process_chat_message(
+        request=request("cửa hàng này Komorebi Tân Bình"),
+        container=container,
+    )
+
+    stored = await container.conversation_context_store.get_copy("conversation-a")
+    assert gateway.calls == 1
+    assert len(resolver.calls) == 1
+    assert resolver.calls[0].entity_kind is NLUEntityKind.SHOP
+    assert resolver.calls[0].entity_query == "Komorebi Tân Bình"
+    assert len(controller.calls) == 1
+    assert controller.calls[0].intent == "select_store"
+    assert controller.calls[0].payload == {"shop": SHOP}
+    assert stored.shop == SHOP
+    assert stored.state is BookingState.SELECTING_DATE
+    assert response.state is BookingState.SELECTING_DATE
     assert external_requests == []
 
 

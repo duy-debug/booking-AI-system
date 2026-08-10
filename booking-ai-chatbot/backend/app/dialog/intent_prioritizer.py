@@ -62,11 +62,24 @@ class IntentPrioritizer:
         context: BookingContext | None = None,
     ) -> IntentCandidate | None:
         """Trả về candidate tốt nhất mà không làm thay đổi `BookingContext`."""
-        compatible = [
-            candidate
-            for candidate in candidates
-            if self._policy.is_allowed(state, _canonical_intent(candidate.intent))
-        ]
+        compatible: list[IntentCandidate] = []
+        for candidate in candidates:
+            canonical_intent = _canonical_intent(candidate.intent)
+            is_compatible = self._policy.is_allowed(state, canonical_intent)
+            if not is_compatible:
+                trace_log(
+                    logging.getLogger(__name__),
+                    logging.INFO,
+                    "IntentPrioritizer",
+                    "candidate_rejected",
+                    candidate_intent=canonical_intent,
+                    confidence=candidate.confidence,
+                    current_state=state.value,
+                    compatible=False,
+                    rejection_reason="state_incompatible",
+                )
+                continue
+            compatible.append(candidate)
         if not compatible:
             trace_log(
                 logging.getLogger(__name__),
@@ -105,7 +118,6 @@ class IntentPrioritizer:
 # Chuẩn hóa alias intent từ LLM về tên intent canonical mà backend sử dụng.
 def _canonical_intent(intent: str) -> str:
     return {
-        "select_shop": "select_store",
         "select_service": "select_course",
         "collect_phone": "provide_phone",
         "change_booking_field": "change_info",
@@ -125,8 +137,7 @@ def _entity_complete(
             return 1
         return int(
             any(
-                isinstance(candidate.entities.get(key), str)
-                and candidate.entities[key].strip()
+                isinstance(value := candidate.entities.get(key), str) and value.strip()
                 for key in ("service_name", "main_course_name", "addon_name")
             )
         )

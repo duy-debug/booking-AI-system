@@ -550,7 +550,7 @@ async def test_llm_faq_output_preserves_query_without_generating_answer() -> Non
 async def test_shop_query_maps_to_entity_resolution_without_domain_object() -> None:
     fallback, _ = fallback_for(
         structured(
-            intent="select_shop",
+            intent="select_store",
             entity_kind="shop",
             entity_query="quận 1",
         )
@@ -566,6 +566,27 @@ async def test_shop_query_maps_to_entity_resolution_without_domain_object() -> N
     assert result.payload == {}
     assert result.entity_kind is NLUEntityKind.SHOP
     assert result.entity_query == "quận 1"
+
+
+@pytest.mark.asyncio
+async def test_shop_name_entity_bridges_to_entity_resolution_request() -> None:
+    fallback, _ = fallback_for(
+        structured(
+            intent="select_store",
+            entities={"shop_name": "Komorebi Tân Bình"},
+        )
+    )
+
+    result = await fallback.parse(
+        text="cửa hàng này Komorebi Tân Bình",
+        state=BookingState.SELECTING_SHOP,
+    )
+
+    assert result.resolution_status is NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED
+    assert result.intent is None
+    assert result.payload == {}
+    assert result.entity_kind is NLUEntityKind.SHOP
+    assert result.entity_query == "Komorebi Tân Bình"
 
 
 @pytest.mark.asyncio

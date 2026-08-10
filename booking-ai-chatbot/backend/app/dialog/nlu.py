@@ -533,7 +533,6 @@ class LLMNLUCandidatesOutput(BaseModel):
 _LLM_ISO_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
 _LLM_CLOCK_PATTERN = re.compile(r"(?:\d|[01]\d|2[0-3]):[0-5]\d")
 _LLM_INTENT_ALIASES = {
-    "select_shop": "select_store",
     "select_service": "select_course",
     "collect_phone": "provide_phone",
     "change_booking_field": "change_info",
@@ -725,6 +724,22 @@ class LLMNLU:
         raw_intent = output.intent.strip()
         intent = _LLM_INTENT_ALIASES.get(raw_intent, raw_intent)
         if intent == "unknown" or output.confidence < self._min_confidence:
+            # Chặn candidate dưới ngưỡng trước khi đi vào flow để log rõ lý do unresolved.
+            trace_log(
+                logging.getLogger(__name__),
+                logging.INFO,
+                "LLMNLU",
+                "selected_candidate_rejected",
+                raw_intent=raw_intent,
+                canonical_intent=intent,
+                confidence=output.confidence,
+                current_state=state.value,
+                rejection_reason=(
+                    "below_confidence_threshold"
+                    if output.confidence < self._min_confidence
+                    else "unknown_intent"
+                ),
+            )
             return _llm_unresolved("invalid_nlu_output")
 
         entity_kind, entity_query = _llm_entity_reference(output)
@@ -745,6 +760,19 @@ class LLMNLU:
                 or entity_query is None
                 or not entity_query.strip()
             ):
+                # Ghi rõ contract nào làm candidate đã chọn bị loại trước khi vào resolver.
+                trace_log(
+                    logging.getLogger(__name__),
+                    logging.INFO,
+                    "LLMNLU",
+                    "selected_candidate_rejected",
+                    raw_intent=raw_intent,
+                    canonical_intent=intent,
+                    confidence=output.confidence,
+                    current_state=state.value,
+                    compatible=self._intent_policy.is_allowed(state, expected_intent),
+                    rejection_reason="entity_resolution_contract_mismatch",
+                )
                 return _llm_unresolved("invalid_nlu_output")
             return NLUResult(
                 intent=None,
@@ -761,9 +789,33 @@ class LLMNLU:
             )
 
         if not self._intent_policy.is_allowed(state, intent):
+            trace_log(
+                logging.getLogger(__name__),
+                logging.INFO,
+                "LLMNLU",
+                "selected_candidate_rejected",
+                raw_intent=raw_intent,
+                canonical_intent=intent,
+                confidence=output.confidence,
+                current_state=state.value,
+                compatible=False,
+                rejection_reason="state_incompatible_after_canonicalization",
+            )
             return _llm_unresolved("invalid_nlu_output")
         payload = _llm_direct_payload(intent, output.entities)
         if payload is None:
+            trace_log(
+                logging.getLogger(__name__),
+                logging.INFO,
+                "LLMNLU",
+                "selected_candidate_rejected",
+                raw_intent=raw_intent,
+                canonical_intent=intent,
+                confidence=output.confidence,
+                current_state=state.value,
+                compatible=True,
+                rejection_reason="direct_payload_contract_mismatch",
+            )
             return _llm_unresolved("invalid_nlu_output")
         return NLUResult(
             intent=intent,
@@ -950,7 +1002,12 @@ def _llm_entity_reference(
         if entity_kind is NLUEntityKind.THERAPIST:
             entity_query = _normalize_therapist_query(entity_query)
         return entity_kind, entity_query
-    if output.intent.strip() == "select_course":
+    canonical_intent = _LLM_INTENT_ALIASES.get(output.intent.strip(), output.intent.strip())
+    if canonical_intent == "select_store":
+        shop_query = _non_empty_text(output.entities.shop_name)
+        if shop_query is not None:
+            return NLUEntityKind.SHOP, shop_query
+    if canonical_intent == "select_course":
         course_query = (
             _non_empty_text(output.entities.main_course_name)
             or _non_empty_text(output.entities.service_name)
@@ -958,7 +1015,7 @@ def _llm_entity_reference(
         )
         if course_query is not None:
             return NLUEntityKind.COURSE, course_query
-    if output.intent.strip() == "select_therapist":
+    if canonical_intent == "select_therapist":
         therapist_name = _non_empty_text(output.entities.therapist_name)
         if therapist_name is not None:
             return NLUEntityKind.THERAPIST, therapist_name
