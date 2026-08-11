@@ -12,3 +12,4 @@ build/
 logs/
 *.log
 .rebuild-backups/
+booking-ai-chatbot/backend/knowledge/[[]Description-v1]-Project-1.2-RAG-Chatbot.pdf
