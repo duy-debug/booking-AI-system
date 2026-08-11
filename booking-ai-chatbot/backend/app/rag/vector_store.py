@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -10,10 +11,42 @@ from app.rag.chunker import Chunk
 
 
 # ============================================================
+# SearchResult
+# ============================================================
+#
+# Đây là cấu trúc dữ liệu đại diện cho MỘT kết quả
+# được trả về sau khi search trong Qdrant.
+#
+# Ví dụ:
+#
+# SearchResult(
+#     text="RAG là phương pháp...",
+#     source="rag.pdf",
+#     file_path="knowledge/rag.pdf",
+#     chunk_index=12,
+#     score=0.82,
+# )
+#
+# score:
+#     độ tương đồng giữa query vector
+#     và vector của chunk trong Qdrant.
+#
+# ============================================================
+
+@dataclass
+class SearchResult:
+    text: str
+    source: str
+    file_path: str
+    chunk_index: int
+    score: float
+
+
+# ============================================================
 # VectorStore
 # ============================================================
 #
-# Class này chịu trách nhiệm duy nhất:
+# Class này chịu trách nhiệm:
 #
 # vector + metadata
 #        ↓
@@ -25,6 +58,7 @@ from app.rag.chunker import Chunk
 # - tạo collection
 # - lưu vectors
 # - lưu payload
+# - search vectors
 #
 # Nó KHÔNG:
 #
@@ -32,17 +66,6 @@ from app.rag.chunker import Chunk
 # - chunk document
 # - tạo embedding
 # - gọi LLM
-#
-#
-# Pipeline:
-#
-# Chunk
-#   +
-# Vector
-#   ↓
-# Point
-#   ↓
-# Qdrant
 #
 # ============================================================
 
@@ -61,14 +84,12 @@ class VectorStore:
             folder Qdrant local lưu database.
 
         collection_name:
-            tên collection dùng để chứa knowledge.
+            tên collection chứa knowledge.
 
         vector_size:
             dimension của embedding vector.
 
-            Với:
-            sentence-transformers/all-MiniLM-L6-v2
-
+            Với all-MiniLM-L6-v2:
             vector_size = 384
         """
 
@@ -102,16 +123,7 @@ class VectorStore:
 
 
         # ----------------------------------------------------
-        # 4. Khởi tạo Qdrant client
-        # ----------------------------------------------------
-        #
-        # Local mode:
-        #
-        # Qdrant sẽ lưu dữ liệu tại:
-        #
-        # qdrant_data/
-        #
-        # Không cần chạy Docker/server riêng.
+        # 4. Khởi tạo Qdrant local client
         # ----------------------------------------------------
 
         self.client = QdrantClient(
@@ -128,14 +140,6 @@ class VectorStore:
     ) -> None:
         """
         Tạo collection nếu collection chưa tồn tại.
-
-        Collection sẽ được cấu hình:
-
-        vector size:
-            384
-
-        distance:
-            cosine
         """
 
         # ----------------------------------------------------
@@ -192,7 +196,7 @@ class VectorStore:
 
 
         # ----------------------------------------------------
-        # 2. chunks và vectors phải bằng nhau
+        # 2. Số chunks phải bằng số vectors
         # ----------------------------------------------------
 
         if len(chunks) != len(vectors):
@@ -210,7 +214,7 @@ class VectorStore:
 
 
         # ----------------------------------------------------
-        # 4. Ghép Chunk với Vector
+        # 4. Ghép Chunk ↔ Vector
         # ----------------------------------------------------
 
         for index, (chunk, vector) in enumerate(
@@ -233,14 +237,11 @@ class VectorStore:
             # Tạo Point
             # ------------------------------------------------
             #
-            # Qdrant Point gồm:
+            # Một Point gồm:
             #
             # id
             # vector
             # payload
-            #
-            # payload là metadata ta muốn lấy lại
-            # khi search.
             # ------------------------------------------------
 
             point = PointStruct(
@@ -256,10 +257,7 @@ class VectorStore:
                 },
             )
 
-
-            points.append(
-                point
-            )
+            points.append(point)
 
 
         # ----------------------------------------------------
@@ -273,6 +271,131 @@ class VectorStore:
 
 
     # ========================================================
+    # Search
+    # ========================================================
+
+    def search(
+        self,
+        query_vector: list[float],
+        limit: int = 5,
+    ) -> list[SearchResult]:
+        """
+        Search các Point gần query vector nhất.
+
+        Flow:
+
+        query vector
+             ↓
+        Qdrant cosine similarity
+             ↓
+        top-k Point
+             ↓
+        payload + score
+             ↓
+        SearchResult[]
+        """
+
+        # ----------------------------------------------------
+        # 1. Validate query vector dimension
+        # ----------------------------------------------------
+
+        if len(query_vector) != self.vector_size:
+            raise ValueError(
+                f"Invalid query vector size: expected "
+                f"{self.vector_size}, "
+                f"got {len(query_vector)}"
+            )
+
+
+        # ----------------------------------------------------
+        # 2. Validate limit
+        # ----------------------------------------------------
+
+        if limit <= 0:
+            raise ValueError(
+                "limit must be greater than 0"
+            )
+
+
+        # ----------------------------------------------------
+        # 3. Search trong Qdrant
+        # ----------------------------------------------------
+        #
+        # query:
+        #     embedding vector của câu hỏi.
+        #
+        # limit:
+        #     lấy bao nhiêu Point gần nhất.
+        #
+        # with_payload=True:
+        #     ngoài score còn lấy lại payload:
+        #
+        #     text
+        #     source
+        #     file_path
+        #     chunk_index
+        # ----------------------------------------------------
+
+        response = self.client.query_points(
+            collection_name=self.collection_name,
+            query=query_vector,
+            limit=limit,
+            with_payload=True,
+        )
+
+
+        # ----------------------------------------------------
+        # 4. Chuyển Qdrant result → SearchResult
+        # ----------------------------------------------------
+
+        results: list[SearchResult] = []
+
+
+        for point in response.points:
+
+            # Payload có thể là None,
+            # nên fallback về dictionary rỗng.
+            payload = point.payload or {}
+
+
+            result = SearchResult(
+                text=payload.get(
+                    "text",
+                    "",
+                ),
+
+                source=payload.get(
+                    "source",
+                    "",
+                ),
+
+                file_path=payload.get(
+                    "file_path",
+                    "",
+                ),
+
+                chunk_index=payload.get(
+                    "chunk_index",
+                    -1,
+                ),
+
+                score=float(
+                    point.score
+                ),
+            )
+
+
+            results.append(result)
+
+
+        # ----------------------------------------------------
+        # 5. Return top-k SearchResult
+        # ----------------------------------------------------
+
+        return results
+
+
+    # ========================================================
     # Count
     # ========================================================
 
@@ -280,9 +403,7 @@ class VectorStore:
         self,
     ) -> int:
         """
-        Đếm số Point hiện có trong collection.
-
-        Chủ yếu hữu ích để test/debug.
+        Đếm số Point trong collection.
         """
 
         result = self.client.count(
@@ -291,3 +412,20 @@ class VectorStore:
         )
 
         return result.count
+
+
+    # ========================================================
+    # Close
+    # ========================================================
+
+    def close(
+        self,
+    ) -> None:
+        """
+        Đóng Qdrant client.
+
+        Quan trọng khi dùng local mode trên Windows
+        để giải phóng file lock đúng cách.
+        """
+
+        self.client.close()
