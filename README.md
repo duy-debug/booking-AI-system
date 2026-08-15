@@ -90,7 +90,7 @@ flowchart TB
 
     FE --> BE[FastAPI Booking Backend]
     CB --> BE
-    CB --> Qdrant[(Qdrant Vector DB)]
+    CB --> Qdrant[(Qdrant Vector Database)]
     CB --> Gemini[Gemini LLM]
 
     BE --> DB[(Supabase PostgreSQL)]
