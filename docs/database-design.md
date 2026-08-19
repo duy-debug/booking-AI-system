@@ -10,17 +10,12 @@ erDiagram
 
     THERAPISTS ||--o{ THERAPIST_SHIFTS : "works"
     THERAPISTS ||--o{ RESERVATIONS : "assigned to"
-    THERAPISTS |o--o{ BOOKINGS : "requested optional"
+    THERAPISTS |o--o{ BOOKINGS : "optionally requested"
 
     CUSTOMERS ||--o{ BOOKINGS : "makes"
-
     BOOKINGS ||--o{ RESERVATIONS : "contains"
-
     RESERVATIONS ||--o{ RESERVATION_COURSES : "includes"
-
     COURSES ||--o{ RESERVATION_COURSES : "used in"
-
-    CUSTOMER_RESTRICTIONS ||--|| "NG list"
 
     CUSTOMER_RESTRICTIONS {
         uuid restriction_id PK
@@ -46,7 +41,7 @@ erDiagram
     COURSES {
         uuid course_id PK
         uuid shop_id FK
-        varchar pos_course_code UK(shop_id)
+        varchar pos_course_code "Unique within shop"
         varchar name
         integer duration_minutes
         decimal price
@@ -59,7 +54,7 @@ erDiagram
     THERAPISTS {
         uuid therapist_id PK
         uuid shop_id FK
-        varchar pos_therapist_code UK(shop_id)
+        varchar pos_therapist_code "Unique within shop"
         varchar name
         enum gender
         boolean is_active
