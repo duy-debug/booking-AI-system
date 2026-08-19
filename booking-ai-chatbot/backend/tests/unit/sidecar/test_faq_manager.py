@@ -10,11 +10,8 @@ from app.dialog.dialog_controller import DialogTurnStatus
 from app.dialog.instruction_builder import DialogResponse, InstructionBuilder
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
-from app.infrastructure.qdrant_client import (
-    FAQManager,
-    KnowledgeDocument,
-    KnowledgeGatewayUnavailableError,
-)
+from app.knowledge import KnowledgeDocument, KnowledgeGatewayUnavailableError
+from app.knowledge.query.service import FAQManager
 
 
 class FakeKnowledgeGateway:
@@ -98,7 +95,7 @@ async def test_empty_and_blank_documents_render_safe_no_result() -> None:
 
     assert response.status is DialogTurnStatus.FAILURE_HANDLED
     assert "chưa có đủ thông tin" in response.text
-    assert gateway.calls == [("Unknown policy?", 3)]
+    assert gateway.calls == [("Unknown policy?", 6)]
     assert builder.calls == [(response.text, 0, context, True)]
 
 
@@ -158,7 +155,7 @@ async def test_documents_keep_order_normalize_deduplicate_and_limit_first_three(
 
     assert response.text == "First answer.\n\nSecond answer."
     assert response.metadata == {"response_type": "faq", "source_count": 2}
-    assert gateway.calls == [("FAQ", 3)]
+    assert gateway.calls == [("FAQ", 6)]
     assert builder.calls == [(response.text, 2, context, False)]
     assert "private" not in response.text
 
@@ -194,7 +191,7 @@ async def test_typed_gateway_failure_renders_safe_unavailable_response() -> None
 
     assert response.status is DialogTurnStatus.FAILURE_HANDLED
     assert "private failure" not in response.text
-    assert gateway.calls == [("Parking?", 3)]
+    assert gateway.calls == [("Parking?", 6)]
 
 
 @pytest.mark.asyncio
@@ -211,7 +208,7 @@ async def test_cancellation_and_programmer_errors_propagate(
             context=BookingContext("faq-error"),
         )
 
-    assert gateway.calls == [("FAQ", 3)]
+    assert gateway.calls == [("FAQ", 6)]
     assert builder.calls == []
 
 

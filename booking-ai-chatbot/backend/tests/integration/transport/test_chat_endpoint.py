@@ -40,7 +40,8 @@ from app.domain.booking_state import BookingState
 from app.domain.outcomes import HandlerOutcome, HandlerResult
 from app.infrastructure.context_store import Settings
 from app.infrastructure.gemini_client import LLMMessage, LLMResponse
-from app.infrastructure.qdrant_client import FAQManager, KnowledgeDocument
+from app.knowledge import KnowledgeDocument
+from app.knowledge.query.service import FAQManager
 from app.main import create_app
 from tests.structured_nlu_gateway import StructuredNLUGateway
 
@@ -1247,7 +1248,7 @@ def test_faq_returns_safe_json_without_state_change_or_internal_metadata(
         "quick_replies": [],
         "metadata": {"response_type": "faq", "source_count": 1},
     }
-    assert gateway.calls == [("Cửa hàng mở cửa lúc mấy giờ?", 3)]
+    assert gateway.calls == [("Cửa hàng mở cửa lúc mấy giờ?", 6)]
     assert "private" not in response.text
     assert "0.98" not in response.text
     assert outbound_requests == []

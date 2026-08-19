@@ -5,10 +5,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from app.infrastructure.qdrant_client import (
-    KnowledgeDocument,
-    KnowledgeGateway,
-)
+from app.knowledge import KnowledgeDocument, KnowledgeGateway
 
 DOCUMENT = KnowledgeDocument(
     content="The spa is open from 9:00 to 21:00.",

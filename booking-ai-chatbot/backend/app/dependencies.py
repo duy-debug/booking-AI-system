@@ -44,12 +44,14 @@ from app.domain.booking_state import BookingState
 from app.infrastructure.context_store import ContextStore, Settings
 from app.infrastructure.gemini_client import GeminiClient, LLMGateway
 from app.infrastructure.pos_api_client import PosApiClient
-from app.infrastructure.qdrant_client import (
-    FAQManager,
+from app.knowledge import (
     KnowledgeGateway,
-    KnowledgeQdrantClient,
+)
+from app.knowledge.embeddings.sentence_transformer import SentenceTransformerEmbedding
+from app.knowledge.query.retriever import KnowledgeQdrantClient
+from app.knowledge.query.service import FAQManager
+from app.knowledge.stores.qdrant import (
     QdrantQueryClient,
-    SentenceTransformerEmbedding,
 )
 
 _MAX_CONVERSATION_ID_LENGTH = 128
@@ -309,6 +311,9 @@ async def create_application_container(
                 client=cast(QdrantQueryClient, qdrant_client),
                 embedding=SentenceTransformerEmbedding(settings.embedding_model_name),
                 collection_name=settings.qdrant_collection,
+                hybrid_enabled=settings.rag_hybrid_enabled,
+                sparse_top_k=settings.rag_hybrid_sparse_top_k,
+                hybrid_top_k=settings.rag_hybrid_fusion_top_k,
             )
         container = ApplicationContainer(
             http_client=client,
@@ -538,6 +543,14 @@ def _validate_settings(settings: Settings) -> None:
         or not 0.0 <= settings.rag_hybrid_score_threshold <= 1.0
     ):
         raise ValueError("RAG hybrid score threshold must be between zero and one.")
+    if type(settings.rag_hybrid_enabled) is not bool:
+        raise ValueError("RAG hybrid enabled flag must be boolean.")
+    if type(settings.rag_hybrid_sparse_top_k) is not int or settings.rag_hybrid_sparse_top_k <= 0:
+        raise ValueError("RAG hybrid sparse top-k must be a positive integer.")
+    if settings.rag_hybrid_fusion_top_k is not None and (
+        type(settings.rag_hybrid_fusion_top_k) is not int or settings.rag_hybrid_fusion_top_k <= 0
+    ):
+        raise ValueError("RAG hybrid fusion top-k must be a positive integer.")
     if settings.knowledge_qdrant_enabled:
         host = settings.qdrant_host.strip()
         if (

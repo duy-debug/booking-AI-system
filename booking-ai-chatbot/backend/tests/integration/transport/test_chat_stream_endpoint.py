@@ -46,11 +46,8 @@ from app.infrastructure.gemini_client import (
     LLMMessage,
     LLMResponse,
 )
-from app.infrastructure.qdrant_client import (
-    FAQManager,
-    KnowledgeDocument,
-    KnowledgeGatewayUnavailableError,
-)
+from app.knowledge import KnowledgeDocument, KnowledgeGatewayUnavailableError
+from app.knowledge.query.service import FAQManager
 from app.main import create_app
 from tests.structured_nlu_gateway import StructuredNLUGateway
 
@@ -730,7 +727,7 @@ def test_faq_stream_has_json_parity_and_uses_one_injected_gateway(
         "metadata",
     }:
         assert stream_message[key] == regular_body[key]
-    assert gateway.calls == [(message, 3), (message, 3)]
+    assert gateway.calls == [(message, 6), (message, 6)]
     assert "token" not in {event for event, _ in events}
     assert outbound_requests == []
 

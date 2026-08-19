@@ -22,10 +22,7 @@ from app.domain.booking_state import BookingState
 from app.domain.outcomes import HandlerOutcome, HandlerResult
 from app.infrastructure.context_store import Settings
 from app.infrastructure.gemini_client import LLMMessage, LLMResponse
-from app.infrastructure.qdrant_client import (
-    KnowledgeDocument,
-    KnowledgeGatewayUnavailableError,
-)
+from app.knowledge import KnowledgeDocument, KnowledgeGatewayUnavailableError
 from app.transport.chat_api import _process_chat_message
 from app.transport.schemas import ChatRequest
 
@@ -189,7 +186,7 @@ async def test_structured_llm_faq_at_idle_returns_answer_and_commits_turn(
     assert response.text == "Cửa hàng mở cửa từ 09:00 đến 22:00."
     assert response.state is BookingState.IDLE
     assert response.metadata == {"response_type": "faq", "source_count": 1}
-    assert knowledge.calls == [("Cửa hàng mở cửa lúc mấy giờ?", 3)]
+    assert knowledge.calls == [("Cửa hàng mở cửa lúc mấy giờ?", 6)]
     assert llm.calls == 1
     assert store.saves == 1
     assert external == []
@@ -312,7 +309,7 @@ async def test_llm_classified_faq_calls_llm_and_knowledge_once(
 
     assert response.text == "Vui lòng hỏi cửa hàng trước."
     assert llm.calls == 1
-    assert knowledge.calls == [("Có dịch vụ phù hợp cho mẹ bầu không?", 3)]
+    assert knowledge.calls == [("Có dịch vụ phù hợp cho mẹ bầu không?", 6)]
     assert store.saves == 1
 
 

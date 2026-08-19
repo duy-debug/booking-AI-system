@@ -5,15 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from app.infrastructure.qdrant_client import (
+from app.knowledge.index.chunker import KnowledgeChunk, SectionAwareMarkdownChunker
+from app.knowledge.index.loader import (
     InvalidKnowledgeContentError,
     InvalidKnowledgeEncodingError,
     InvalidKnowledgePathError,
-    KnowledgeChunk,
     KnowledgeFileTooLargeError,
     MarkdownDocument,
     MarkdownKnowledgeLoader,
-    SectionAwareMarkdownChunker,
     UnsupportedKnowledgeFileError,
 )
 

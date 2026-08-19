@@ -23,7 +23,8 @@ from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
 from app.infrastructure.context_store import ContextStore, Settings
 from app.infrastructure.gemini_client import LLMMessage, LLMResponse
-from app.infrastructure.qdrant_client import KnowledgeDocument, KnowledgeQdrantClient
+from app.knowledge import KnowledgeDocument
+from app.knowledge.query.retriever import KnowledgeQdrantClient
 
 
 class FakeLLMGateway:
@@ -266,6 +267,54 @@ async def test_enabled_qdrant_rejects_invalid_config(
 
     with pytest.raises(ValueError, match=message):
         await dependencies.create_application_container(configured)
+
+
+@pytest.mark.asyncio
+async def test_qdrant_hybrid_config_is_forwarded_to_knowledge_gateway(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clients: list[FakeQdrantClient] = []
+    captured_gateway_kwargs: dict[str, object] = {}
+
+    class FakeKnowledgeGateway:
+        def __init__(self, **kwargs: object) -> None:
+            captured_gateway_kwargs.update(kwargs)
+
+    def client_factory(**kwargs: object) -> FakeQdrantClient:
+        client = FakeQdrantClient(**kwargs)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(dependencies, "QdrantClient", client_factory)
+    monkeypatch.setattr(
+        dependencies,
+        "SentenceTransformerEmbedding",
+        lambda model_name: LazyFakeEmbedding(model_name),
+    )
+    monkeypatch.setattr(dependencies, "KnowledgeQdrantClient", FakeKnowledgeGateway)
+
+    configured = Settings(
+        pos_base_url="http://pos.test",
+        knowledge_qdrant_enabled=True,
+        qdrant_host="qdrant.test",
+        qdrant_port=6333,
+        qdrant_collection="knowledge",
+        embedding_model_name="configured-model",
+        rag_hybrid_enabled=True,
+        rag_hybrid_sparse_top_k=9,
+        rag_hybrid_fusion_top_k=4,
+    )
+
+    container = await dependencies.create_application_container(configured)
+
+    assert isinstance(container.knowledge_gateway, FakeKnowledgeGateway)
+    assert captured_gateway_kwargs["collection_name"] == "knowledge"
+    assert captured_gateway_kwargs["hybrid_enabled"] is True
+    assert captured_gateway_kwargs["sparse_top_k"] == 9
+    assert captured_gateway_kwargs["hybrid_top_k"] == 4
+
+    await container.close()
+    assert clients[0].closed
 
 
 @pytest.mark.parametrize(

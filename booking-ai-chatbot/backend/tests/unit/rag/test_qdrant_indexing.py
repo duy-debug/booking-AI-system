@@ -11,16 +11,18 @@ import pytest
 from qdrant_client import models
 from qdrant_client.http.models import CollectionInfo
 
-from app.infrastructure.qdrant_client import (
+from app.knowledge.index.pipeline import (
+    index_knowledge_document,
+    settings_from_environment as _settings_from_environment,
+)
+from app.knowledge.index.writer import (
     EmptyKnowledgeDocumentError,
     IncompatibleCollectionError,
     InvalidIndexingSourceError,
     KnowledgeIndexingError,
-    QdrantIndexClient,
-    _settings_from_environment,
-    index_knowledge_document,
     point_id_for_chunk,
 )
+from app.knowledge.stores.qdrant import QdrantIndexClient
 
 
 class FakeEmbedding:
@@ -143,8 +145,7 @@ def index(
 
 def test_import_does_not_construct_qdrant_client_or_affect_app_startup() -> None:
     code = (
-        "import sys; import app.main; "
-        "assert 'app.infrastructure.qdrant_client' in sys.modules; "
+        "import app.main; "
         "assert not hasattr(app.main, 'qdrant_client')"
     )
 
@@ -287,6 +288,14 @@ def test_empty_api_key_becomes_none(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = _settings_from_environment()
 
     assert settings.qdrant_api_key is None
+
+
+def test_hybrid_flag_is_read_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAG_HYBRID_ENABLED", "true")
+
+    settings = _settings_from_environment()
+
+    assert settings.rag_hybrid_enabled is True
 
 
 @pytest.mark.parametrize(

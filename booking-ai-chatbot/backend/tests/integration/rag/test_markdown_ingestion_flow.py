@@ -2,10 +2,8 @@
 
 from pathlib import Path
 
-from app.infrastructure.qdrant_client import (
-    MarkdownKnowledgeLoader,
-    SectionAwareMarkdownChunker,
-)
+from app.knowledge.index.chunker import SectionAwareMarkdownChunker
+from app.knowledge.index.loader import MarkdownKnowledgeLoader
 
 
 def test_checked_in_markdown_loads_into_deterministic_ordered_chunks() -> None:

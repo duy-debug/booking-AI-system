@@ -7,7 +7,7 @@ from collections.abc import Sequence
 import pytest
 
 from app.infrastructure.context_store import Settings
-from app.infrastructure.qdrant_client import SentenceTransformerEmbedding
+from app.knowledge.embeddings.sentence_transformer import SentenceTransformerEmbedding
 
 
 class FakeEncoder:
