@@ -13,13 +13,15 @@ erDiagram
     THERAPISTS |o--o{ BOOKINGS : "optionally requested"
 
     CUSTOMERS ||--o{ BOOKINGS : "makes"
+    CUSTOMERS ||--o{ CUSTOMER_RESTRICTIONS : "has restriction"
+
     BOOKINGS ||--o{ RESERVATIONS : "contains"
     RESERVATIONS ||--o{ RESERVATION_COURSES : "includes"
     COURSES ||--o{ RESERVATION_COURSES : "used in"
 
     CUSTOMER_RESTRICTIONS {
         uuid restriction_id PK
-        varchar phone
+        uuid customer_id FK
         varchar reason
         boolean is_active
         timestamp created_at
