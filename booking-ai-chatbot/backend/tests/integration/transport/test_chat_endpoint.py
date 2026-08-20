@@ -1,4 +1,4 @@
-"""Integration tests for the non-streaming FastAPI chat endpoint."""
+﻿"""Integration tests for the non-streaming FastAPI chat endpoint."""
 
 import json
 from collections.abc import Iterator
@@ -40,8 +40,8 @@ from app.domain.booking_state import BookingState
 from app.domain.outcomes import HandlerOutcome, HandlerResult
 from app.infrastructure.context_store import Settings
 from app.infrastructure.gemini_client import LLMMessage, LLMResponse
-from app.knowledge import KnowledgeDocument
-from app.knowledge.query.service import FAQManager
+from app.rag_v1 import KnowledgeDocument
+from app.rag_v1.service import FAQManager
 from app.main import create_app
 from tests.structured_nlu_gateway import StructuredNLUGateway
 
@@ -58,7 +58,7 @@ COURSE = Course(
 )
 ADDON = Course(
     course_id=UUID("55555555-5555-5555-5555-555555555555"),
-    name="Chăm sóc da đầu",
+    name="ChÄƒm sÃ³c da Ä‘áº§u",
     duration_minutes=15,
     price=Decimal("100000.00"),
     course_type=CourseType.ADDON,
@@ -94,8 +94,8 @@ class RecordingDiscoveryShopHandler(SearchShopHandler):
             SHOP,
             Shop(
                 shop_id=UUID("33333333-3333-3333-3333-333333333333"),
-                name="Komorebi Huế",
-                address="Huế",
+                name="Komorebi Huáº¿",
+                address="Huáº¿",
             ),
         ]
         return HandlerResult(HandlerOutcome.SUCCESS, {"shops": tuple(shops)})
@@ -306,7 +306,7 @@ def test_json_endpoint_calls_dialog_controller_once(
     response = post_message(
         client,
         conversation_id="controller-boundary",
-        message="Tôi muốn đặt lịch",
+        message="TÃ´i muá»‘n Ä‘áº·t lá»‹ch",
     )
 
     assert response.status_code == 200
@@ -342,7 +342,7 @@ def test_shop_discovery_enters_shop_selection_without_selecting_a_candidate(
     response = post_message(
         client,
         conversation_id="conversation-list-shops",
-        message="bạn có thể liệt kê cửa hàng cho tôi xem được không",
+        message="báº¡n cÃ³ thá»ƒ liá»‡t kÃª cá»­a hÃ ng cho tÃ´i xem Ä‘Æ°á»£c khÃ´ng",
     )
     body = response.json()
     context = container.memory_cache._contexts["conversation-list-shops"]
@@ -350,9 +350,9 @@ def test_shop_discovery_enters_shop_selection_without_selecting_a_candidate(
     assert response.status_code == 200
     assert body["state"] == "selecting_shop"
     assert body["status"] == "success"
-    assert body["quick_replies"] == ["Shibuya", "Komorebi Huế"]
+    assert body["quick_replies"] == ["Shibuya", "Komorebi Huáº¿"]
     assert body["metadata"] == {"item_count": 2}
-    assert "Komorebi Huế" in body["text"]
+    assert "Komorebi Huáº¿" in body["text"]
     assert handler.calls == [None]
     assert context.shop is None
     assert outbound_requests == []
@@ -379,7 +379,7 @@ def test_shop_discovery_does_not_truncate_shop_list(
                 Shop(
                     shop_id=UUID(f"00000000-0000-0000-0000-00000000000{index}"),
                     name=f"Komorebi Shop {index}",
-                    address=f"Khu vực {index}",
+                    address=f"Khu vá»±c {index}",
                 )
                 for index in range(1, 10)
             )
@@ -393,7 +393,7 @@ def test_shop_discovery_does_not_truncate_shop_list(
     response = post_message(
         client,
         conversation_id="conversation-list-many-shops",
-        message="cho tôi xem danh sách cửa hàng",
+        message="cho tÃ´i xem danh sÃ¡ch cá»­a hÃ ng",
     )
     body = response.json()
 
@@ -425,7 +425,7 @@ def test_service_package_synonym_lists_services_during_duration_selection(
     response = post_message(
         client,
         conversation_id=context.conversation_id,
-        message="cho tôi xem các gói",
+        message="cho tÃ´i xem cÃ¡c gÃ³i",
     )
 
     assert response.status_code == 200
@@ -458,7 +458,7 @@ def test_service_discovery_keeps_booking_selection_and_calls_pos_once(
     response = post_message(
         client,
         conversation_id=context.conversation_id,
-        message="có những liệu trình chính và add-on nào",
+        message="cÃ³ nhá»¯ng liá»‡u trÃ¬nh chÃ­nh vÃ  add-on nÃ o",
     )
     body = response.json()
 
@@ -480,7 +480,7 @@ def test_valid_idle_booking_turn_returns_json_and_persists_state(
     response = post_message(
         client,
         conversation_id="conversation-a",
-        message="Tôi muốn đặt lịch",
+        message="TÃ´i muá»‘n Ä‘áº·t lá»‹ch",
         idempotency_key="key-a",
     )
 
@@ -510,7 +510,7 @@ def test_json_happy_path_reaches_people_without_preload_calls(
     started = post_message(
         client,
         conversation_id="conversation-p1",
-        message="Tôi muốn đặt lịch",
+        message="TÃ´i muá»‘n Ä‘áº·t lá»‹ch",
     )
     resolver = StaticResolver(
         EntityResolutionResult(
@@ -566,7 +566,7 @@ def test_booking_request_prefills_date_and_skips_redundant_date_question(
     started = post_message(
         client,
         conversation_id="conversation-prefilled",
-        message="Tôi muốn đặt booking ngày mai vào lúc 7:00 nhé",
+        message="TÃ´i muá»‘n Ä‘áº·t booking ngÃ y mai vÃ o lÃºc 7:00 nhÃ©",
     )
     container.entity_resolution_coordinator = cast(
         EntityResolutionCoordinator,
@@ -589,7 +589,7 @@ def test_booking_request_prefills_date_and_skips_redundant_date_question(
 
     assert started.json()["state"] == "selecting_shop"
     assert selected_shop.json()["state"] == "selecting_people"
-    assert selected_shop.json()["quick_replies"] == ["1 người", "2 người", "3 người"]
+    assert selected_shop.json()["quick_replies"] == ["1 ngÆ°á»i", "2 ngÆ°á»i", "3 ngÆ°á»i"]
     assert context.booking_date == date.today() + timedelta(days=1)
     assert context.requested_booking_date is None
     assert context.requested_start_time == time(7, 0)
@@ -624,7 +624,7 @@ def test_booking_request_consumes_date_and_people_then_asks_only_for_duration(
     started = post_message(
         client,
         conversation_id="conversation-all-basic-slots",
-        message="Tôi muốn đặt booking ngày mai 1 người vào lúc 7 giờ",
+        message="TÃ´i muá»‘n Ä‘áº·t booking ngÃ y mai 1 ngÆ°á»i vÃ o lÃºc 7 giá»",
     )
     assert started.json()["state"] == "selecting_shop"
 
@@ -652,7 +652,7 @@ def test_booking_request_consumes_date_and_people_then_asks_only_for_duration(
     context = container.memory_cache._contexts["conversation-all-basic-slots"]
 
     assert selected_shop.json()["state"] == "selecting_duration"
-    assert "thời lượng" in selected_shop.json()["text"].casefold()
+    assert "thá»i lÆ°á»£ng" in selected_shop.json()["text"].casefold()
     assert context.booking_date == requested_date
     assert context.num_customer == 1
     assert context.requested_booking_date is None
@@ -740,8 +740,8 @@ def test_booking_request_consumes_shop_course_addon_and_time_in_workflow_order(
     response = post_message(
         client,
         conversation_id="conversation-all-course-slots",
-        message="Đặt Shibuya ngày 15/08/2099 một người 60 phút Aromatherapy "
-        "thêm chăm sóc da đầu lúc 10:30",
+        message="Äáº·t Shibuya ngÃ y 15/08/2099 má»™t ngÆ°á»i 60 phÃºt Aromatherapy "
+        "thÃªm chÄƒm sÃ³c da Ä‘áº§u lÃºc 10:30",
     )
     context = container.memory_cache._contexts["conversation-all-course-slots"]
 
@@ -782,7 +782,7 @@ def test_json_phone_denial_clears_phone_and_returns_to_collection(
     response = post_message(
         client,
         conversation_id=context.conversation_id,
-        message="không",
+        message="khÃ´ng",
     )
 
     assert response.status_code == 200
@@ -844,7 +844,7 @@ def test_existing_customer_phone_goes_directly_to_final_confirmation(
     assert response.status_code == 200
     assert response.json()["status"] == "success"
     assert response.json()["state"] == "awaiting_confirmation"
-    assert "xác nhận số điện thoại" not in response.json()["text"].casefold()
+    assert "xÃ¡c nháº­n sá»‘ Ä‘iá»‡n thoáº¡i" not in response.json()["text"].casefold()
     saved = container.memory_cache._contexts[context.conversation_id]
     assert saved.phone == "0901234567"
     assert saved.phone_confirmed is True
@@ -880,11 +880,11 @@ def test_booking_proactively_suggests_main_course_then_addon_then_slots(
     main_response = post_message(
         client,
         conversation_id=context.conversation_id,
-        message="60 phút",
+        message="60 phÃºt",
     )
     assert main_response.json()["state"] == "selecting_service"
     assert main_response.json()["quick_replies"] == [COURSE.name]
-    assert "liệu trình chính" in main_response.json()["text"].casefold()
+    assert "liá»‡u trÃ¬nh chÃ­nh" in main_response.json()["text"].casefold()
     assert service_handler.calls == [(SHOP.shop_id, CourseType.MAIN)]
 
     container.entity_resolution_coordinator = cast(
@@ -907,7 +907,7 @@ def test_booking_proactively_suggests_main_course_then_addon_then_slots(
     assert addon_response.json()["state"] == "selecting_service"
     assert addon_response.json()["quick_replies"] == [
         ADDON.name,
-        "Không chọn add-on",
+        "KhÃ´ng chá»n add-on",
     ]
     assert "add-on" in addon_response.json()["text"].casefold()
     assert service_handler.calls[-1] == (SHOP.shop_id, CourseType.ADDON)
@@ -915,7 +915,7 @@ def test_booking_proactively_suggests_main_course_then_addon_then_slots(
     slot_response = post_message(
         client,
         conversation_id=context.conversation_id,
-        message="Không chọn add-on",
+        message="KhÃ´ng chá»n add-on",
     )
     assert slot_response.json()["state"] == "selecting_time"
     assert slot_response.json()["quick_replies"] == ["10:30", "11:00"]
@@ -948,7 +948,7 @@ def test_empty_availability_moves_ui_back_to_date_step(
     post_message(
         client,
         conversation_id=context.conversation_id,
-        message="60 phút",
+        message="60 phÃºt",
     )
     container.entity_resolution_coordinator = cast(
         EntityResolutionCoordinator,
@@ -970,14 +970,14 @@ def test_empty_availability_moves_ui_back_to_date_step(
     response = post_message(
         client,
         conversation_id=context.conversation_id,
-        message="Không chọn add-on",
+        message="KhÃ´ng chá»n add-on",
     )
 
     assert response.status_code == 200
     assert response.json()["state"] == "selecting_date"
     assert response.json()["status"] == "failure_handled"
-    assert response.json()["quick_replies"] == ["16/08/2099", "17/08/2099", "Chọn ngày khác"]
-    assert "chọn ngày khác" in response.json()["text"].casefold()
+    assert response.json()["quick_replies"] == ["16/08/2099", "17/08/2099", "Chá»n ngÃ y khÃ¡c"]
+    assert "chá»n ngÃ y khÃ¡c" in response.json()["text"].casefold()
     saved = container.memory_cache._contexts[context.conversation_id]
     assert saved.booking_date == date(2099, 8, 15)
     assert saved.last_unavailable_date == date(2099, 8, 15)
@@ -1015,7 +1015,7 @@ def test_reselecting_same_failed_date_stays_on_date_step(
     assert response.json()["state"] == "selecting_date"
     assert response.json()["status"] == "failure_handled"
     assert "15/08/2099" in response.json()["text"]
-    assert response.json()["quick_replies"] == ["16/08/2099", "17/08/2099", "Chọn ngày khác"]
+    assert response.json()["quick_replies"] == ["16/08/2099", "17/08/2099", "Chá»n ngÃ y khÃ¡c"]
     saved = container.memory_cache._contexts[context.conversation_id]
     assert saved.num_customer == 1
     assert saved.duration_minutes == 60
@@ -1121,14 +1121,14 @@ def test_invalid_people_count_returns_business_validation_message(
     response = post_message(
         client,
         conversation_id=context.conversation_id,
-        message="5 người",
+        message="5 ngÆ°á»i",
     )
 
     assert response.status_code == 200
     assert response.json()["state"] == "selecting_people"
     assert response.json()["status"] == "failure_handled"
-    assert "tối đa 3 người" in response.json()["text"].casefold()
-    assert response.json()["quick_replies"] == ["1 người", "2 người", "3 người"]
+    assert "tá»‘i Ä‘a 3 ngÆ°á»i" in response.json()["text"].casefold()
+    assert response.json()["quick_replies"] == ["1 ngÆ°á»i", "2 ngÆ°á»i", "3 ngÆ°á»i"]
     assert outbound_requests == []
 
 
@@ -1210,7 +1210,7 @@ def test_valid_structured_llm_fallback_returns_http_200(
     response = post_message(
         client,
         conversation_id="conversation-llm",
-        message="Giúp mình bắt đầu quy trình nhé",
+        message="GiÃºp mÃ¬nh báº¯t Ä‘áº§u quy trÃ¬nh nhÃ©",
     )
 
     assert response.status_code == 200
@@ -1225,7 +1225,7 @@ def test_faq_returns_safe_json_without_state_change_or_internal_metadata(
     client, outbound_requests = chat_client
     container = container_of(client)
     gateway = StaticKnowledgeGateway(
-        [KnowledgeDocument("Cửa hàng mở cửa từ 09:00 đến 22:00.", 0.98, "private")]
+        [KnowledgeDocument("Cá»­a hÃ ng má»Ÿ cá»­a tá»« 09:00 Ä‘áº¿n 22:00.", 0.98, "private")]
     )
     container.faq_manager = FAQManager(
         knowledge_gateway=gateway,
@@ -1235,20 +1235,20 @@ def test_faq_returns_safe_json_without_state_change_or_internal_metadata(
     response = post_message(
         client,
         conversation_id="conversation-faq-json",
-        message="Cửa hàng mở cửa lúc mấy giờ?",
+        message="Cá»­a hÃ ng má»Ÿ cá»­a lÃºc máº¥y giá»?",
     )
 
     assert response.status_code == 200
     assert response.json() == {
         "conversation_id": "conversation-faq-json",
-        "text": "Cửa hàng mở cửa từ 09:00 đến 22:00.",
+        "text": "Cá»­a hÃ ng má»Ÿ cá»­a tá»« 09:00 Ä‘áº¿n 22:00.",
         "state": "idle",
         "status": "success",
         "instruction_template": None,
         "quick_replies": [],
         "metadata": {"response_type": "faq", "source_count": 1},
     }
-    assert gateway.calls == [("Cửa hàng mở cửa lúc mấy giờ?", 6)]
+    assert gateway.calls == [("Cá»­a hÃ ng má»Ÿ cá»­a lÃºc máº¥y giá»?", 6)]
     assert "private" not in response.text
     assert "0.98" not in response.text
     assert outbound_requests == []
@@ -1271,12 +1271,12 @@ def test_in_progress_change_returns_200_and_persists_atomic_result(
     response = post_message(
         client,
         conversation_id=context.conversation_id,
-        message="đổi ngày",
+        message="Ä‘á»•i ngÃ y",
     )
 
     assert response.status_code == 200
     assert response.json()["state"] == "selecting_date"
-    assert response.json()["text"] == "Bạn muốn đổi sang ngày nào?"
+    assert response.json()["text"] == "Báº¡n muá»‘n Ä‘á»•i sang ngÃ y nÃ o?"
     saved = container.memory_cache._contexts[context.conversation_id]
     assert saved.booking_date is None
     assert saved.start_time is None
@@ -1312,7 +1312,7 @@ def test_change_date_with_value_applies_in_one_runtime_turn(
     response = post_message(
         client,
         conversation_id=context.conversation_id,
-        message="đổi sang ngày 07/08/2026",
+        message="Ä‘á»•i sang ngÃ y 07/08/2026",
     )
 
     assert response.status_code == 200
@@ -1356,7 +1356,7 @@ def test_change_shop_resolves_before_committing_new_shop(
     response = post_message(
         client,
         conversation_id=context.conversation_id,
-        message="đổi sang chi nhánh District 1",
+        message="Ä‘á»•i sang chi nhÃ¡nh District 1",
     )
 
     assert response.status_code == 200
@@ -1416,7 +1416,7 @@ def test_ambiguous_shop_change_does_not_mutate_existing_booking(
     response = post_message(
         client,
         conversation_id=context.conversation_id,
-        message="đổi sang chi nhánh Tokyo",
+        message="Ä‘á»•i sang chi nhÃ¡nh Tokyo",
     )
 
     assert response.status_code == 200
@@ -1445,12 +1445,12 @@ def test_completed_booking_change_is_rejected_without_mutation_or_pos_call(
     response = post_message(
         client,
         conversation_id=context.conversation_id,
-        message="đổi ngày",
+        message="Ä‘á»•i ngÃ y",
     )
 
     assert response.status_code == 200
     assert response.json()["state"] == "completed"
-    assert "Đặt lịch này đã hoàn tất" in response.json()["text"]
+    assert "Äáº·t lá»‹ch nÃ y Ä‘Ã£ hoÃ n táº¥t" in response.json()["text"]
     saved = container.memory_cache._contexts[context.conversation_id]
     assert saved.booking_date == date(2026, 8, 5)
     assert outbound_requests == []
@@ -1483,17 +1483,17 @@ def test_conversations_are_independent_and_same_conversation_is_retained(
     first = post_message(
         client,
         conversation_id="conversation-a",
-        message="Tôi muốn đặt lịch",
+        message="TÃ´i muá»‘n Ä‘áº·t lá»‹ch",
     )
     second = post_message(
         client,
         conversation_id="conversation-b",
-        message="Tôi muốn đặt lịch",
+        message="TÃ´i muá»‘n Ä‘áº·t lá»‹ch",
     )
     retained = post_message(
         client,
         conversation_id="conversation-a",
-        message="không có kết quả chắc chắn",
+        message="khÃ´ng cÃ³ káº¿t quáº£ cháº¯c cháº¯n",
     )
     container = container_of(client)
     first_context = container.memory_cache._contexts["conversation-a"]
@@ -1520,7 +1520,7 @@ def test_prepared_people_state_processes_structured_llm_turn(
     response = post_message(
         client,
         conversation_id="conversation-a",
-        message="2 người",
+        message="2 ngÆ°á»i",
     )
 
     assert response.status_code == 200
@@ -1630,12 +1630,12 @@ def test_unknown_message_returns_state_aware_clarification(
     response = post_message(
         client,
         conversation_id="conversation-a",
-        message="nội dung không xác định",
+        message="ná»™i dung khÃ´ng xÃ¡c Ä‘á»‹nh",
     )
 
     assert response.status_code == 200
     assert response.json()["state"] == "completed"
-    assert "nhập lại rõ hơn" in response.json()["text"]
+    assert "nháº­p láº¡i rÃµ hÆ¡n" in response.json()["text"]
 
 
 def test_response_never_exposes_sensitive_context_fields(

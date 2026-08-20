@@ -1,4 +1,4 @@
-"""Integration tests for the business-event SSE chat endpoint."""
+﻿"""Integration tests for the business-event SSE chat endpoint."""
 
 import json
 from collections.abc import Iterator
@@ -46,8 +46,8 @@ from app.infrastructure.gemini_client import (
     LLMMessage,
     LLMResponse,
 )
-from app.knowledge import KnowledgeDocument, KnowledgeGatewayUnavailableError
-from app.knowledge.query.service import FAQManager
+from app.rag_v1 import KnowledgeDocument, KnowledgeGatewayUnavailableError
+from app.rag_v1.service import FAQManager
 from app.main import create_app
 from tests.structured_nlu_gateway import StructuredNLUGateway
 
@@ -266,7 +266,7 @@ def test_stream_success_contract_and_event_order(
     response = post_stream(
         client,
         conversation_id="conversation-a",
-        message="Tôi muốn đặt lịch",
+        message="TÃ´i muá»‘n Ä‘áº·t lá»‹ch",
     )
     events = parse_events(response)
 
@@ -316,14 +316,14 @@ def test_change_request_has_json_parity_and_normal_sse_event_order(
     response = post_stream(
         client,
         conversation_id=context.conversation_id,
-        message="đổi ngày",
+        message="Ä‘á»•i ngÃ y",
     )
     events = parse_events(response)
 
     assert response.status_code == 200
     assert [event for event, _ in events] == ["started", "message", "completed"]
     assert events[1][1]["state"] == "selecting_date"
-    assert events[1][1]["text"] == "Bạn muốn đổi sang ngày nào?"
+    assert events[1][1]["text"] == "Báº¡n muá»‘n Ä‘á»•i sang ngÃ y nÃ o?"
     assert "token" not in {event for event, _ in events}
     saved = container.memory_cache._contexts[context.conversation_id]
     assert saved.booking_date is None
@@ -422,14 +422,14 @@ def test_completed_booking_without_code_has_json_sse_parity_and_one_create_per_r
         "/api/v1/chat",
         json={
             "conversation_id": json_context.conversation_id,
-            "message": "xác nhận",
+            "message": "xÃ¡c nháº­n",
             "idempotency_key": "endpoint-json",
         },
     )
     streamed = post_stream(
         client,
         conversation_id=sse_context.conversation_id,
-        message="xác nhận",
+        message="xÃ¡c nháº­n",
         idempotency_key="endpoint-sse",
     )
     events = parse_events(streamed)
@@ -439,8 +439,8 @@ def test_completed_booking_without_code_has_json_sse_parity_and_one_create_per_r
     assert regular.json()["status"] == "success"
     assert regular.json()["metadata"] == {"booking_created": True}
     completion_text = cast(str, regular.json()["text"])
-    assert "Đặt lịch thành công" in completion_text
-    assert "Mã đặt lịch" in completion_text
+    assert "Äáº·t lá»‹ch thÃ nh cÃ´ng" in completion_text
+    assert "MÃ£ Ä‘áº·t lá»‹ch" in completion_text
     assert "booking code" not in completion_text.casefold()
     assert "reservation code" not in completion_text.casefold()
     assert "33333333-3333-3333-3333-333333333333" in completion_text
@@ -502,13 +502,13 @@ def test_unknown_input_is_a_normal_message_not_an_error(
     response = post_stream(
         client,
         conversation_id="conversation-a",
-        message="nội dung không xác định",
+        message="ná»™i dung khÃ´ng xÃ¡c Ä‘á»‹nh",
     )
     events = parse_events(response)
 
     assert [event for event, _ in events] == ["started", "message", "completed"]
     assert events[1][1]["state"] == "completed"
-    assert "nhập lại rõ hơn" in cast(str, events[1][1]["text"])
+    assert "nháº­p láº¡i rÃµ hÆ¡n" in cast(str, events[1][1]["text"])
     assert gateway.calls == 1
 
 
@@ -576,7 +576,7 @@ def test_runtime_processing_error_becomes_terminal_safe_error_event(
     assert events[1][1] == {
         "conversation_id": "conversation-a",
         "code": "chat_processing_failed",
-        "message": "Hệ thống chưa thể xử lý yêu cầu lúc này.",
+        "message": "Há»‡ thá»‘ng chÆ°a thá»ƒ xá»­ lÃ½ yÃªu cáº§u lÃºc nÃ y.",
     }
     assert "private runtime failure" not in response.text
     assert "event: completed" not in response.text
@@ -619,7 +619,7 @@ def test_context_is_retained_between_stream_and_json_requests(
     streamed = post_stream(
         client,
         conversation_id="conversation-a",
-        message="Tôi muốn đặt lịch",
+        message="TÃ´i muá»‘n Ä‘áº·t lá»‹ch",
     )
     regular = client.post(
         "/api/v1/chat",
@@ -663,13 +663,13 @@ def test_stream_message_has_parity_with_json_on_independent_contexts(
         "/api/v1/chat",
         json={
             "conversation_id": "conversation-json",
-            "message": "Tôi muốn đặt lịch",
+            "message": "TÃ´i muá»‘n Ä‘áº·t lá»‹ch",
         },
     )
     streamed = post_stream(
         client,
         conversation_id="conversation-sse",
-        message="Tôi muốn đặt lịch",
+        message="TÃ´i muá»‘n Ä‘áº·t lá»‹ch",
     )
     regular_body = regular.json()
     stream_message = parse_events(streamed)[1][1]
@@ -696,13 +696,13 @@ def test_faq_stream_has_json_parity_and_uses_one_injected_gateway(
     client, outbound_requests = stream_client
     container = container_of(client)
     gateway = StaticKnowledgeGateway(
-        [KnowledgeDocument("Bãi đỗ xe nằm cạnh cửa hàng.", 0.9, "private")]
+        [KnowledgeDocument("BÃ£i Ä‘á»— xe náº±m cáº¡nh cá»­a hÃ ng.", 0.9, "private")]
     )
     container.faq_manager = FAQManager(
         knowledge_gateway=gateway,
         instruction_builder=container.instruction_builder,
     )
-    message = "Có chỗ đậu xe không?"
+    message = "CÃ³ chá»— Ä‘áº­u xe khÃ´ng?"
 
     regular = client.post(
         "/api/v1/chat",
@@ -748,7 +748,7 @@ def test_handled_knowledge_failure_is_a_normal_sse_message(
     response = post_stream(
         client,
         conversation_id="faq-unavailable",
-        message="Chính sách hủy lịch như thế nào?",
+        message="ChÃ­nh sÃ¡ch há»§y lá»‹ch nhÆ° tháº¿ nÃ o?",
     )
     events = parse_events(response)
 

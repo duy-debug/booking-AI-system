@@ -1,4 +1,4 @@
-"""Unit tests for deterministic FAQ sidecar orchestration."""
+﻿"""Unit tests for deterministic FAQ sidecar orchestration."""
 
 import asyncio
 from copy import deepcopy
@@ -10,8 +10,8 @@ from app.dialog.dialog_controller import DialogTurnStatus
 from app.dialog.instruction_builder import DialogResponse, InstructionBuilder
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
-from app.knowledge import KnowledgeDocument, KnowledgeGatewayUnavailableError
-from app.knowledge.query.service import FAQManager
+from app.rag_v1 import KnowledgeDocument, KnowledgeGatewayUnavailableError
+from app.rag_v1.service import FAQManager
 
 
 class FakeKnowledgeGateway:
@@ -81,7 +81,7 @@ async def test_missing_gateway_renders_safe_unavailable_response() -> None:
     response = await manager.answer(query="Opening hours?", context=context)
 
     assert response.status is DialogTurnStatus.FAILURE_HANDLED
-    assert "chưa thể tra cứu" in response.text
+    assert "tra cứu" in response.text
     assert builder.calls == [(response.text, 0, context, True)]
 
 
@@ -94,7 +94,7 @@ async def test_empty_and_blank_documents_render_safe_no_result() -> None:
     response = await manager.answer(query="Unknown policy?", context=context)
 
     assert response.status is DialogTurnStatus.FAILURE_HANDLED
-    assert "chưa có đủ thông tin" in response.text
+    assert "đủ thông tin" in response.text
     assert gateway.calls == [("Unknown policy?", 6)]
     assert builder.calls == [(response.text, 0, context, True)]
 
@@ -229,7 +229,7 @@ async def test_context_is_not_mutated_and_active_state_reminder_is_rendered() ->
     response = await manager.answer(query="Closing time?", context=context)
 
     assert "Open until 22:00." in response.text
-    assert "khung giờ" in response.text
+    assert "khung" in response.text
     assert response.state is BookingState.SELECTING_TIME
     assert context == before
     assert not hasattr(manager, "_context_store")

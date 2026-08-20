@@ -1,22 +1,13 @@
-"""Unit tests for secure Markdown loading and section-aware chunking."""
+"""Tests for flat rag_v1 loading and chunking."""
 
 import sys
-from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from app.knowledge.index.chunker import KnowledgeChunk, SectionAwareMarkdownChunker
-from app.knowledge.index.loader import (
-    InvalidKnowledgeContentError,
-    InvalidKnowledgeEncodingError,
-    InvalidKnowledgePathError,
-    KnowledgeFileTooLargeError,
-    MarkdownDocument,
-    MarkdownKnowledgeLoader,
-    UnsupportedKnowledgeFileError,
-)
+from app.rag_v1.chunker import Chunk, DocumentChunker
+from app.rag_v1.loader import Document, DocumentLoader
 
 
 class FakePdfPage:
@@ -38,222 +29,74 @@ class FakePdfReader:
         self.path = path
 
 
-class EmptyPdfReader:
-    pages = [FakePdfPage(None), FakePdfPage("   ")]
+def test_loads_markdown_and_normalizes_line_endings(tmp_path: Path) -> None:
+    path = tmp_path / "faq.md"
+    path.write_bytes("# FAQ\r\n\r\nMở lúc 08:00.\r".encode())
 
-    def __init__(self, path: Path) -> None:
-        self.path = path
+    document = DocumentLoader().load_file(path)
 
-
-def make_root(tmp_path: Path) -> Path:
-    root = tmp_path / "knowledge"
-    root.mkdir()
-    return root
-
-
-def test_loads_utf8_markdown_and_normalizes_line_endings(tmp_path: Path) -> None:
-    root = make_root(tmp_path)
-    (root / "faq.md").write_bytes("# Giờ mở cửa\r\n\r\nMở lúc 08:00.\r".encode())
-
-    document = MarkdownKnowledgeLoader(root).load(Path("faq.md"))
-
-    assert document == MarkdownDocument(
-        content="# Giờ mở cửa\n\nMở lúc 08:00.\n",
-        source="knowledge/faq.md",
+    assert document == Document(
+        text="# FAQ\n\nMở lúc 08:00.\n",
+        source="faq.md",
+        file_path=str(path),
     )
-
-
-def test_rejects_unsupported_knowledge_file(tmp_path: Path) -> None:
-    root = make_root(tmp_path)
-    (root / "secret.txt").write_text("not knowledge", encoding="utf-8")
-
-    with pytest.raises(UnsupportedKnowledgeFileError):
-        MarkdownKnowledgeLoader(root).load(Path("secret.txt"))
 
 
 def test_loads_pdf_by_extracting_page_text(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = make_root(tmp_path)
-    (root / "policy.pdf").write_bytes(b"%PDF fake")
+    path = tmp_path / "policy.pdf"
+    path.write_bytes(b"%PDF fake")
     monkeypatch.setitem(sys.modules, "pypdf", SimpleNamespace(PdfReader=FakePdfReader))
 
-    document = MarkdownKnowledgeLoader(root).load(Path("policy.pdf"))
+    document = DocumentLoader().load_file(path)
 
-    assert document == MarkdownDocument(
-        content="Trang 1: Chính sách đặt lịch.\n\nTrang 2: Chính sách hủy lịch.",
-        source="knowledge/policy.pdf",
-    )
+    assert document.text == "Trang 1: Chính sách đặt lịch.\n\nTrang 2: Chính sách hủy lịch."
+    assert document.source == "policy.pdf"
 
 
-def test_rejects_pdf_without_extractable_text(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    root = make_root(tmp_path)
-    (root / "scan.pdf").write_bytes(b"%PDF fake scan")
-    monkeypatch.setitem(sys.modules, "pypdf", SimpleNamespace(PdfReader=EmptyPdfReader))
+def test_rejects_unsupported_file(tmp_path: Path) -> None:
+    path = tmp_path / "secret.exe"
+    path.write_text("private", encoding="utf-8")
 
-    with pytest.raises(InvalidKnowledgeContentError, match="extractable text"):
-        MarkdownKnowledgeLoader(root).load(Path("scan.pdf"))
+    with pytest.raises(ValueError, match="Unsupported"):
+        DocumentLoader().load_file(path)
 
 
-def test_rejects_path_traversal_and_absolute_path_outside_root(tmp_path: Path) -> None:
-    root = make_root(tmp_path)
-    outside = tmp_path / "outside.md"
-    outside.write_text("private", encoding="utf-8")
-    loader = MarkdownKnowledgeLoader(root)
-
-    with pytest.raises(InvalidKnowledgePathError):
-        loader.load(Path("../outside.md"))
-    with pytest.raises(InvalidKnowledgePathError):
-        loader.load(outside)
-
-
-def test_extracts_headings_and_preserves_section_order() -> None:
-    document = MarkdownDocument(
-        content=(
-            "Preamble.\n\n# Opening Hours\n\nOpen at 08:00.\n\n"
-            "## Parking\n\nParking is unconfirmed."
-        ),
-        source="knowledge/faq.md",
-    )
-
-    chunks = SectionAwareMarkdownChunker().chunk(document)
-
-    assert [chunk.section for chunk in chunks] == [None, "Opening Hours", "Parking"]
-    assert [chunk.chunk_index for chunk in chunks] == [0, 1, 2]
-    assert chunks[0].content == "Preamble."
-    assert chunks[1].content == "# Opening Hours\n\nOpen at 08:00."
-    assert chunks[2].content == "# Parking\n\nParking is unconfirmed."
-
-
-def test_long_section_splits_by_words_without_empty_chunks() -> None:
-    body = " ".join(f"word{index}" for index in range(100))
-    document = MarkdownDocument(
-        content=f"# Long Policy\n\n{body}",
-        source="knowledge/long.md",
-    )
-
-    chunks = SectionAwareMarkdownChunker(max_chunk_size=120).chunk(document)
-
-    assert len(chunks) > 1
-    assert all(chunk.content.strip() for chunk in chunks)
-    assert all(len(chunk.content) <= 120 for chunk in chunks)
-    assert all(chunk.content.startswith("# Long Policy\n\n") for chunk in chunks)
-    reconstructed = " ".join(chunk.content.removeprefix("# Long Policy\n\n") for chunk in chunks)
-    assert reconstructed == body
-
-
-def test_chunk_ids_are_deterministic_and_change_with_content() -> None:
-    chunker = SectionAwareMarkdownChunker()
-    original = MarkdownDocument("# Policy\n\nOriginal content.", "knowledge/faq.md")
-    changed = MarkdownDocument("# Policy\n\nChanged content.", "knowledge/faq.md")
-
-    first = chunker.chunk(original)
-    repeated = chunker.chunk(original)
-    updated = chunker.chunk(changed)
-
-    assert first == repeated
-    assert first[0].chunk_id != updated[0].chunk_id
-    assert first[0].chunk_id.startswith("kc_")
-
-
-def test_chunk_is_immutable_and_source_never_leaks_absolute_path() -> None:
-    document = MarkdownDocument("# FAQ\n\nAnswer.", "knowledge/faq.md")
-    chunk = SectionAwareMarkdownChunker().chunk(document)[0]
-
-    assert isinstance(chunk, KnowledgeChunk)
-    assert chunk.source == "knowledge/faq.md"
-    assert not Path(chunk.source).is_absolute()
-    with pytest.raises(FrozenInstanceError):
-        chunk.content = "changed"  # type: ignore[misc]
-
-
-def test_duplicate_headings_remain_ordered_with_unique_indices() -> None:
-    document = MarkdownDocument(
-        "# Policy\n\nRepeated content.\n\n# Policy\n\nRepeated content.",
-        "knowledge/duplicate.md",
-    )
-
-    chunks = SectionAwareMarkdownChunker().chunk(document)
-
-    assert [chunk.section for chunk in chunks] == ["Policy", "Policy"]
-    assert [chunk.chunk_index for chunk in chunks] == [0, 1]
-    assert chunks[0].content == chunks[1].content
-    assert len({chunk.chunk_id for chunk in chunks}) == 2
-
-
-def test_empty_file_and_heading_only_section_create_no_chunks(tmp_path: Path) -> None:
-    root = make_root(tmp_path)
-    (root / "empty.md").write_text("", encoding="utf-8")
-    (root / "heading.md").write_text("# Empty Section\n", encoding="utf-8")
-    loader = MarkdownKnowledgeLoader(root)
-    chunker = SectionAwareMarkdownChunker()
-
-    assert chunker.chunk(loader.load(Path("empty.md"))) == []
-    assert chunker.chunk(loader.load(Path("heading.md"))) == []
-
-
-def test_rejects_invalid_utf8_and_binary_content(tmp_path: Path) -> None:
-    root = make_root(tmp_path)
-    (root / "invalid.md").write_bytes(b"\xff\xfe")
-    (root / "binary.md").write_bytes(b"valid\x00text")
-    loader = MarkdownKnowledgeLoader(root)
-
-    with pytest.raises(InvalidKnowledgeEncodingError):
-        loader.load(Path("invalid.md"))
-    with pytest.raises(InvalidKnowledgeContentError):
-        loader.load(Path("binary.md"))
-
-
-def test_rejects_file_above_configured_size_limit(tmp_path: Path) -> None:
-    root = make_root(tmp_path)
-    (root / "large.md").write_text("12345", encoding="utf-8")
-
-    with pytest.raises(KnowledgeFileTooLargeError):
-        MarkdownKnowledgeLoader(root, max_file_size=4).load(Path("large.md"))
-
-
-def test_load_all_sorts_by_relative_path_and_ignores_unsupported_files(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    root = make_root(tmp_path)
+def test_load_directory_is_recursive_and_sorted(tmp_path: Path) -> None:
+    root = tmp_path / "knowledge"
     nested = root / "nested"
-    nested.mkdir()
+    nested.mkdir(parents=True)
     (root / "z.md").write_text("Z", encoding="utf-8")
     (root / "a.md").write_text("A", encoding="utf-8")
-    (root / "policy.pdf").write_bytes(b"%PDF fake")
-    (nested / "b.MD").write_text("B", encoding="utf-8")
-    (root / "ignored.txt").write_text("ignored", encoding="utf-8")
-    monkeypatch.setitem(sys.modules, "pypdf", SimpleNamespace(PdfReader=FakePdfReader))
+    (nested / "b.txt").write_text("B", encoding="utf-8")
+    (root / "ignored.exe").write_text("ignored", encoding="utf-8")
 
-    documents = MarkdownKnowledgeLoader(root).load_all()
+    documents = DocumentLoader().load_directory(root)
 
-    assert [document.source for document in documents] == [
-        "knowledge/a.md",
-        "knowledge/nested/b.MD",
-        "knowledge/policy.pdf",
-        "knowledge/z.md",
+    assert [document.source for document in documents] == ["a.md", "z.md"]
+
+
+def test_chunker_uses_simple_sliding_window_with_overlap() -> None:
+    document = Document(text="abcdefghij", source="faq.md", file_path="knowledge/faq.md")
+
+    chunks = DocumentChunker(chunk_size=4, chunk_overlap=1).chunk_document(document)
+
+    assert chunks == [
+        Chunk("abcd", "faq.md", "knowledge/faq.md", 0),
+        Chunk("defg", "faq.md", "knowledge/faq.md", 1),
+        Chunk("ghij", "faq.md", "knowledge/faq.md", 2),
+        Chunk("j", "faq.md", "knowledge/faq.md", 3),
     ]
 
 
-def test_rejects_unsafe_source_on_manually_created_document() -> None:
-    document = MarkdownDocument("Content", "../secret.md")
+def test_chunk_documents_flattens_all_documents() -> None:
+    documents = [
+        Document(text="abc", source="a.md", file_path="a.md"),
+        Document(text="def", source="b.md", file_path="b.md"),
+    ]
 
-    with pytest.raises(InvalidKnowledgePathError):
-        SectionAwareMarkdownChunker().chunk(document)
+    chunks = DocumentChunker(chunk_size=10, chunk_overlap=0).chunk_documents(documents)
 
-
-def test_markdown_inside_code_fence_is_data_not_a_section() -> None:
-    document = MarkdownDocument(
-        "# Policy\n\n```text\n# Not a heading\n```\n\nAnswer.",
-        "knowledge/code.md",
-    )
-
-    chunks = SectionAwareMarkdownChunker().chunk(document)
-
-    assert [chunk.section for chunk in chunks] == ["Policy"]
-    assert "# Not a heading" in chunks[0].content
+    assert [chunk.text for chunk in chunks] == ["abc", "def"]

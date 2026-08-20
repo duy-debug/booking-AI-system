@@ -55,10 +55,7 @@ class Settings:
     qdrant_api_key: str | None = None
     qdrant_collection: str = "kb_chunks"
     knowledge_qdrant_enabled: bool = False
-    rag_hybrid_enabled: bool = False
-    rag_hybrid_sparse_top_k: int = 12
-    rag_hybrid_fusion_top_k: int | None = None
-    rag_hybrid_score_threshold: float = 0.45
+    rag_score_threshold: float = 0.45
 
 
 # Quản lý trace context an toàn cho async và propagate header qua FastAPI/ASGI.

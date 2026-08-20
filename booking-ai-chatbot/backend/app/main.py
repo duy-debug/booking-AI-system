@@ -101,6 +101,6 @@ app = create_app(
         qdrant_api_key=os.getenv("QDRANT_API_KEY") or None,
         qdrant_collection=os.getenv("QDRANT_COLLECTION", "kb_chunks"),
         knowledge_qdrant_enabled=_knowledge_qdrant_enabled,
-        rag_hybrid_score_threshold=float(os.getenv("RAG_HYBRID_SCORE_THRESHOLD", "0.45")),
+        rag_score_threshold=float(os.getenv("RAG_SCORE_THRESHOLD", "0.45")),
     )
 )

@@ -1,11 +1,11 @@
-"""Contract tests for the knowledge gateway port."""
+﻿"""Contract tests for the knowledge gateway port."""
 
 from dataclasses import FrozenInstanceError
 from typing import TYPE_CHECKING
 
 import pytest
 
-from app.knowledge import KnowledgeDocument, KnowledgeGateway
+from app.rag_v1 import KnowledgeDocument, KnowledgeGateway
 
 DOCUMENT = KnowledgeDocument(
     content="The spa is open from 9:00 to 21:00.",

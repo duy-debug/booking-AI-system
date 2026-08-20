@@ -1,4 +1,4 @@
-"""Tests for lazy local semantic embeddings."""
+﻿"""Tests for lazy local semantic embeddings."""
 
 import subprocess
 import sys
@@ -7,7 +7,7 @@ from collections.abc import Sequence
 import pytest
 
 from app.infrastructure.context_store import Settings
-from app.knowledge.embeddings.sentence_transformer import SentenceTransformerEmbedding
+from app.rag_v1.embedding import EmbeddingModel
 
 
 class FakeEncoder:
@@ -41,13 +41,13 @@ class RecordingLoader:
 def test_model_is_lazy_loaded_once_and_reused() -> None:
     encoder = FakeEncoder()
     loader = RecordingLoader(encoder)
-    embedding = SentenceTransformerEmbedding("configured-model", model_loader=loader)
+    embedding = EmbeddingModel("configured-model", model_loader=loader)
 
     assert loader.model_names == []
     with pytest.raises(RuntimeError, match="after"):
         _ = embedding.dimension
 
-    assert embedding.embed_query("xin chào") == [0.0, 0.5, 1.0]
+    assert embedding.embed_query("xin chÃ o") == [0.0, 0.5, 1.0]
     assert embedding.embed_query("hello") == [0.0, 0.5, 1.0]
     assert loader.model_names == ["configured-model"]
     assert embedding.dimension == 3
@@ -59,7 +59,7 @@ def test_model_name_is_passed_from_runtime_config() -> None:
         embedding_model_name="configured-model",
     )
     loader = RecordingLoader(FakeEncoder())
-    embedding = SentenceTransformerEmbedding(
+    embedding = EmbeddingModel(
         settings.embedding_model_name,
         model_loader=loader,
     )
@@ -71,7 +71,7 @@ def test_model_name_is_passed_from_runtime_config() -> None:
 
 def test_documents_use_one_normalized_batch_and_preserve_order() -> None:
     encoder = FakeEncoder()
-    embedding = SentenceTransformerEmbedding(
+    embedding = EmbeddingModel(
         "model",
         model_loader=RecordingLoader(encoder),
     )
@@ -90,7 +90,7 @@ def test_documents_use_one_normalized_batch_and_preserve_order() -> None:
 
 def test_empty_documents_do_not_load_model() -> None:
     loader = RecordingLoader(FakeEncoder())
-    embedding = SentenceTransformerEmbedding("model", model_loader=loader)
+    embedding = EmbeddingModel("model", model_loader=loader)
 
     assert embedding.embed_documents([]) == []
     assert loader.model_names == []
@@ -99,7 +99,7 @@ def test_empty_documents_do_not_load_model() -> None:
 @pytest.mark.parametrize("query", ["", "   ", "\n\t"])
 def test_empty_query_is_rejected_without_loading_model(query: str) -> None:
     loader = RecordingLoader(FakeEncoder())
-    embedding = SentenceTransformerEmbedding("model", model_loader=loader)
+    embedding = EmbeddingModel("model", model_loader=loader)
 
     with pytest.raises(ValueError, match="query"):
         embedding.embed_query(query)
@@ -117,7 +117,7 @@ def test_invalid_output_count_is_rejected() -> None:
         ) -> object:
             return [[1.0, 2.0, 3.0]]
 
-    embedding = SentenceTransformerEmbedding(
+    embedding = EmbeddingModel(
         "model",
         model_loader=RecordingLoader(MissingVectorEncoder()),
     )
@@ -136,7 +136,7 @@ def test_inconsistent_vector_dimension_is_rejected() -> None:
         ) -> object:
             return [[1.0, 2.0] for _ in sentences]
 
-    embedding = SentenceTransformerEmbedding(
+    embedding = EmbeddingModel(
         "model",
         model_loader=RecordingLoader(WrongDimensionEncoder()),
     )

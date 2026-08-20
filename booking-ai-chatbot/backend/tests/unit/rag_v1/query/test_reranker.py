@@ -1,9 +1,9 @@
-"""Tests for the runtime knowledge reranker."""
+﻿"""Tests for the runtime knowledge reranker."""
 
 import pytest
 
-from app.knowledge import KnowledgeDocument
-from app.knowledge.query.service import KnowledgeReranker
+from app.rag_v1 import KnowledgeDocument
+from app.rag_v1.service import KnowledgeReranker
 
 
 def document(content: str, score: float) -> KnowledgeDocument:

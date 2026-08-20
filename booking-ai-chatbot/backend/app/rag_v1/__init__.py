@@ -1,7 +1,8 @@
-"""Các building block Knowledge/RAG dùng chung cho chatbot."""
-
 from dataclasses import dataclass
 from typing import Protocol
+
+from app.rag_v1.config import RAGConfig
+from app.rag_v1.indexer import KnowledgeIndexer, build_indexer
 
 
 class KnowledgeGatewayError(Exception):
@@ -9,7 +10,7 @@ class KnowledgeGatewayError(Exception):
 
 
 class KnowledgeGatewayUnavailableError(KnowledgeGatewayError):
-    """Được raise khi knowledge source đang không sẵn sàng."""
+    """Được raise khi knowledge source chưa sẵn sàng hoặc đang lỗi."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,7 +23,7 @@ class KnowledgeDocument:
 
 
 class KnowledgeGateway(Protocol):
-    """Contract search knowledge mà application layer cần dùng."""
+    """Contract search knowledge mà dialog/FAQ layer cần dùng."""
 
     async def search(
         self,
@@ -39,4 +40,7 @@ __all__ = [
     "KnowledgeGateway",
     "KnowledgeGatewayError",
     "KnowledgeGatewayUnavailableError",
+    "KnowledgeIndexer",
+    "RAGConfig",
+    "build_indexer",
 ]

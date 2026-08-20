@@ -1,8 +1,6 @@
-"""Tests for semantic Qdrant knowledge retrieval."""
+﻿"""Tests for semantic Qdrant knowledge retrieval."""
 
 import asyncio
-import sys
-from types import SimpleNamespace
 from typing import cast
 
 import httpx
@@ -11,10 +9,9 @@ from qdrant_client import models
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 from qdrant_client.http.models.models import QueryResponse
 
-from app.knowledge import KnowledgeGatewayUnavailableError
-from app.knowledge.embeddings.sentence_transformer import SentenceTransformerEmbedding
-from app.knowledge.query.retriever import KnowledgeQdrantClient, _LlamaIndexRetrieverFactory
-from app.knowledge.stores.qdrant import QdrantQueryClient
+from app.rag_v1 import KnowledgeGatewayUnavailableError
+from app.rag_v1.embedding import EmbeddingModel
+from app.rag_v1.retriever import KnowledgeQdrantClient
 
 
 class FakeEmbedding:
@@ -89,8 +86,8 @@ def gateway(
     configured_embedding = embedding or FakeEmbedding()
     return (
         KnowledgeQdrantClient(
-            client=cast(QdrantQueryClient, client),
-            embedding=cast(SentenceTransformerEmbedding, configured_embedding),
+            client=client,
+            embedding=cast(EmbeddingModel, configured_embedding),
             collection_name="kb_chunks",
         ),
         configured_embedding,
@@ -211,58 +208,3 @@ async def test_cancelled_error_propagates() -> None:
 
     with pytest.raises(asyncio.CancelledError):
         await knowledge.search("query")
-
-
-def test_llamaindex_factory_enables_hybrid_query_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: dict[str, object] = {}
-    client = cast(QdrantQueryClient, FakeQueryClient())
-    embedding = cast(SentenceTransformerEmbedding, FakeEmbedding())
-
-    class FakeIndex:
-        def as_retriever(self, **kwargs: object) -> object:
-            calls["retriever_kwargs"] = kwargs
-            return object()
-
-    class FakeVectorStoreIndex:
-        @staticmethod
-        def from_vector_store(*, vector_store: object, embed_model: object) -> FakeIndex:
-            calls["vector_store"] = vector_store
-            calls["embed_model"] = embed_model
-            return FakeIndex()
-
-    monkeypatch.setitem(
-        sys.modules,
-        "llama_index.core",
-        SimpleNamespace(VectorStoreIndex=FakeVectorStoreIndex),
-    )
-    monkeypatch.setattr(
-        "app.knowledge.query.retriever.build_qdrant_vector_store",
-        lambda **kwargs: kwargs,
-    )
-    monkeypatch.setattr(
-        "app.knowledge.query.retriever.build_llamaindex_embedding",
-        lambda embedding: ("wrapped", embedding),
-    )
-
-    factory = _LlamaIndexRetrieverFactory(
-        client=client,
-        embedding=embedding,
-        collection_name="kb_chunks",
-        hybrid_enabled=True,
-        sparse_top_k=11,
-        hybrid_top_k=4,
-    )
-
-    factory.build(3)
-
-    assert calls["vector_store"] == {
-        "client": client,
-        "collection_name": "kb_chunks",
-        "enable_hybrid": True,
-    }
-    assert calls["retriever_kwargs"] == {
-        "similarity_top_k": 3,
-        "vector_store_query_mode": "hybrid",
-        "sparse_top_k": 11,
-        "hybrid_top_k": 4,
-    }
