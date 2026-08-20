@@ -1,22 +1,25 @@
 from app.rag_v1.embedding import EmbeddingModel
+from app.rag_v1.fusion import rrf_merge
+from app.rag_v1.keyword_search import BM25KeywordSearch
 from app.rag_v1.vector_store import SearchResult, VectorStore
 
 # ============================================================
 # Retriever
 # ============================================================
 #
-# Class này chịu trách nhiệm:
+# Class này chịu trách nhiệm lấy candidate chunks cho RAG query.
+#
+# Trong bản hybrid:
 #
 # user query
 #     ↓
-# embedding
+# semantic search
 #     ↓
-# query vector
+# keyword search
 #     ↓
-# vector search
+# RRF merge
 #     ↓
-# top-k relevant chunks
-#
+# top-k candidate chunks
 #
 # Nó KHÔNG:
 #
@@ -28,12 +31,13 @@ from app.rag_v1.vector_store import SearchResult, VectorStore
 #
 # ============================================================
 
-class Retriever:
 
+class Retriever:
     def __init__(
         self,
         embedder: EmbeddingModel,
         vector_store: VectorStore,
+        keyword_search: BM25KeywordSearch | None = None,
     ) -> None:
         """
         Khởi tạo Retriever.
@@ -42,8 +46,11 @@ class Retriever:
             Chuyển query text thành embedding vector.
 
         vector_store:
-            Nhận query vector và search các point
-            gần nhất trong Qdrant.
+            Search semantic bằng vector similarity trong Qdrant.
+
+        keyword_search:
+            Search keyword bằng BM25.
+            Nếu chưa truyền dependency này thì Retriever chạy semantic-only.
         """
 
         # ----------------------------------------------------
@@ -52,6 +59,7 @@ class Retriever:
 
         self.embedder = embedder
         self.vector_store = vector_store
+        self.keyword_search_engine = keyword_search
 
 
     def retrieve(
@@ -62,81 +70,114 @@ class Retriever:
         """
         Retrieve các chunk liên quan nhất với query.
 
-        Flow:
+        Flow hybrid:
 
         query
           ↓
-        embed query
+        semantic_search()
           ↓
-        query vector
+        keyword_search()
           ↓
-        search Qdrant
+        rrf_merge()
           ↓
         top-k SearchResult
         """
 
         # ----------------------------------------------------
-        # 1. Validate query
-        # ----------------------------------------------------
-        #
-        # Không cho query rỗng hoặc chỉ có whitespace.
-        #
-        # Ví dụ:
-        #
-        # ""
-        # "   "
-        #
-        # đều không hợp lệ.
+        # 1. Validate input
         # ----------------------------------------------------
 
-        if not query.strip():
-            raise ValueError(
-                "Query cannot be empty"
-            )
+        self._validate_query(
+            query
+        )
+        self._validate_top_k(
+            top_k
+        )
 
 
         # ----------------------------------------------------
-        # 2. Validate top_k
+        # 2. Semantic search
         # ----------------------------------------------------
         #
-        # top_k là số lượng kết quả muốn retrieve.
+        # Đây là search theo NGỮ NGHĨA.
         #
-        # Ví dụ:
-        #
-        # top_k = 5
-        #
-        # → lấy 5 chunk gần query nhất.
+        # query text
+        #      ↓
+        # embedding vector
+        #      ↓
+        # Qdrant cosine similarity
+        #      ↓
+        # semantic_results
         # ----------------------------------------------------
 
-        if top_k <= 0:
-            raise ValueError(
-                "top_k must be greater than 0"
-            )
+        semantic_results = self.semantic_search(
+            query=query,
+            top_k=top_k,
+        )
 
 
         # ----------------------------------------------------
-        # 3. Embed query
+        # 3. Nếu chưa bật keyword search thì trả semantic-only
+        # ----------------------------------------------------
+
+        if self.keyword_search_engine is None:
+            return semantic_results
+
+
+        # ----------------------------------------------------
+        # 4. Keyword search
         # ----------------------------------------------------
         #
-        # Ví dụ:
+        # Đây là search theo TỪ KHÓA.
         #
-        # "RAG là gì?"
+        # query text
+        #      ↓
+        # tokenize
+        #      ↓
+        # BM25
+        #      ↓
+        # keyword_results
+        # ----------------------------------------------------
+
+        keyword_results = self.keyword_search(
+            query=query,
+            top_k=top_k,
+        )
+
+
+        # ----------------------------------------------------
+        # 5. RRF merge
+        # ----------------------------------------------------
         #
-        #        ↓
+        # Đây là bước GỘP hybrid search.
         #
-        # EmbeddingModel
-        #
-        #        ↓
-        #
-        # [
-        #     0.012,
-        #     -0.031,
-        #     ...
-        # ]
-        #
-        # Với all-MiniLM-L6-v2:
-        #
-        # vector dimension = 384
+        # semantic_results
+        #      ↓
+        # keyword_results
+        #      ↓
+        # RRF
+        #      ↓
+        # final top-k candidate chunks
+        # ----------------------------------------------------
+
+        return rrf_merge(
+            semantic_results=semantic_results,
+            keyword_results=keyword_results,
+            limit=top_k,
+        )
+
+
+    def semantic_search(
+        self,
+        query: str,
+        top_k: int,
+    ) -> list[SearchResult]:
+        """
+        Semantic search: search theo ý nghĩa bằng embedding vector.
+        """
+
+        # ----------------------------------------------------
+        # 1. Embed query
         # ----------------------------------------------------
 
         query_vector = self.embedder.embed_text(
@@ -145,30 +186,56 @@ class Retriever:
 
 
         # ----------------------------------------------------
-        # 4. Search trong VectorStore
-        # ----------------------------------------------------
-        #
-        # VectorStore sẽ:
-        #
-        # query vector
-        #      ↓
-        # Qdrant
-        #      ↓
-        # cosine similarity
-        #      ↓
-        # top-k points
-        #      ↓
-        # SearchResult[]
+        # 2. Search vector trong Qdrant
         # ----------------------------------------------------
 
-        results = self.vector_store.search(
+        return self.vector_store.search(
             query_vector=query_vector,
             limit=top_k,
         )
 
 
-        # ----------------------------------------------------
-        # 5. Return kết quả
-        # ----------------------------------------------------
+    def keyword_search(
+        self,
+        query: str,
+        top_k: int,
+    ) -> list[SearchResult]:
+        """
+        Keyword search: search theo từ khóa bằng BM25.
+        """
 
-        return results
+        if self.keyword_search_engine is None:
+            return []
+
+        return self.keyword_search_engine.search(
+            query=query,
+            limit=top_k,
+        )
+
+
+    def _validate_query(
+        self,
+        query: str,
+    ) -> None:
+        """
+        Validate query trước khi retrieve.
+        """
+
+        if not query.strip():
+            raise ValueError(
+                "Query cannot be empty"
+            )
+
+
+    def _validate_top_k(
+        self,
+        top_k: int,
+    ) -> None:
+        """
+        Validate số lượng kết quả muốn retrieve.
+        """
+
+        if top_k <= 0:
+            raise ValueError(
+                "top_k must be greater than 0"
+            )

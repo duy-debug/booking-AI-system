@@ -1,14 +1,17 @@
 """Tests for flat rag_v1 indexing orchestration."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from app.rag_v1.chunker import Chunk, DocumentChunker
 from app.rag_v1.config import RAGConfig
+from app.rag_v1.fusion import rrf_merge
 from app.rag_v1.indexer import KnowledgeIndexer
+from app.rag_v1.keyword_search import BM25KeywordSearch
 from app.rag_v1.loader import DocumentLoader
-from app.rag_v1.vector_store import VectorStore, point_id_for_chunk
+from app.rag_v1.vector_store import SearchResult, VectorStore, point_id_for_chunk
 
 
 class FakeEmbedding:
@@ -44,6 +47,7 @@ class FakeQdrantClient:
     def __init__(self) -> None:
         self.collection_created = False
         self.points: list[object] = []
+        self.records: list[object] = []
 
     def collection_exists(self, collection_name: str) -> bool:
         return self.collection_created
@@ -53,6 +57,16 @@ class FakeQdrantClient:
 
     def upsert(self, *, collection_name: str, points: list[object]) -> None:
         self.points.extend(points)
+
+    def scroll(
+        self,
+        *,
+        collection_name: str,
+        limit: int,
+        with_payload: bool,
+        with_vectors: bool,
+    ) -> tuple[list[object], object | None]:
+        return self.records[:limit], None
 
 
 def test_indexer_runs_loader_chunker_embedding_and_vector_store(tmp_path: Path) -> None:
@@ -144,6 +158,78 @@ def test_vector_store_rejects_invalid_vector_size() -> None:
 
     with pytest.raises(ValueError, match="vector size"):
         store.upsert([Chunk("content", "faq.md", "faq.md", 0)], [[0.1, 0.2]])
+
+
+def test_bm25_keyword_search_returns_keyword_matches() -> None:
+    client = FakeQdrantClient()
+    client.records = [
+        SimpleNamespace(
+            payload={
+                "text": "Cancellation policy requires four hours notice.",
+                "source": "policy.md",
+                "file_path": "knowledge/policy.md",
+                "chunk_index": 0,
+            }
+        ),
+        SimpleNamespace(
+            payload={
+                "text": "Massage pricing overview.",
+                "source": "pricing.md",
+                "file_path": "knowledge/pricing.md",
+                "chunk_index": 1,
+            }
+        ),
+        SimpleNamespace(
+            payload={
+                "text": "Cancellation fee can be waived.",
+                "source": "policy.md",
+                "file_path": "knowledge/policy.md",
+                "chunk_index": 2,
+            }
+        ),
+    ]
+    store = VectorStore(
+        collection_name="knowledge",
+        vector_size=3,
+        client=client,  # type: ignore[arg-type]
+    )
+
+    keyword_search = BM25KeywordSearch(
+        vector_store=store,
+    )
+
+    results = keyword_search.search(
+        "cancellation policy",
+        limit=2,
+    )
+
+    assert [result.text for result in results] == [
+        "Cancellation policy requires four hours notice.",
+        "Cancellation fee can be waived.",
+    ]
+    assert all(result.score > 0 for result in results)
+
+
+def test_rrf_merge_combines_semantic_and_keyword_results() -> None:
+    semantic_results = [
+        SearchResult("semantic first", "a.md", "a.md", 0, 0.90),
+        SearchResult("shared", "shared.md", "shared.md", 1, 0.80),
+    ]
+    keyword_results = [
+        SearchResult("shared", "shared.md", "shared.md", 1, 2.30),
+        SearchResult("keyword only", "b.md", "b.md", 2, 1.70),
+    ]
+
+    results = rrf_merge(
+        semantic_results=semantic_results,
+        keyword_results=keyword_results,
+        limit=2,
+    )
+
+    assert [result.text for result in results] == [
+        "shared",
+        "semantic first",
+    ]
 
 
 def test_point_id_for_chunk_is_deterministic() -> None:
