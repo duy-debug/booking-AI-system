@@ -14,7 +14,7 @@ class InvalidKnowledgePathError(KnowledgeIngestionError):
 
 
 class UnsupportedKnowledgeFileError(KnowledgeIngestionError):
-    """Được raise khi document không phải Markdown file."""
+    """Được raise khi document không phải file knowledge được hỗ trợ."""
 
 
 class KnowledgeFileTooLargeError(KnowledgeIngestionError):
@@ -34,7 +34,7 @@ class KnowledgeIndexingError(Exception):
 
 
 class InvalidIndexingSourceError(KnowledgeIndexingError):
-    """Được raise khi source cần index không phải Markdown file tồn tại."""
+    """Được raise khi source cần index không phải knowledge file tồn tại."""
 
 
 class EmptyKnowledgeDocumentError(KnowledgeIndexingError):

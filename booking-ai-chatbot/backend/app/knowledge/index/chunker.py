@@ -5,14 +5,28 @@ import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
+# Các lỗi/path model từ loader được dùng lại để chunker giữ cùng rule an toàn
+# với bước ingestion: source phải là logical path an toàn, content phải hợp lệ.
 from app.knowledge.index.loader import (
     InvalidKnowledgeContentError,
     InvalidKnowledgePathError,
     MarkdownDocument,
 )
 
+# Giới hạn mặc định cho mỗi chunk trước khi embed.
+#
+# Giá trị này giữ chunk đủ nhỏ để embedding ổn định, nhưng vẫn đủ context cho
+# retrieval trả lời FAQ.
 DEFAULT_MAX_CHUNK_SIZE = 1_000
+
+# ATX heading là dạng heading Markdown dùng dấu "#".
+#
+# Regex này lấy text heading và bỏ dấu "#" thừa ở cuối nếu có.
 _ATX_HEADING_PATTERN = re.compile(r"^#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$")
+
+# Paragraph break là một hoặc nhiều dòng trống.
+#
+# Chunker ưu tiên tách theo paragraph trước khi phải tách sâu hơn theo word.
 _PARAGRAPH_BREAK_PATTERN = re.compile(r"\n[ \t]*\n+")
 
 
@@ -20,16 +34,28 @@ _PARAGRAPH_BREAK_PATTERN = re.compile(r"\n[ \t]*\n+")
 class KnowledgeChunk:
     """Một knowledge text chunk ổn định và sẵn sàng để embed."""
 
+    # ID deterministic của chunk, dùng để tạo Qdrant point id ổn định.
     chunk_id: str
+
+    # Nội dung text thật sẽ được đưa vào embedding model.
     content: str
+
+    # Logical source path an toàn, lưu vào Qdrant payload để trace nguồn.
     source: str
+
+    # Heading Markdown gần nhất, giúp retrieval giữ được ngữ cảnh section.
     section: str | None
+
+    # Vị trí chunk trong document gốc, dùng để giữ thứ tự đọc/debug.
     chunk_index: int
 
 
 @dataclass(frozen=True, slots=True)
 class _MarkdownSection:
+    # Heading hiện tại của section; None nếu document có content trước heading.
     heading: str | None
+
+    # Body text thuộc section đó, chưa được tách thành chunk nhỏ.
     body: str
 
 

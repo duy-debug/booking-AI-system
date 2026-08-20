@@ -6,16 +6,27 @@ from uuid import UUID, uuid5
 
 from qdrant_client import models
 
+# Writer nhận KnowledgeChunk từ chunker rồi chuyển thành Qdrant PointStruct.
 from app.knowledge.index.chunker import KnowledgeChunk
+
+# Các lỗi này thể hiện lỗi indexing có thể dự đoán được, ví dụ collection
+# Qdrant không tương thích hoặc source không tạo được chunk.
 from app.knowledge.index.errors import (
     EmptyKnowledgeDocumentError,
     IncompatibleCollectionError,
     InvalidIndexingSourceError,
     KnowledgeIndexingError,
 )
+
+# QdrantIndexClient là contract tối thiểu để writer không phụ thuộc trực tiếp
+# vào toàn bộ QdrantClient thật trong unit test.
 from app.knowledge.stores.qdrant import QdrantIndexClient, normalize_collection_name
 
 _POINT_ID_NAMESPACE = UUID("f3050e37-e832-5c11-9a82-8d86e2251dc9")
+# Namespace cố định cho uuid5.
+#
+# Cùng một chunk_id luôn sinh ra cùng UUID, giúp re-index không tạo point id
+# ngẫu nhiên mới trong Qdrant.
 
 
 class IndexEmbedding(Protocol):
@@ -23,17 +34,26 @@ class IndexEmbedding(Protocol):
 
     @property
     def dimension(self) -> int: ...
+    # Dimension vector sau khi embed, dùng để tạo/validate Qdrant collection.
 
     def embed_documents(self, texts: list[str] | tuple[str, ...]) -> list[list[float]]: ...
+    # Batch embed chunk content và giữ đúng thứ tự input.
 
 
 @dataclass(frozen=True, slots=True)
 class IndexingSummary:
     """Kết quả không nhạy cảm được trả về sau một lượt indexing."""
 
+    # Collection đã được ghi dữ liệu.
     collection_name: str
+
+    # Logical source path của document vừa index.
     source: str
+
+    # Số chunk đã ghi vào Qdrant.
     chunk_count: int
+
+    # Dimension vector dùng trong lượt index.
     vector_dimension: int
 
 

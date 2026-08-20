@@ -1,7 +1,9 @@
 """Unit tests for secure Markdown loading and section-aware chunking."""
 
+import sys
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,6 +17,32 @@ from app.knowledge.index.loader import (
     MarkdownKnowledgeLoader,
     UnsupportedKnowledgeFileError,
 )
+
+
+class FakePdfPage:
+    def __init__(self, text: str | None) -> None:
+        self._text = text
+
+    def extract_text(self) -> str | None:
+        return self._text
+
+
+class FakePdfReader:
+    pages = [
+        FakePdfPage("Trang 1: Chính sách đặt lịch."),
+        FakePdfPage(None),
+        FakePdfPage("Trang 2: Chính sách hủy lịch."),
+    ]
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+
+class EmptyPdfReader:
+    pages = [FakePdfPage(None), FakePdfPage("   ")]
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
 
 
 def make_root(tmp_path: Path) -> Path:
@@ -35,12 +63,40 @@ def test_loads_utf8_markdown_and_normalizes_line_endings(tmp_path: Path) -> None
     )
 
 
-def test_rejects_non_markdown_file(tmp_path: Path) -> None:
+def test_rejects_unsupported_knowledge_file(tmp_path: Path) -> None:
     root = make_root(tmp_path)
     (root / "secret.txt").write_text("not knowledge", encoding="utf-8")
 
     with pytest.raises(UnsupportedKnowledgeFileError):
         MarkdownKnowledgeLoader(root).load(Path("secret.txt"))
+
+
+def test_loads_pdf_by_extracting_page_text(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = make_root(tmp_path)
+    (root / "policy.pdf").write_bytes(b"%PDF fake")
+    monkeypatch.setitem(sys.modules, "pypdf", SimpleNamespace(PdfReader=FakePdfReader))
+
+    document = MarkdownKnowledgeLoader(root).load(Path("policy.pdf"))
+
+    assert document == MarkdownDocument(
+        content="Trang 1: Chính sách đặt lịch.\n\nTrang 2: Chính sách hủy lịch.",
+        source="knowledge/policy.pdf",
+    )
+
+
+def test_rejects_pdf_without_extractable_text(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = make_root(tmp_path)
+    (root / "scan.pdf").write_bytes(b"%PDF fake scan")
+    monkeypatch.setitem(sys.modules, "pypdf", SimpleNamespace(PdfReader=EmptyPdfReader))
+
+    with pytest.raises(InvalidKnowledgeContentError, match="extractable text"):
+        MarkdownKnowledgeLoader(root).load(Path("scan.pdf"))
 
 
 def test_rejects_path_traversal_and_absolute_path_outside_root(tmp_path: Path) -> None:
@@ -160,20 +216,26 @@ def test_rejects_file_above_configured_size_limit(tmp_path: Path) -> None:
         MarkdownKnowledgeLoader(root, max_file_size=4).load(Path("large.md"))
 
 
-def test_load_all_sorts_by_relative_path_and_ignores_non_markdown(tmp_path: Path) -> None:
+def test_load_all_sorts_by_relative_path_and_ignores_unsupported_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root = make_root(tmp_path)
     nested = root / "nested"
     nested.mkdir()
     (root / "z.md").write_text("Z", encoding="utf-8")
     (root / "a.md").write_text("A", encoding="utf-8")
+    (root / "policy.pdf").write_bytes(b"%PDF fake")
     (nested / "b.MD").write_text("B", encoding="utf-8")
     (root / "ignored.txt").write_text("ignored", encoding="utf-8")
+    monkeypatch.setitem(sys.modules, "pypdf", SimpleNamespace(PdfReader=FakePdfReader))
 
     documents = MarkdownKnowledgeLoader(root).load_all()
 
     assert [document.source for document in documents] == [
         "knowledge/a.md",
         "knowledge/nested/b.MD",
+        "knowledge/policy.pdf",
         "knowledge/z.md",
     ]
 

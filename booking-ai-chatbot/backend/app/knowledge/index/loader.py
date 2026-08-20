@@ -1,7 +1,9 @@
-"""Đọc Markdown knowledge document theo cách an toàn."""
+"""Đọc Markdown/PDF knowledge document theo cách an toàn."""
 
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path, PurePosixPath
+from typing import Protocol, cast
 
 from app.knowledge.index.errors import (
     InvalidKnowledgeContentError,
@@ -13,18 +15,42 @@ from app.knowledge.index.errors import (
 )
 
 DEFAULT_MAX_FILE_SIZE = 2 * 1024 * 1024
+SUPPORTED_KNOWLEDGE_EXTENSIONS = frozenset({".md", ".pdf"})
+
+
+class _PdfPage(Protocol):
+    # ----------------------------------------------------
+    # Contract tối thiểu của một PDF page từ pypdf
+    # ----------------------------------------------------
+    #
+    # Loader chỉ cần extract_text(). Dùng Protocol giúp test fake PDF
+    # reader mà không cần import pypdf thật trong unit test.
+    # ----------------------------------------------------
+    def extract_text(self) -> str | None: ...
+
+
+class _PdfReader(Protocol):
+    # ----------------------------------------------------
+    # Contract tối thiểu của PdfReader
+    # ----------------------------------------------------
+    #
+    # pypdf.PdfReader expose pages; mỗi page có thể extract text hoặc
+    # trả None nếu PDF là ảnh scan/không có text layer.
+    # ----------------------------------------------------
+    @property
+    def pages(self) -> list[_PdfPage]: ...
 
 
 @dataclass(frozen=True, slots=True)
 class MarkdownDocument:
-    """Chứa Markdown text đã normalize và relative source path an toàn."""
+    """Chứa knowledge text đã normalize và relative source path an toàn."""
 
     content: str
     source: str
 
 
 class MarkdownKnowledgeLoader:
-    """Load Markdown UTF-8 nằm gọn trong một knowledge directory."""
+    """Load Markdown/PDF nằm gọn trong một knowledge directory."""
 
     def __init__(
         self,
@@ -42,15 +68,15 @@ class MarkdownKnowledgeLoader:
 
     def load(self, path: Path) -> MarkdownDocument:
         """
-        Load một Markdown file nhưng không cho phép đi ra ngoài root.
+        Load một Markdown/PDF file nhưng không cho phép đi ra ngoài root.
 
         Luồng:
 
         input path
           -> resolve trong knowledge root
-          -> validate Markdown file
-          -> đọc bytes
-          -> decode UTF-8 text
+          -> validate file được hỗ trợ
+          -> đọc bytes để kiểm tra size
+          -> chọn parser theo extension
           -> trả MarkdownDocument
         """
 
@@ -66,15 +92,18 @@ class MarkdownKnowledgeLoader:
         document_path = self._resolve_document_path(path)
 
         # ----------------------------------------------------
-        # STEP 2: Kiểm tra Markdown file
+        # STEP 2: Kiểm tra file được hỗ trợ
         # ----------------------------------------------------
         #
-        # Ingestion pipeline chỉ nhận file .md thật.
+        # Ingestion pipeline hiện nhận .md và .pdf.
         #
         # Việc này tránh index nhầm các file local không thuộc knowledge.
         # ----------------------------------------------------
-        if document_path.suffix.lower() != ".md":
-            raise UnsupportedKnowledgeFileError("Knowledge loader accepts only Markdown files.")
+        extension = document_path.suffix.lower()
+        if extension not in SUPPORTED_KNOWLEDGE_EXTENSIONS:
+            raise UnsupportedKnowledgeFileError(
+                "Knowledge loader accepts only Markdown and PDF files."
+            )
         if not document_path.is_file():
             raise InvalidKnowledgePathError("Knowledge document must be an existing regular file.")
 
@@ -106,35 +135,21 @@ class MarkdownKnowledgeLoader:
             )
 
         # ----------------------------------------------------
-        # STEP 5: Chặn nội dung binary
+        # STEP 5: Chọn parser theo extension
         # ----------------------------------------------------
         #
-        # Knowledge Markdown phải là text.
+        # Markdown là plain text UTF-8 nên có thể decode trực tiếp.
         #
-        # Null byte là tín hiệu đơn giản cho thấy file có thể là binary
-        # hoặc bị lỗi với pipeline này.
+        # PDF là binary format nên không dùng rule null byte. Thay vào đó
+        # dùng pypdf để extract text layer từ từng page.
         # ----------------------------------------------------
-        if b"\x00" in raw_content:
-            raise InvalidKnowledgeContentError(
-                "Knowledge document must contain text rather than binary data."
-            )
+        if extension == ".md":
+            content = _decode_markdown(raw_content)
+        else:
+            content = _extract_pdf_text(document_path)
 
         # ----------------------------------------------------
-        # STEP 6: Decode UTF-8
-        # ----------------------------------------------------
-        #
-        # Các bước RAG phía sau làm việc với Python string đã normalize,
-        # không làm việc trực tiếp với bytes.
-        # ----------------------------------------------------
-        try:
-            content = raw_content.decode("utf-8")
-        except UnicodeDecodeError as error:
-            raise InvalidKnowledgeEncodingError(
-                "Knowledge document must use UTF-8 encoding."
-            ) from error
-
-        # ----------------------------------------------------
-        # STEP 7: Chuẩn hóa và trả document
+        # STEP 6: Chuẩn hóa và trả document
         # ----------------------------------------------------
         #
         # Normalize line ending để chunk ID ổn định trên
@@ -148,9 +163,9 @@ class MarkdownKnowledgeLoader:
         return MarkdownDocument(content=normalized_content, source=source)
 
     def load_all(self) -> list[MarkdownDocument]:
-        """Load toàn bộ Markdown file theo thứ tự relative path ổn định."""
+        """Load toàn bộ Markdown/PDF file theo thứ tự relative path ổn định."""
         # ----------------------------------------------------
-        # STEP 1: Tìm toàn bộ Markdown file trong knowledge root
+        # STEP 1: Tìm toàn bộ knowledge file trong knowledge root
         # ----------------------------------------------------
         #
         # Sort theo relative path để mỗi lần index lại có thứ tự ổn định,
@@ -160,7 +175,7 @@ class MarkdownKnowledgeLoader:
             (
                 path
                 for path in self._root.rglob("*")
-                if path.is_file() and path.suffix.lower() == ".md"
+                if path.is_file() and path.suffix.lower() in SUPPORTED_KNOWLEDGE_EXTENSIONS
             ),
             key=lambda path: path.relative_to(self._root).as_posix(),
         )
@@ -196,3 +211,76 @@ class MarkdownKnowledgeLoader:
                 "Knowledge document must remain inside the configured root."
             )
         return resolved
+
+
+def _decode_markdown(raw_content: bytes) -> str:
+    # ----------------------------------------------------
+    # STEP 1: Chặn Markdown binary
+    # ----------------------------------------------------
+    #
+    # Markdown phải là text. Null byte là tín hiệu đơn giản cho thấy file
+    # có thể là binary hoặc bị lỗi với pipeline này.
+    # ----------------------------------------------------
+    if b"\x00" in raw_content:
+        raise InvalidKnowledgeContentError(
+            "Knowledge document must contain text rather than binary data."
+        )
+
+    # ----------------------------------------------------
+    # STEP 2: Decode UTF-8
+    # ----------------------------------------------------
+    #
+    # Các bước RAG phía sau làm việc với Python string đã normalize,
+    # không làm việc trực tiếp với bytes.
+    # ----------------------------------------------------
+    try:
+        return raw_content.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise InvalidKnowledgeEncodingError(
+            "Knowledge document must use UTF-8 encoding."
+        ) from error
+
+
+def _extract_pdf_text(path: Path) -> str:
+    # ----------------------------------------------------
+    # STEP 1: Import pypdf khi thật sự cần
+    # ----------------------------------------------------
+    #
+    # Nếu project chỉ index Markdown thì không cần load pypdf. Khi gặp PDF,
+    # loader mới import parser PDF.
+    # ----------------------------------------------------
+    try:
+        pdf_module = import_module("pypdf")
+    except ImportError as error:
+        raise UnsupportedKnowledgeFileError(
+            "PDF knowledge loading requires the pypdf package."
+        ) from error
+    pdf_reader = pdf_module.PdfReader
+
+    # ----------------------------------------------------
+    # STEP 2: Extract text từ từng page
+    # ----------------------------------------------------
+    #
+    # PDF export từ Word/browser thường có text layer. PDF scan ảnh có thể
+    # trả text rỗng, khi đó loader reject để tránh index document trống.
+    # ----------------------------------------------------
+    reader = cast(_PdfReader, pdf_reader(path))
+    pages: list[str] = []
+    for page in reader.pages:
+        page_text = page.extract_text()
+        if page_text and page_text.strip():
+            pages.append(page_text.strip())
+
+    # ----------------------------------------------------
+    # STEP 3: Ghép page text thành một document
+    # ----------------------------------------------------
+    #
+    # Dùng hai dòng trống để giữ ranh giới page tương tự paragraph break,
+    # giúp chunker phía sau tách nội dung tự nhiên hơn.
+    # ----------------------------------------------------
+    content = "\n\n".join(pages)
+    if not content.strip():
+        raise InvalidKnowledgeContentError(
+            "PDF knowledge document contains no extractable text."
+        )
+    return content

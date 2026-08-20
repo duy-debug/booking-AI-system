@@ -22,6 +22,7 @@ rag = [
     "llama-index>=0.10,<1",
     "llama-index-vector-stores-qdrant>=0.2",
     "fastembed>=0.3",
+    "pypdf>=5",
 ]
 
 [tool.ruff]

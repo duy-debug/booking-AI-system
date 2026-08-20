@@ -8,16 +8,24 @@ from pathlib import Path
 import sys
 from typing import cast
 
+# Settings và embedding runtime dùng cho CLI indexing offline.
 from app.infrastructure.context_store import Settings
 from app.knowledge.embeddings.llamaindex_adapter import build_llamaindex_embedding
 from app.knowledge.embeddings.sentence_transformer import SentenceTransformerEmbedding
+
+# Nhóm loader/chunker chịu trách nhiệm biến Markdown file thành chunk text.
 from app.knowledge.index.chunker import KnowledgeChunk, SectionAwareMarkdownChunker
+
+# Nhóm lỗi expected để CLI/test bắt lỗi rõ ràng thay vì crash mơ hồ.
 from app.knowledge.index.errors import (
     EmptyKnowledgeDocumentError,
     InvalidIndexingSourceError,
     KnowledgeIndexingError,
 )
 from app.knowledge.index.loader import MarkdownDocument, MarkdownKnowledgeLoader
+
+# Nhóm writer chịu trách nhiệm tạo collection, filter source và map chunk
+# thành Qdrant point.
 from app.knowledge.index.writer import (
     IndexEmbedding,
     IndexingSummary,
@@ -26,6 +34,8 @@ from app.knowledge.index.writer import (
     point_id_for_chunk,
     source_filter,
 )
+
+# Nhóm Qdrant store là boundary với Qdrant và LlamaIndex QdrantVectorStore.
 from app.knowledge.stores.qdrant import (
     QdrantIndexClient,
     build_qdrant_client,

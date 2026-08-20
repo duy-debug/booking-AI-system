@@ -8,6 +8,14 @@ from typing import Protocol, cast
 
 
 class _SentenceEncoder(Protocol):
+    # ----------------------------------------------------
+    # Contract tối thiểu của SentenceTransformer thật
+    # ----------------------------------------------------
+    #
+    # Ta không import class SentenceTransformer ở đầu file vì dependency
+    # này khá nặng. Protocol này mô tả đúng các method mà app cần dùng,
+    # giúp type-check/test vẫn rõ ràng mà chưa cần load model thật.
+    # ----------------------------------------------------
     def encode(
         self,
         sentences: Sequence[str],
@@ -19,6 +27,10 @@ class _SentenceEncoder(Protocol):
 
 
 EncoderLoader = Callable[[str], _SentenceEncoder]
+# EncoderLoader cho phép test inject fake model loader.
+#
+# Production dùng _load_sentence_transformer(), còn unit test có thể truyền
+# loader giả để không phải tải model embedding thật.
 
 
 class SentenceTransformerEmbedding:
@@ -30,9 +42,24 @@ class SentenceTransformerEmbedding:
         *,
         model_loader: EncoderLoader | None = None,
     ) -> None:
+        # ----------------------------------------------------
+        # STEP 1: Chuẩn hóa tên model
+        # ----------------------------------------------------
+        #
+        # model_name là tên local sentence-transformer model. Nếu rỗng thì
+        # app không biết phải load model nào để embed query/document.
+        # ----------------------------------------------------
         normalized_model_name = model_name.strip()
         if not normalized_model_name:
             raise ValueError("Embedding model name must not be empty.")
+
+        # ----------------------------------------------------
+        # STEP 2: Lưu cấu hình lazy-load model
+        # ----------------------------------------------------
+        #
+        # _model ban đầu là None. Model thật chỉ được load khi có lệnh
+        # embed đầu tiên, nhờ vậy startup app nhẹ hơn.
+        # ----------------------------------------------------
         self._model_name = normalized_model_name
         self._model_loader = model_loader or _load_sentence_transformer
         self._model: _SentenceEncoder | None = None
