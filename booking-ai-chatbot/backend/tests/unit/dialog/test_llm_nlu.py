@@ -547,6 +547,42 @@ async def test_llm_faq_output_preserves_query_without_generating_answer() -> Non
 
 
 @pytest.mark.asyncio
+async def test_llm_faq_output_accepts_entity_query_as_rag_query() -> None:
+    gateway = FakeLLMGateway(
+        LLMResponse(
+            content=json.dumps(
+                {
+                    "candidates": [
+                        {
+                            "intent": "ask_question",
+                            "confidence": 1,
+                            "entities": {},
+                            "entity_kind": None,
+                            "entity_query": "Người phụ nữ mang thai có thể massage không?",
+                        }
+                    ]
+                }
+            )
+        )
+    )
+    fallback = LLMNLU(
+        llm_gateway=gateway,
+        intent_policy=policy(),
+    )
+
+    result = await fallback.parse(
+        text="Người phụ nữ mang thai có thể massage không?",
+        state=BookingState.IDLE,
+    )
+
+    assert result.intent == "ask_question"
+    assert result.payload == {
+        "query": "Người phụ nữ mang thai có thể massage không?",
+    }
+    assert result.confidence == 1.0
+
+
+@pytest.mark.asyncio
 async def test_shop_query_maps_to_entity_resolution_without_domain_object() -> None:
     fallback, _ = fallback_for(
         structured(

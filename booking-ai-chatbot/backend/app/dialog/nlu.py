@@ -860,6 +860,7 @@ def _build_llm_messages(
         "liệu trình chính; addon_name là tùy chọn; service_name nghĩa là chưa rõ loại. Chỉ đặt "
         "skip_addon=true khi người dùng từ chối add-on rõ ràng. Dùng change_info cho "
         "yêu cầu chỉnh sửa booking draft hiện tại, ask_question cho FAQ, và các intent list/search "
+        "FAQ: entity_query=query=câu hỏi. "
         "chỉ cho discovery. search_shops lưu vị trí trong query. Việc chọn "
         "shop/course/therapist phải dùng entity_kind và entity_query; tuyệt đối không tự tạo ID. "
         "Khi người dùng thể hiện một giờ bắt đầu đặt lịch cụ thể, hãy phân loại ý định ngữ nghĩa "
@@ -963,7 +964,14 @@ _INTENT_TOOL: dict[str, object] = {
                                 "type": ["string", "null"],
                                 "enum": ["shop", "course", "therapist", None],
                             },
-                            "entity_query": {"type": ["string", "null"]},
+                            "entity_query": {
+                                "type": ["string", "null"],
+                                "description": (
+                                    "Với ask_question, bắt buộc chứa nguyên câu hỏi của người dùng "
+                                    "để FAQ/RAG dùng làm query. Với chọn shop/course/therapist, "
+                                    "chứa tên entity cần resolver xử lý."
+                                ),
+                            },
                         },
                     },
                 }
@@ -982,12 +990,20 @@ def _parse_llm_candidates(response: LLMResponse) -> list[IntentCandidate]:
         call = response.tool_calls[0]
         if call.name != "extract_intent_candidates":
             raise ValueError("Unexpected NLU function call.")
-        return LLMNLUCandidatesOutput.model_validate(call.arguments).candidates
+        return LLMNLUCandidatesOutput.model_validate(
+            _normalize_llm_candidates_payload(
+                call.arguments
+            )
+        ).candidates
     if response.content is None or not response.content.strip():
         raise ValueError("LLM NLU response is empty.")
     raw = json.loads(response.content)
     if isinstance(raw, dict) and "candidates" in raw:
-        return LLMNLUCandidatesOutput.model_validate(raw).candidates
+        return LLMNLUCandidatesOutput.model_validate(
+            _normalize_llm_candidates_payload(
+                raw
+            )
+        ).candidates
     legacy = LLMNLUOutput.model_validate(_normalize_llm_output_payload(raw))
     return [IntentCandidate.model_validate(legacy.model_dump())]
 
@@ -1163,9 +1179,79 @@ def _typed_llm_entity(key: str, value: object) -> object | None:
     return None
 
 
+def _normalize_llm_candidates_payload(
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    """
+    Chuẩn hóa danh sách candidate trước khi validate schema nghiêm ngặt.
+    """
+
+    # ----------------------------------------------------
+    # 1. Copy payload gốc
+    # ----------------------------------------------------
+
+    normalized = dict(
+        payload
+    )
+
+    candidates = normalized.get(
+        "candidates"
+    )
+
+    if not isinstance(candidates, list):
+        return normalized
+
+
+    # ----------------------------------------------------
+    # 2. Normalize từng candidate
+    # ----------------------------------------------------
+    #
+    # LLM đôi khi trả confidence là số nguyên:
+    #
+    # confidence: 1
+    #
+    # Trong khi schema nội bộ dùng StrictFloat để tránh payload
+    # không rõ kiểu. Vì vậy ta chỉ ép int an toàn thành float
+    # tại boundary NLU, trước khi Pydantic validate.
+    # ----------------------------------------------------
+
+    normalized["candidates"] = [
+        _normalize_llm_output_payload(candidate)
+        if isinstance(candidate, Mapping)
+        else candidate
+        for candidate in candidates
+    ]
+
+    return normalized
+
+
 # Chuẩn hóa các giá trị therapist đặc thù trước khi ép vào schema nghiêm ngặt của LLM output.
 def _normalize_llm_output_payload(payload: Mapping[str, object]) -> dict[str, object]:
     normalized = dict(payload)
+
+    # ----------------------------------------------------
+    # 1. Normalize confidence
+    # ----------------------------------------------------
+    #
+    # LLM có thể trả 1 thay vì 1.0.
+    # Đây vẫn là confidence hợp lệ về mặt ngữ nghĩa,
+    # nên ta chuyển int thành float trước khi validate.
+    # ----------------------------------------------------
+
+    confidence = normalized.get(
+        "confidence"
+    )
+
+    if type(confidence) is int:
+        normalized["confidence"] = float(
+            confidence
+        )
+
+
+    # ----------------------------------------------------
+    # 2. Normalize entities
+    # ----------------------------------------------------
+
     entities_raw = normalized.get("entities")
     if isinstance(entities_raw, Mapping):
         entities = dict(entities_raw)
@@ -1175,7 +1261,51 @@ def _normalize_llm_output_payload(payload: Mapping[str, object]) -> dict[str, ob
         therapist_name = _non_empty_text(entities.get("therapist_name"))
         if therapist_name is not None:
             entities["therapist_name"] = therapist_name
+
+        # ------------------------------------------------
+        # Đồng bộ query FAQ
+        # ------------------------------------------------
+        #
+        # Với ask_question, RAG cần query text để retrieve.
+        #
+        # Contract mới yêu cầu LLM đặt:
+        #
+        # - entity_query:
+        #     nguyên câu hỏi người dùng
+        #
+        # - entities.query:
+        #     cùng nội dung để direct payload map thành {"query": ...}
+        #
+        # Đoạn này chỉ đồng bộ hai field LLM đã trả,
+        # không tự quyết định intent thay LLM.
+        # ------------------------------------------------
+
+        canonical_intent = _LLM_INTENT_ALIASES.get(
+            str(normalized.get("intent", "")).strip(),
+            str(normalized.get("intent", "")).strip(),
+        )
+
+        if canonical_intent == "ask_question":
+            question_query = (
+                _non_empty_text(
+                    normalized.get("entity_query")
+                )
+                or _non_empty_text(
+                    entities.get("query")
+                )
+            )
+
+            if question_query is not None:
+                normalized["entity_query"] = question_query
+                entities["query"] = question_query
+
         normalized["entities"] = entities
+
+
+    # ----------------------------------------------------
+    # 3. Normalize entity query đặc thù
+    # ----------------------------------------------------
+
     if normalized.get("entity_kind") == NLUEntityKind.THERAPIST.value:
         therapist_query = _normalize_therapist_query(normalized.get("entity_query"))
         if therapist_query is not None:
