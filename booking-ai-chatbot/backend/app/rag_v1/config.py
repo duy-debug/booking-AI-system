@@ -15,6 +15,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class RAGConfig:
     embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
+    reranker_model_name: str = "itdainb/PhoRanker"
     normalize_embeddings: bool = True
 
     chunk_size: int = 1000
@@ -38,6 +39,11 @@ class RAGConfig:
         if not self.embedding_model_name.strip():
             raise ValueError(
                 "embedding_model_name cannot be empty"
+            )
+
+        if not self.reranker_model_name.strip():
+            raise ValueError(
+                "reranker_model_name cannot be empty"
             )
 
 

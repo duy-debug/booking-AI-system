@@ -241,3 +241,6 @@ def test_point_id_for_chunk_is_deterministic() -> None:
 def test_rag_config_rejects_invalid_reindex_settings() -> None:
     with pytest.raises(ValueError, match="chunk_overlap"):
         RAGConfig(chunk_size=100, chunk_overlap=100)
+
+    with pytest.raises(ValueError, match="reranker_model_name"):
+        RAGConfig(reranker_model_name="   ")
