@@ -47,9 +47,15 @@ from app.infrastructure.pos_api_client import PosApiClient
 from app.rag_v1 import (
     KnowledgeGateway,
 )
+from app.rag_v1.config import RAGConfig
 from app.rag_v1.embedding import EmbeddingModel
-from app.rag_v1.retriever import KnowledgeQdrantClient
-from app.rag_v1.service import FAQManager
+from app.rag_v1.faq_manager import FAQManager
+from app.rag_v1.keyword_search import BM25KeywordSearch
+from app.rag_v1.prompt import PromptBuilder
+from app.rag_v1.reranker import Reranker
+from app.rag_v1.retriever import Retriever
+from app.rag_v1.service import RAGService
+from app.rag_v1.vector_store import VectorStore
 
 _MAX_CONVERSATION_ID_LENGTH = 128
 _RAW_PHONE_PATTERN = re.compile(r"\+?\d{9,15}")
@@ -183,6 +189,7 @@ class ApplicationContainer:
     _handlers: tuple[object, ...] = field(repr=False)
     _owns_http_client: bool = field(repr=False)
     _qdrant_client: QdrantClient | None = field(default=None, repr=False)
+    _rag_service: RAGService | None = field(default=None, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
 
     # Tráº£ vá» handler Ä‘Ã£ wire sáºµn Ä‘á»ƒ cÃ¡c fallback path khÃ´ng tá»± táº¡o dependency má»›i.
@@ -203,6 +210,8 @@ class ApplicationContainer:
             await self.http_client.aclose()
         if self._qdrant_client is not None:
             self._qdrant_client.close()
+        if self._rag_service is not None:
+            await self._rag_service.close()
 
 
 # Wire toÃ n bá»™ dependency production: POS, Qdrant, LLM, StateMachine,
@@ -298,16 +307,49 @@ async def create_application_container(
             instruction_builder,
         )
         configured_knowledge_gateway = knowledge_gateway
+        faq_rag_service: RAGService | None = None
+        rag_config = RAGConfig(
+            embedding_model_name=settings.embedding_model_name,
+        )
         if configured_knowledge_gateway is None and settings.knowledge_qdrant_enabled:
+            rag_config = RAGConfig(
+                embedding_model_name=settings.embedding_model_name,
+                collection_name=settings.qdrant_collection,
+            )
             qdrant_client = QdrantClient(
                 host=settings.qdrant_host,
                 port=settings.qdrant_port,
                 api_key=settings.qdrant_api_key,
             )
-            configured_knowledge_gateway = KnowledgeQdrantClient(
+            vector_store = VectorStore(
                 client=qdrant_client,
-                embedding=EmbeddingModel(settings.embedding_model_name),
-                collection_name=settings.qdrant_collection,
+                collection_name=rag_config.collection_name,
+                vector_size=rag_config.vector_size,
+            )
+            embedding = EmbeddingModel(
+                model_name=rag_config.embedding_model_name,
+                normalize_embeddings=rag_config.normalize_embeddings,
+            )
+            keyword_search = BM25KeywordSearch(
+                vector_store=vector_store,
+            )
+            faq_retriever = Retriever(
+                embedder=embedding,
+                vector_store=vector_store,
+                keyword_search=keyword_search,
+            )
+            faq_reranker = Reranker(
+                model_name=rag_config.reranker_model_name,
+            )
+            faq_rag_service = RAGService(
+                retriever=faq_retriever,
+                reranker=faq_reranker,
+                prompt_builder=PromptBuilder(),
+                api_key=settings.gemini_api_key or "",
+                base_url=settings.gemini_base_url,
+                model=settings.gemini_model,
+                fallback_model=settings.gemini_fallback_model,
+                max_retries=settings.llm_max_retries,
             )
         container = ApplicationContainer(
             http_client=client,
@@ -334,14 +376,14 @@ async def create_application_container(
             ),
             llm_nlg_required=settings.llm_nlg_required,
             faq_manager=FAQManager(
-                knowledge_gateway=configured_knowledge_gateway,
                 instruction_builder=instruction_builder,
-                min_relevance_score=settings.rag_score_threshold,
+                rag_service=faq_rag_service,
             ),
             knowledge_gateway=configured_knowledge_gateway,
             _handlers=handlers,
             _owns_http_client=owns_http_client,
             _qdrant_client=qdrant_client,
+            _rag_service=faq_rag_service,
         )
         dialog_controller.bind_runtime(container)
         return container

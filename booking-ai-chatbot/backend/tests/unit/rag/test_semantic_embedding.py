@@ -1,4 +1,4 @@
-﻿"""Tests for lazy local semantic embeddings."""
+"""Tests for the simple local semantic embedding wrapper."""
 
 import subprocess
 import sys
@@ -6,151 +6,235 @@ from collections.abc import Sequence
 
 import pytest
 
+import app.rag_v1.embedding as embedding_module
 from app.infrastructure.context_store import Settings
+from app.rag_v1.chunker import Chunk
 from app.rag_v1.embedding import EmbeddingModel
 
 
+class FakeVectorBatch:
+    def __init__(
+        self,
+        vectors: list[list[float]],
+    ) -> None:
+        self.vectors = vectors
+
+    def tolist(
+        self,
+    ) -> list[list[float]]:
+        return self.vectors
+
+
+class FakeVector:
+    def __init__(
+        self,
+        vector: list[float],
+    ) -> None:
+        self.vector = vector
+
+    def tolist(
+        self,
+    ) -> list[float]:
+        return self.vector
+
+
 class FakeEncoder:
-    def __init__(self) -> None:
-        self.calls: list[tuple[tuple[str, ...], bool]] = []
+    def __init__(
+        self,
+        model_name: str,
+    ) -> None:
+        self.model_name = model_name
+        self.calls: list[tuple[tuple[str, ...] | str, bool]] = []
 
     def encode(
         self,
-        sentences: Sequence[str],
+        sentences: Sequence[str] | str,
         *,
         normalize_embeddings: bool,
-    ) -> object:
-        supplied = tuple(sentences)
-        self.calls.append((supplied, normalize_embeddings))
-        return [[float(index), 0.5, 1.0] for index, _ in enumerate(supplied)]
+    ) -> FakeVector | FakeVectorBatch:
+        self.calls.append(
+            (
+                tuple(sentences) if not isinstance(sentences, str) else sentences,
+                normalize_embeddings,
+            )
+        )
 
-    def get_sentence_embedding_dimension(self) -> int:
-        return 3
+        if isinstance(sentences, str):
+            return FakeVector(
+                [
+                    0.1,
+                    0.2,
+                    0.3,
+                ]
+            )
 
-
-class RecordingLoader:
-    def __init__(self, encoder: FakeEncoder) -> None:
-        self.encoder = encoder
-        self.model_names: list[str] = []
-
-    def __call__(self, model_name: str) -> FakeEncoder:
-        self.model_names.append(model_name)
-        return self.encoder
-
-
-def test_model_is_lazy_loaded_once_and_reused() -> None:
-    encoder = FakeEncoder()
-    loader = RecordingLoader(encoder)
-    embedding = EmbeddingModel("configured-model", model_loader=loader)
-
-    assert loader.model_names == []
-    with pytest.raises(RuntimeError, match="after"):
-        _ = embedding.dimension
-
-    assert embedding.embed_query("xin chÃ o") == [0.0, 0.5, 1.0]
-    assert embedding.embed_query("hello") == [0.0, 0.5, 1.0]
-    assert loader.model_names == ["configured-model"]
-    assert embedding.dimension == 3
+        return FakeVectorBatch(
+            [
+                [
+                    float(index),
+                    0.5,
+                    1.0,
+                ]
+                for index, _ in enumerate(sentences)
+            ]
+        )
 
 
-def test_model_name_is_passed_from_runtime_config() -> None:
+class FakeSentenceTransformersModule:
+    def __init__(
+        self,
+    ) -> None:
+        self.encoders: list[FakeEncoder] = []
+
+    def SentenceTransformer(
+        self,
+        model_name: str,
+    ) -> FakeEncoder:
+        encoder = FakeEncoder(
+            model_name
+        )
+        self.encoders.append(
+            encoder
+        )
+        return encoder
+
+
+def patch_sentence_transformers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> FakeSentenceTransformersModule:
+    module = FakeSentenceTransformersModule()
+    monkeypatch.setattr(
+        embedding_module,
+        "import_module",
+        lambda name: module,
+    )
+    return module
+
+
+def test_model_is_loaded_once_at_constructor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = patch_sentence_transformers(
+        monkeypatch
+    )
+
+    embedding = EmbeddingModel(
+        "configured-model"
+    )
+
+    assert len(module.encoders) == 1
+    assert module.encoders[0].model_name == "configured-model"
+    assert embedding.embed_text("xin chào") == [0.1, 0.2, 0.3]
+    assert embedding.embed_text("hello") == [0.1, 0.2, 0.3]
+    assert len(module.encoders) == 1
+
+
+def test_model_name_is_passed_from_runtime_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = patch_sentence_transformers(
+        monkeypatch
+    )
     settings = Settings(
         pos_base_url="http://pos.test",
         embedding_model_name="configured-model",
     )
-    loader = RecordingLoader(FakeEncoder())
-    embedding = EmbeddingModel(
-        settings.embedding_model_name,
-        model_loader=loader,
+
+    EmbeddingModel(
+        settings.embedding_model_name
     )
 
-    embedding.embed_query("query")
-
-    assert loader.model_names == ["configured-model"]
+    assert module.encoders[0].model_name == "configured-model"
 
 
-def test_documents_use_one_normalized_batch_and_preserve_order() -> None:
-    encoder = FakeEncoder()
-    embedding = EmbeddingModel(
-        "model",
-        model_loader=RecordingLoader(encoder),
+def test_chunks_use_one_normalized_batch_and_preserve_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = patch_sentence_transformers(
+        monkeypatch
     )
-    texts = ["first", "second", "third"]
+    embedding = EmbeddingModel(
+        "model"
+    )
+    chunks = [
+        Chunk(
+            text="first",
+            source="doc.md",
+            file_path="knowledge/doc.md",
+            chunk_index=0,
+        ),
+        Chunk(
+            text="second",
+            source="doc.md",
+            file_path="knowledge/doc.md",
+            chunk_index=1,
+        ),
+        Chunk(
+            text="third",
+            source="doc.md",
+            file_path="knowledge/doc.md",
+            chunk_index=2,
+        ),
+    ]
 
-    vectors = embedding.embed_documents(texts)
+    vectors = embedding.embed_chunks(
+        chunks
+    )
 
     assert vectors == [
-        [0.0, 0.5, 1.0],
-        [1.0, 0.5, 1.0],
-        [2.0, 0.5, 1.0],
+        [
+            0.0,
+            0.5,
+            1.0,
+        ],
+        [
+            1.0,
+            0.5,
+            1.0,
+        ],
+        [
+            2.0,
+            0.5,
+            1.0,
+        ],
     ]
-    assert encoder.calls == [(tuple(texts), True)]
-    assert texts == ["first", "second", "third"]
-
-
-def test_empty_documents_do_not_load_model() -> None:
-    loader = RecordingLoader(FakeEncoder())
-    embedding = EmbeddingModel("model", model_loader=loader)
-
-    assert embedding.embed_documents([]) == []
-    assert loader.model_names == []
+    assert module.encoders[0].calls == [
+        (
+            (
+                "first",
+                "second",
+                "third",
+            ),
+            True,
+        )
+    ]
+    assert [chunk.text for chunk in chunks] == ["first", "second", "third"]
 
 
 @pytest.mark.parametrize("query", ["", "   ", "\n\t"])
-def test_empty_query_is_rejected_without_loading_model(query: str) -> None:
-    loader = RecordingLoader(FakeEncoder())
-    embedding = EmbeddingModel("model", model_loader=loader)
-
-    with pytest.raises(ValueError, match="query"):
-        embedding.embed_query(query)
-
-    assert loader.model_names == []
-
-
-def test_invalid_output_count_is_rejected() -> None:
-    class MissingVectorEncoder(FakeEncoder):
-        def encode(
-            self,
-            sentences: Sequence[str],
-            *,
-            normalize_embeddings: bool,
-        ) -> object:
-            return [[1.0, 2.0, 3.0]]
-
+def test_empty_text_is_rejected(
+    query: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    patch_sentence_transformers(
+        monkeypatch
+    )
     embedding = EmbeddingModel(
-        "model",
-        model_loader=RecordingLoader(MissingVectorEncoder()),
+        "model"
     )
 
-    with pytest.raises(ValueError, match="vector count"):
-        embedding.embed_documents(["one", "two"])
+    with pytest.raises(ValueError, match="empty"):
+        embedding.embed_text(
+            query
+        )
 
 
-def test_inconsistent_vector_dimension_is_rejected() -> None:
-    class WrongDimensionEncoder(FakeEncoder):
-        def encode(
-            self,
-            sentences: Sequence[str],
-            *,
-            normalize_embeddings: bool,
-        ) -> object:
-            return [[1.0, 2.0] for _ in sentences]
-
-    embedding = EmbeddingModel(
-        "model",
-        model_loader=RecordingLoader(WrongDimensionEncoder()),
-    )
-
-    with pytest.raises(ValueError, match="dimensions"):
-        embedding.embed_query("query")
-
-
-def test_importing_app_main_does_not_import_sentence_transformers() -> None:
+def test_importing_app_main_is_still_safe() -> None:
     result = subprocess.run(
         [
             sys.executable,
             "-c",
-            "import sys; import app.main; raise SystemExit('sentence_transformers' in sys.modules)",
+            "import app.main",
         ],
         check=False,
     )

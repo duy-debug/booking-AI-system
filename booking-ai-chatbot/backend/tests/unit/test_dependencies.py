@@ -24,7 +24,6 @@ from app.domain.booking_state import BookingState
 from app.infrastructure.context_store import ContextStore, Settings
 from app.infrastructure.gemini_client import LLMMessage, LLMResponse
 from app.rag_v1 import KnowledgeDocument
-from app.rag_v1.retriever import KnowledgeQdrantClient
 
 
 class FakeLLMGateway:
@@ -108,9 +107,28 @@ async def test_runtime_flow_validation_rejects_unsupported_intent() -> None:
 
 
 class LazyFakeEmbedding:
+    def __init__(
+        self,
+        model_name: str,
+        normalize_embeddings: bool = True,
+    ) -> None:
+        self.model_name = model_name
+        self.normalize_embeddings = normalize_embeddings
+        self.embed_calls = 0
+
+
+class LazyFakeReranker:
     def __init__(self, model_name: str) -> None:
         self.model_name = model_name
-        self.embed_calls = 0
+
+
+class LazyFakeRAGService:
+    def __init__(self, **kwargs: object) -> None:
+        self.kwargs = kwargs
+        self.closed = False
+
+    async def close(self) -> None:
+        self.closed = True
 
 
 def settings(
@@ -168,7 +186,7 @@ async def test_qdrant_feature_disabled_keeps_gateway_none() -> None:
     container = await dependencies.create_application_container(settings())
 
     assert container.knowledge_gateway is None
-    assert container.faq_manager._knowledge_gateway is None
+    assert container.faq_manager.rag_service is None
     assert container._qdrant_client is None
 
     await container.close()
@@ -196,22 +214,47 @@ async def test_qdrant_feature_enabled_injects_lazy_gateway_without_query(
 ) -> None:
     clients: list[FakeQdrantClient] = []
     embeddings: list[LazyFakeEmbedding] = []
+    rerankers: list[LazyFakeReranker] = []
+    rag_services: list[LazyFakeRAGService] = []
 
     def client_factory(**kwargs: object) -> FakeQdrantClient:
         client = FakeQdrantClient(**kwargs)
         clients.append(client)
         return client
 
-    def embedding_factory(model_name: str) -> LazyFakeEmbedding:
-        embedding = LazyFakeEmbedding(model_name)
+    def embedding_factory(
+        *,
+        model_name: str,
+        normalize_embeddings: bool = True,
+    ) -> LazyFakeEmbedding:
+        embedding = LazyFakeEmbedding(
+            model_name,
+            normalize_embeddings,
+        )
         embeddings.append(embedding)
         return embedding
+
+    def reranker_factory(model_name: str) -> LazyFakeReranker:
+        reranker = LazyFakeReranker(model_name)
+        rerankers.append(reranker)
+        return reranker
 
     monkeypatch.setattr(dependencies, "QdrantClient", client_factory)
     monkeypatch.setattr(
         dependencies,
         "EmbeddingModel",
         embedding_factory,
+    )
+    monkeypatch.setattr(
+        dependencies,
+        "Reranker",
+        reranker_factory,
+    )
+    monkeypatch.setattr(
+        dependencies,
+        "RAGService",
+        lambda **kwargs: rag_services.append(LazyFakeRAGService(**kwargs))
+        or rag_services[-1],
     )
     configured = Settings(
         pos_base_url="http://pos.test",
@@ -225,8 +268,8 @@ async def test_qdrant_feature_enabled_injects_lazy_gateway_without_query(
 
     container = await dependencies.create_application_container(configured)
 
-    assert isinstance(container.knowledge_gateway, KnowledgeQdrantClient)
-    assert container.faq_manager._knowledge_gateway is container.knowledge_gateway
+    assert container.knowledge_gateway is None
+    assert container.faq_manager.rag_service is rag_services[0]
     assert clients[0].kwargs == {
         "host": "qdrant.test",
         "port": 6333,
@@ -235,9 +278,14 @@ async def test_qdrant_feature_enabled_injects_lazy_gateway_without_query(
     assert clients[0].query_calls == 0
     assert embeddings[0].model_name == "configured-model"
     assert embeddings[0].embed_calls == 0
+    assert rerankers[0].model_name == "itdainb/PhoRanker"
+    assert rag_services[0].kwargs["retriever"] is not None
+    assert rag_services[0].kwargs["reranker"] is rerankers[0]
+    assert rag_services[0].kwargs["api_key"] == ""
 
     await container.close()
     assert clients[0].closed
+    assert rag_services[0].closed
 
 
 @pytest.mark.parametrize(
@@ -274,11 +322,11 @@ async def test_qdrant_config_is_forwarded_to_dense_rag_gateway(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     clients: list[FakeQdrantClient] = []
-    captured_gateway_kwargs: dict[str, object] = {}
+    captured_vector_store_kwargs: dict[str, object] = {}
 
-    class FakeKnowledgeGateway:
+    class FakeVectorStore:
         def __init__(self, **kwargs: object) -> None:
-            captured_gateway_kwargs.update(kwargs)
+            captured_vector_store_kwargs.update(kwargs)
 
     def client_factory(**kwargs: object) -> FakeQdrantClient:
         client = FakeQdrantClient(**kwargs)
@@ -288,10 +336,30 @@ async def test_qdrant_config_is_forwarded_to_dense_rag_gateway(
     monkeypatch.setattr(dependencies, "QdrantClient", client_factory)
     monkeypatch.setattr(
         dependencies,
-        "EmbeddingModel",
-        lambda model_name: LazyFakeEmbedding(model_name),
+        "VectorStore",
+        FakeVectorStore,
     )
-    monkeypatch.setattr(dependencies, "KnowledgeQdrantClient", FakeKnowledgeGateway)
+    monkeypatch.setattr(
+        dependencies,
+        "EmbeddingModel",
+        lambda *,
+        model_name,
+        normalize_embeddings=True: LazyFakeEmbedding(
+            model_name,
+            normalize_embeddings,
+        ),
+    )
+    monkeypatch.setattr(dependencies, "BM25KeywordSearch", lambda vector_store: object())
+    monkeypatch.setattr(
+        dependencies,
+        "Retriever",
+        lambda *,
+        embedder,
+        vector_store,
+        keyword_search: object(),
+    )
+    monkeypatch.setattr(dependencies, "Reranker", lambda model_name: object())
+    monkeypatch.setattr(dependencies, "RAGService", lambda **kwargs: LazyFakeRAGService(**kwargs))
 
     configured = Settings(
         pos_base_url="http://pos.test",
@@ -304,9 +372,13 @@ async def test_qdrant_config_is_forwarded_to_dense_rag_gateway(
 
     container = await dependencies.create_application_container(configured)
 
-    assert isinstance(container.knowledge_gateway, FakeKnowledgeGateway)
-    assert captured_gateway_kwargs["collection_name"] == "knowledge"
-    assert set(captured_gateway_kwargs) == {"client", "embedding", "collection_name"}
+    assert container.knowledge_gateway is None
+    assert captured_vector_store_kwargs["collection_name"] == "knowledge"
+    assert set(captured_vector_store_kwargs) == {
+        "client",
+        "collection_name",
+        "vector_size",
+    }
 
     await container.close()
     assert clients[0].closed
@@ -451,8 +523,9 @@ async def test_factory_preserves_injected_knowledge_gateway_identity() -> None:
         knowledge_gateway=gateway,
     )
 
-    assert container.faq_manager._knowledge_gateway is gateway
+    assert container.knowledge_gateway is gateway
     assert container.faq_manager._instruction_builder is container.instruction_builder
+    assert container.faq_manager.rag_service is None
 
     await container.close()
     await client.aclose()
@@ -466,7 +539,7 @@ async def test_factory_allows_missing_knowledge_gateway() -> None:
         http_client=client,
     )
 
-    assert container.faq_manager._knowledge_gateway is None
+    assert container.faq_manager.rag_service is None
 
     await container.close()
     await client.aclose()

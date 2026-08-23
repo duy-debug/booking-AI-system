@@ -18,7 +18,13 @@ from app.rag_v1.retriever import Retriever
 #     ↓
 # Retriever
 #     ↓
-# Lấy top-k candidate chunks từ Qdrant
+# Hybrid retrieval
+#     ↓
+# Semantic search trong Qdrant
+#     +
+# Keyword search bằng BM25
+#     +
+# Gộp kết quả bằng RRF
 #     ↓
 # Reranker
 #     ↓
@@ -135,7 +141,13 @@ class RAGService:
         #   ↓
         # embedding
         #   ↓
-        # Qdrant search
+        # semantic search trong Qdrant
+        #   +
+        # keyword search bằng BM25
+        #   +
+        # RRF merge
+        #   ↓
+        # top-k candidate chunks
         #
         #
         # Reranker:
@@ -260,7 +272,17 @@ class RAGService:
         # ----------------------------------------------------
         #
         # retrieve_top_k =
-        # số lượng candidate chunks lấy từ Qdrant.
+        # số lượng candidate chunks lấy từ Retriever.
+        #
+        # Trong RAG v1, Retriever không chỉ gọi Qdrant.
+        #
+        # Nó chạy hybrid search:
+        #
+        # semantic search trong Qdrant
+        #     +
+        # keyword search bằng BM25
+        #     +
+        # RRF merge
         #
         # Ví dụ:
         #
@@ -268,8 +290,8 @@ class RAGService:
         #
         # nghĩa là:
         #
-        # Qdrant trả về tối đa 10 chunks
-        # gần query nhất.
+        # Retriever trả về tối đa 10 candidate chunks
+        # sau khi đã gộp semantic + keyword bằng RRF.
         #
         # ----------------------------------------------------
 
@@ -324,7 +346,15 @@ class RAGService:
         #
         #       ↓
         #
-        # Qdrant cosine search
+        # Semantic search trong Qdrant
+        #
+        #       +
+        #
+        # Keyword search bằng BM25
+        #
+        #       ↓
+        #
+        # RRF merge
         #
         #       ↓
         #

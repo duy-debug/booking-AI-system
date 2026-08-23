@@ -41,7 +41,7 @@ from app.domain.outcomes import HandlerOutcome, HandlerResult
 from app.infrastructure.context_store import Settings
 from app.infrastructure.gemini_client import LLMMessage, LLMResponse
 from app.rag_v1 import KnowledgeDocument
-from app.rag_v1.service import FAQManager
+from app.rag_v1.faq_manager import FAQManager
 from app.main import create_app
 from tests.structured_nlu_gateway import StructuredNLUGateway
 
