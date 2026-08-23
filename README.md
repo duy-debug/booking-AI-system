@@ -206,31 +206,14 @@ docker compose down -v
 
 ## Chạy từng service khi phát triển local
 
-### Booking Backend
+Mỗi service nên chạy ở một terminal riêng. Với mỗi block bên dưới, bạn chỉ cần đứng ở thư mục gốc `booking-ai-system`, copy nguyên block và chạy.
 
-```bash
-cd booking-ai-system-be
-
-python -m venv .venv
-```
-
-Windows PowerShell:
+### 1. Booking Backend
 
 ```powershell
-.venv\Scripts\Activate.ps1
-pip install -e .
-Copy-Item .env.example .env
-```
-
-Chạy database migration:
-
-```powershell
-alembic upgrade head
-```
-
-Khởi động API:
-
-```powershell
+cd .\booking-ai-system-be
+deactivate 2>$null
+.\.venv\Scripts\Activate.ps1
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -242,27 +225,28 @@ Swagger: http://localhost:8000/docs
 OpenAPI: http://localhost:8000/openapi.json
 ```
 
-### AI Chatbot
-
-Qdrant và Booking Backend phải được khởi động trước Chatbot.
-
-```bash
-cd booking-ai-chatbot/backend
-
-python -m venv .venv
-```
-
-Windows PowerShell:
+### 2. Booking Frontend
 
 ```powershell
-.venv\Scripts\Activate.ps1
-pip install -e .
-Copy-Item .env.example .env
+cd .\booking-ai-system-fe
+npm run build
+npx next start -p 3000
 ```
 
-Cập nhật các giá trị cần thiết trong `.env`, sau đó chạy:
+Mở trình duyệt tại:
+
+```text
+http://localhost:3000
+```
+
+### 3. AI Chatbot Backend
+
+Qdrant và Booking Backend cần chạy trước Chatbot Backend.
 
 ```powershell
+cd .\booking-ai-chatbot\backend
+deactivate 2>$null
+.\.venv\Scripts\Activate.ps1
 uvicorn app.main:app --reload --port 8001
 ```
 
@@ -272,18 +256,18 @@ Kiểm tra:
 Swagger: http://localhost:8001/docs
 ```
 
-### Frontend
+### 4. Chatbot Frontend
 
-```bash
-cd booking-ai-system-fe
-npm install
-npm run dev
+```powershell
+cd .\booking-ai-chatbot\frontend
+npm run build
+npx next start -p 3002
 ```
 
 Mở trình duyệt tại:
 
 ```text
-http://localhost:3000
+http://localhost:3002
 ```
 
 ---
