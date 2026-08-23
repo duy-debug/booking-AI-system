@@ -24,8 +24,8 @@ class RAGConfig:
     collection_name: str = "knowledge"
     vector_size: int = 384
 
-    retrieve_top_k: int = 10
-    rerank_top_n: int = 3
+    retrieve_top_k: int = 20
+    rerank_top_n: int = 5
 
     recreate_collection_on_index: bool = False
     delete_existing_sources_on_index: bool = True

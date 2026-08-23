@@ -215,8 +215,8 @@ class RAGService:
         self,
         query: str,
         *,
-        retrieve_top_k: int = 10,
-        rerank_top_n: int = 3,
+        retrieve_top_k: int = 20,
+        rerank_top_n: int = 5,
     ) -> str:
         """
         Chạy toàn bộ RAG query pipeline.
