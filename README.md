@@ -212,9 +212,9 @@ Mỗi service nên chạy ở một terminal riêng. Với mỗi block bên dư�
 
 ```powershell
 cd .\booking-ai-system-be
-deactivate 2>$null
 .\.venv\Scripts\Activate.ps1
-uvicorn app.main:app --reload --port 8000
+pip install -e .
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
 Kiểm tra:
@@ -245,9 +245,9 @@ Qdrant và Booking Backend cần chạy trước Chatbot Backend.
 
 ```powershell
 cd .\booking-ai-chatbot\backend
-deactivate 2>$null
 .\.venv\Scripts\Activate.ps1
-uvicorn app.main:app --reload --port 8001
+pip install -e ".[dev,rag]"
+python -m uvicorn app.main:app --reload --port 8001
 ```
 
 Kiểm tra:

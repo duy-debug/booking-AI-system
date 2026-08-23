@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Komorebi — Trợ lý Wellness",
-  description: "Trợ lý đặt lịch chăm sóc sức khỏe Komorebi",
+  title: "Komorebi Spa | Massage & AI Concierge",
+  description: "Landing page massage/spa với trợ lý AI Kori hỗ trợ tư vấn và đặt lịch.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

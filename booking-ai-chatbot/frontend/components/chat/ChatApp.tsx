@@ -7,7 +7,12 @@ import { MessageItem } from "@/components/chat/MessageItem";
 import { BotIcon } from "@/components/common/Icons";
 import { useBookingChat } from "@/hooks/use-booking-chat";
 
-export function ChatApp() {
+interface ChatAppProps {
+  mode?: "page" | "widget";
+  onClose?: () => void;
+}
+
+export function ChatApp({ mode = "page", onClose }: ChatAppProps) {
   const {
     messages,
     conversationId,
@@ -66,7 +71,7 @@ export function ChatApp() {
   }
 
   return (
-    <main className="messenger-shell">
+    <main className={`messenger-shell ${mode === "widget" ? "widget-mode" : "page-mode"}`}>
       <section className="chat-panel">
         <ChatHeader
           loading={isSending}
@@ -74,6 +79,8 @@ export function ChatApp() {
           dark={dark}
           onToggleTheme={() => setDark((value) => !value)}
           onNewChat={resetChat}
+          onClose={onClose}
+          showThemeToggle={mode === "page"}
         />
 
         <div
