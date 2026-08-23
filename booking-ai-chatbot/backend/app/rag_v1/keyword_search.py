@@ -2,7 +2,7 @@ import re
 
 from rank_bm25 import BM25Okapi
 
-from app.rag_v1.vector_store import SearchResult, VectorStore
+from app.rag_v1.vector_store import SearchResult, VectorStore, payload_text
 
 # ============================================================
 # Keyword Search
@@ -131,9 +131,27 @@ class BM25KeywordSearch:
 
         for record in records:
             payload = record.payload or {}
-            text = payload.get(
-                "text",
-                "",
+
+            # ------------------------------------------------
+            # Lấy text chunk từ payload
+            # ------------------------------------------------
+            #
+            # BM25 cần nội dung text để build corpus.
+            #
+            # Qdrant hiện có thể chứa:
+            #
+            # - text:
+            #     schema mới do RAG v1 upsert
+            #
+            # - content:
+            #     schema cũ hoặc dữ liệu đã index trước đó
+            #
+            # Nếu không fallback sang content, keyword search
+            # sẽ không thấy những chunk như "Bãi đậu xe".
+            # ------------------------------------------------
+
+            text = payload_text(
+                payload
             )
 
             if not isinstance(text, str) or not text.strip():
@@ -195,21 +213,65 @@ class BM25KeywordSearch:
             query_tokens
         )
 
-        scored_results = [
-            SearchResult(
-                text=result.text,
-                source=result.source,
-                file_path=result.file_path,
-                chunk_index=result.chunk_index,
-                score=float(score),
+        scored_results: list[SearchResult] = []
+
+        for result, tokens, score in zip(
+            searchable_results,
+            tokenized_corpus,
+            scores,
+            strict=True,
+        ):
+            bm25_score = float(
+                score
             )
-            for result, score in zip(
-                searchable_results,
-                scores,
-                strict=True,
+
+            # ------------------------------------------------
+            # Giữ lại chunk match keyword trực tiếp
+            # ------------------------------------------------
+            #
+            # BM25 có thể trả 0.0 khi corpus nhỏ hoặc term xuất hiện
+            # chưa đủ để tạo IDF dương.
+            #
+            # Nếu chỉ lọc score > 0.0, các câu rõ ràng như:
+            #
+            # "bãi đậu xe"
+            #
+            # vẫn có thể bị loại khỏi keyword_results.
+            #
+            # Vì vậy:
+            #
+            # - ưu tiên score BM25 nếu score dương
+            # - fallback bằng số token query trùng với chunk
+            #
+            # Fallback này chỉ nằm trong keyword search,
+            # không thay đổi semantic search hay RRF.
+            # ------------------------------------------------
+
+            matched_tokens = {
+                token
+                for token in query_tokens
+                if token in tokens
+            }
+
+            if bm25_score <= 0.0 and not matched_tokens:
+                continue
+
+            final_score = bm25_score
+
+            if final_score <= 0.0:
+                final_score = float(
+                    len(matched_tokens)
+                )
+
+            scored_results.append(
+                SearchResult(
+                    text=result.text,
+                    source=result.source,
+                    file_path=result.file_path,
+                    chunk_index=result.chunk_index,
+                    score=final_score,
+                )
             )
-            if float(score) > 0.0
-        ]
 
         scored_results.sort(
             key=lambda item: item.score,

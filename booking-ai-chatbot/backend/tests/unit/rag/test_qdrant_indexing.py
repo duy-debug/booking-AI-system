@@ -143,6 +143,7 @@ def test_vector_store_creates_collection_and_upserts_payload() -> None:
     point = client.points[0]
     assert point.payload == {
         "text": "content",
+        "content": "content",
         "source": "faq.md",
         "file_path": "knowledge/faq.md",
         "chunk_index": 0,
@@ -208,6 +209,46 @@ def test_bm25_keyword_search_returns_keyword_matches() -> None:
         "Cancellation fee can be waived.",
     ]
     assert all(result.score > 0 for result in results)
+
+
+def test_bm25_keyword_search_reads_legacy_content_payload() -> None:
+    client = FakeQdrantClient()
+    client.records = [
+        SimpleNamespace(
+            payload={
+                "content": "Bãi đậu xe phụ thuộc từng chi nhánh.",
+                "source": "parking.md",
+                "file_path": "knowledge/parking.md",
+                "chunk_index": 0,
+            }
+        ),
+        SimpleNamespace(
+            payload={
+                "content": "Thông tin thanh toán không yêu cầu nhập số thẻ.",
+                "source": "payment.md",
+                "file_path": "knowledge/payment.md",
+                "chunk_index": 1,
+            }
+        ),
+    ]
+    store = VectorStore(
+        collection_name="knowledge",
+        vector_size=3,
+        client=client,  # type: ignore[arg-type]
+    )
+
+    keyword_search = BM25KeywordSearch(
+        vector_store=store,
+    )
+
+    results = keyword_search.search(
+        "bãi đậu xe",
+        limit=1,
+    )
+
+    assert [result.text for result in results] == [
+        "Bãi đậu xe phụ thuộc từng chi nhánh.",
+    ]
 
 
 def test_rrf_merge_combines_semantic_and_keyword_results() -> None:

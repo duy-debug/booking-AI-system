@@ -367,6 +367,7 @@ class VectorStore:
 
                 payload={
                     "text": chunk.text,
+                    "content": chunk.text,
                     "source": chunk.source,
                     "file_path": chunk.file_path,
                     "chunk_index": chunk.chunk_index,
@@ -473,12 +474,32 @@ class VectorStore:
             # nên fallback về dictionary rỗng.
             payload = point.payload or {}
 
+            # ------------------------------------------------
+            # Lấy text chunk từ payload
+            # ------------------------------------------------
+            #
+            # Đây là bước tương thích schema Qdrant.
+            #
+            # Một số dữ liệu cũ/import ngoài đang lưu nội dung
+            # ở field:
+            #
+            # content
+            #
+            # Trong khi schema mới của RAG v1 dùng field:
+            #
+            # text
+            #
+            # Nếu chỉ đọc "text", RAG có thể retrieve đúng point
+            # nhưng context đưa vào LLM lại bị rỗng.
+            # ------------------------------------------------
+
+            text = payload_text(
+                payload
+            )
+
 
             result = SearchResult(
-                text=payload.get(
-                    "text",
-                    "",
-                ),
+                text=text,
 
                 source=payload.get(
                     "source",
@@ -569,3 +590,44 @@ def point_id_for_chunk(
             raw_id,
         )
     )
+
+
+def payload_text(
+    payload: dict[str, object],
+) -> str:
+    """
+    Lấy nội dung chunk từ payload Qdrant.
+
+    Ưu tiên field "text" của schema RAG v1.
+    Fallback sang "content" để đọc được dữ liệu đã index trước đó.
+    """
+
+    # ----------------------------------------------------
+    # 1. Ưu tiên schema hiện tại
+    # ----------------------------------------------------
+
+    text = payload.get(
+        "text"
+    )
+
+    if isinstance(text, str) and text.strip():
+        return text
+
+
+    # ----------------------------------------------------
+    # 2. Fallback cho schema cũ/import ngoài
+    # ----------------------------------------------------
+
+    content = payload.get(
+        "content"
+    )
+
+    if isinstance(content, str):
+        return content
+
+
+    # ----------------------------------------------------
+    # 3. Không có nội dung hợp lệ
+    # ----------------------------------------------------
+
+    return ""
