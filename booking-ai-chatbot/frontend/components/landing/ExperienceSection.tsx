@@ -1,38 +1,42 @@
-import { CalendarCheckIcon, CheckIcon, SparklesIcon } from "@/components/common/Icons";
-import { experienceItems, steps } from "@/components/landing/data";
-import { Card } from "@/components/ui/Card";
+import { WellnessImage } from "@/components/landing/WellnessImage";
+import { landingImages } from "@/components/landing/data";
 import { Container } from "@/components/ui/Container";
-import { SectionHeading } from "@/components/ui/SectionHeading";
 
 export function ExperienceSection() {
   return (
-    <section className="landing-section experience-section" id="experience">
-      <Container className="experience-grid">
-        <div>
-          <SectionHeading
-            eyebrow="Trải nghiệm"
-            title="Một buổi chăm sóc được chuẩn bị rõ ràng từ trước."
-            description="Landing page chỉ giới thiệu dịch vụ. Toàn bộ tư vấn và booking đi qua chatbot để giữ đúng luồng xác nhận."
-          />
-          <ul className="check-list">
-            {experienceItems.map((item) => (
-              <li key={item}><CheckIcon />{item}</li>
-            ))}
-          </ul>
+    <section className="zen-section why-section" id="experience">
+      <Container>
+        <div className="section-divider-title">
+          <span />
+          <h2>Why Choose Kori Massage</h2>
+          <span />
         </div>
-        <Card className="process-card">
-          <span className="process-icon"><CalendarCheckIcon /></span>
-          <h3>Luồng đặt lịch AI-first</h3>
-          <ol>
-            {steps.map((step) => (
-              <li key={step}>{step}</li>
-            ))}
-          </ol>
-          <div className="process-note">
-            <SparklesIcon />
-            <span>Không tạo booking nếu bạn chưa xác nhận thông tin cuối cùng.</span>
+
+        <div className="why-grid">
+          <div className="why-copy">
+            <h3>Peace, At Last...</h3>
+            <p>
+              Ở Kori, mỗi liệu trình được chuẩn bị như một khoảng nghỉ riêng: ánh sáng
+              ấm, nhịp phục vụ chậm và Kori AI hỗ trợ chọn đúng dịch vụ trước khi đến.
+            </p>
+            <a href="#services">Read more</a>
           </div>
-        </Card>
+
+          <div className="why-images" aria-hidden="true">
+            <WellnessImage
+              src={landingImages.aroma}
+              alt=""
+              className="why-image large"
+              sizes="(max-width: 900px) 80vw, 28vw"
+            />
+            <WellnessImage
+              src={landingImages.hotStone}
+              alt=""
+              className="why-image small"
+              sizes="(max-width: 900px) 54vw, 18vw"
+            />
+          </div>
+        </div>
       </Container>
     </section>
   );

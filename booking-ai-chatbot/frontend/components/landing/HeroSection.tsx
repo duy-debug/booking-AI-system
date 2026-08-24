@@ -1,43 +1,28 @@
-import { ArrowRightIcon, SparklesIcon } from "@/components/common/Icons";
+import { ArrowRightIcon } from "@/components/common/Icons";
 import { ChatOpenButton } from "@/components/landing/ChatOpenButton";
-import { ButtonLink } from "@/components/ui/Button";
+import { WellnessImage } from "@/components/landing/WellnessImage";
+import { landingImages } from "@/components/landing/data";
 import { Container } from "@/components/ui/Container";
 
 export function HeroSection() {
   return (
-    <section className="hero-section" id="top">
-      <Container className="hero-grid">
-        <div className="hero-copy">
-          <span className="eyebrow">Wellness concierge for massage booking</span>
-          <h1>Không gian massage thư giãn, đặt lịch bằng trợ lý AI.</h1>
-          <p>
-            Komorebi giúp bạn khám phá dịch vụ massage, hỏi thông tin cần thiết và đặt lịch qua
-            Kori AI Concierge mà không cần điền form dài dòng.
-          </p>
-          <div className="hero-actions">
+    <section className="zen-hero" id="top">
+      <Container>
+        <div className="zen-hero-card">
+          <WellnessImage
+            src={landingImages.hero}
+            alt="Không gian massage thư giãn với ánh sáng ấm"
+            className="zen-hero-image"
+            priority
+            sizes="(max-width: 900px) 100vw, 1120px"
+          />
+          <div className="zen-hero-overlay" />
+          <div className="zen-hero-copy">
+            <h1>Rebalance Your Body And Mind</h1>
+            <p>Welcome to Kori Massage</p>
             <ChatOpenButton>
-              Mở trợ lý AI <ArrowRightIcon />
+              Book Service <ArrowRightIcon />
             </ChatOpenButton>
-            <ButtonLink href="#services" variant="ghost">Xem dịch vụ</ButtonLink>
-          </div>
-          <div className="hero-notes" aria-label="Điểm nổi bật">
-            <span>Tư vấn dịch vụ</span>
-            <span>Kiểm tra lịch trống</span>
-            <span>Xác nhận trước khi đặt</span>
-          </div>
-        </div>
-        <div className="hero-visual" aria-hidden="true">
-          <div className="hero-orb large" />
-          <div className="hero-orb small" />
-          <div className="ritual-card">
-            <span><SparklesIcon /></span>
-            <strong>Calm ritual</strong>
-            <p>Chọn dịch vụ theo nhu cầu, thời lượng và nhịp thư giãn của bạn.</p>
-          </div>
-          <div className="hero-image-panel">
-            <div className="stone stone-one" />
-            <div className="stone stone-two" />
-            <div className="stone stone-three" />
           </div>
         </div>
       </Container>

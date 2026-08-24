@@ -1,22 +1,63 @@
-import { MapPinIcon, PhoneIcon } from "@/components/common/Icons";
 import { ChatOpenButton } from "@/components/landing/ChatOpenButton";
+import { services, therapists } from "@/components/landing/data";
 import { Container } from "@/components/ui/Container";
 
 export function ContactSection() {
   return (
-    <section className="landing-section contact-section" id="contact">
-      <Container className="contact-panel">
-        <div>
-          <span className="eyebrow">Liên hệ</span>
-          <h2>Cần tư vấn nhanh? Hãy để Kori hỏi đúng thông tin trước.</h2>
-          <p>
-            Thông tin cửa hàng cụ thể sẽ được lấy qua hệ thống booking khi bạn bắt đầu hội thoại.
-          </p>
+    <section className="booking-section" id="pricing">
+      <Container>
+        <div className="section-divider-title">
+          <span />
+          <h2>Book Your Appointment</h2>
+          <span />
         </div>
-        <div className="contact-actions">
-          <span><MapPinIcon /> Chi nhánh được xác nhận trong luồng chat</span>
-          <span><PhoneIcon /> Thông tin liên hệ dùng theo booking thực tế</span>
-          <ChatOpenButton>Hỏi Kori ngay</ChatOpenButton>
+
+        <div className="appointment-panel" aria-label="Mẫu đặt lịch minh họa">
+          <label>
+            Choose a Massage Salon
+            <select defaultValue="Komorebi Tân Bình">
+              <option>Komorebi Tân Bình</option>
+              <option>Komorebi Ba Đình</option>
+              <option>Komorebi Thảo Điền</option>
+            </select>
+          </label>
+          <label>
+            Choose a Service
+            <select defaultValue={services[0].name}>
+              {services.map((service) => (
+                <option key={service.name}>{service.name}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Choose a Specialist
+            <select defaultValue={therapists[0].name}>
+              {therapists.map((therapist) => (
+                <option key={therapist.name}>{therapist.name}</option>
+              ))}
+            </select>
+          </label>
+          <div className="appointment-row">
+            <label>
+              Choose Date
+              <input type="date" defaultValue="2026-08-24" />
+            </label>
+            <label>
+              Choose Time
+              <input type="time" defaultValue="14:00" />
+            </label>
+          </div>
+          <div className="appointment-row">
+            <label>
+              Name
+              <input placeholder="Anh/chị" />
+            </label>
+            <label>
+              Phone number
+              <input placeholder="+84" />
+            </label>
+          </div>
+          <ChatOpenButton>Book Service</ChatOpenButton>
         </div>
       </Container>
     </section>

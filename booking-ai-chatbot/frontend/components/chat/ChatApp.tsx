@@ -3,8 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChatHeader } from "@/components/chat/ChatHeader";
 import { MessageComposer } from "@/components/chat/MessageComposer";
-import { MessageItem } from "@/components/chat/MessageItem";
-import { BotIcon } from "@/components/common/Icons";
+import { MessageList } from "@/components/chat/MessageList";
 import { useBookingChat } from "@/hooks/use-booking-chat";
 
 interface ChatAppProps {
@@ -83,49 +82,18 @@ export function ChatApp({ mode = "page", onClose }: ChatAppProps) {
           showThemeToggle={mode === "page"}
         />
 
-        <div
-          ref={messageScrollRef}
-          className="message-scroll"
-          aria-live="polite"
-          aria-busy={isSending}
-          onScroll={(event) => {
-            const element = event.currentTarget;
-            shouldAutoScrollRef.current =
-              element.scrollHeight - element.scrollTop - element.clientHeight < 120;
+        <MessageList
+          messages={messages}
+          loading={isSending}
+          streamingStarted={streamingStarted}
+          error={error}
+          canRetry={canRetry}
+          scrollRef={messageScrollRef}
+          onRetry={retryLastMessage}
+          onScrollNearBottomChange={(nearBottom) => {
+            shouldAutoScrollRef.current = nearBottom;
           }}
-        >
-          <div className="conversation-date"><span>Hôm nay</span></div>
-          <div className="message-stream">
-            {messages.map((message, index) => (
-              <MessageItem
-                key={message.id}
-                message={message}
-                latest={index === messages.length - 1}
-                streaming={isSending && streamingStarted}
-              />
-            ))}
-
-            {isSending && !streamingStarted && (
-              <div className="message-row assistant" role="status">
-                <span className="message-avatar"><BotIcon /></span>
-                <div>
-                  <div className="typing"><i /><i /><i /></div>
-                  <small className="typing-label">Kori đang suy nghĩ</small>
-                </div>
-              </div>
-            )}
-
-            {error && (
-              <div className="error-banner" role="alert">
-                <span><strong>Không gửi được tin nhắn</strong>{error}</span>
-                {canRetry && (
-                  <button disabled={isSending} onClick={retryLastMessage}>Thử lại</button>
-                )}
-              </div>
-            )}
-          </div>
-          <div className="scroll-anchor" />
-        </div>
+        />
 
         {conversationId && (
           <MessageComposer

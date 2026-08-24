@@ -1,36 +1,54 @@
 import { ArrowRightIcon } from "@/components/common/Icons";
 import { ChatOpenButton } from "@/components/landing/ChatOpenButton";
+import { WellnessImage } from "@/components/landing/WellnessImage";
 import { services } from "@/components/landing/data";
-import { Card } from "@/components/ui/Card";
 import { Container } from "@/components/ui/Container";
-import { SectionHeading } from "@/components/ui/SectionHeading";
 
 export function ServicesSection() {
   return (
-    <section className="landing-section" id="services">
+    <section className="zen-section service-showcase" id="services">
       <Container>
-        <SectionHeading
-          eyebrow="Dịch vụ"
-          title="Chọn nhịp chăm sóc phù hợp với cơ thể."
-          description="Thông tin dưới đây là gợi ý tổng quan. Khi cần chọn chính xác hơn, Kori sẽ hỏi thêm nhu cầu và kiểm tra lịch phù hợp."
-        />
-        <div className="service-grid">
-          {services.map((service) => (
-            <Card className="service-card" key={service.name}>
-              <div>
-                <span className="service-meta">{service.duration} · {service.price}</span>
+        <div className="section-divider-title">
+          <span />
+          <h2>Find Your Perfect Escape</h2>
+          <span />
+        </div>
+
+        <div className="zen-service-list">
+          {services.map((service, index) => (
+            <article className={`zen-service-card ${index % 2 === 1 ? "reverse" : ""}`} key={service.name}>
+              <WellnessImage
+                src={service.image}
+                alt={`Liệu trình ${service.name}`}
+                className="zen-service-image"
+                sizes="(max-width: 900px) 100vw, 34vw"
+              />
+              <div className="zen-service-copy">
                 <h3>{service.name}</h3>
                 <p>{service.description}</p>
+                <div className="zen-service-details">
+                  <div>
+                    <strong>Benefits:</strong>
+                    <span>{service.benefit}</span>
+                  </div>
+                  <div>
+                    <strong>Perfect For:</strong>
+                    <span>{service.perfectFor}</span>
+                  </div>
+                </div>
+                <div className="zen-service-actions">
+                  <span>{service.duration}</span>
+                  <span>{service.price}</span>
+                  <ChatOpenButton>
+                    Book Service <ArrowRightIcon />
+                  </ChatOpenButton>
+                </div>
               </div>
-              <div className="service-footer">
-                <span>{service.benefit}</span>
-                <ChatOpenButton variant="ghost">
-                  Tư vấn dịch vụ này <ArrowRightIcon />
-                </ChatOpenButton>
-              </div>
-            </Card>
+            </article>
           ))}
         </div>
+
+        <a className="view-all-link" href="#assistant">View All</a>
       </Container>
     </section>
   );

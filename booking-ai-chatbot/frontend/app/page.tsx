@@ -1,13 +1,16 @@
 import { AppErrorBoundary } from "@/components/common/AppErrorBoundary";
 import { ChatWidget } from "@/components/chat/ChatWidget";
+import { AiBookingJourney } from "@/components/landing/AiBookingJourney";
 import { AssistantSection } from "@/components/landing/AssistantSection";
 import { ContactSection } from "@/components/landing/ContactSection";
 import { ExperienceSection } from "@/components/landing/ExperienceSection";
 import { FaqSection } from "@/components/landing/FaqSection";
 import { Footer } from "@/components/landing/Footer";
+import { GiftSection } from "@/components/landing/GiftSection";
 import { HeroSection } from "@/components/landing/HeroSection";
 import { Navbar } from "@/components/landing/Navbar";
 import { ServicesSection } from "@/components/landing/ServicesSection";
+import { TherapistsSection } from "@/components/landing/TherapistsSection";
 import { TestimonialsSection } from "@/components/landing/TestimonialsSection";
 
 export default function Home() {
@@ -16,12 +19,15 @@ export default function Home() {
       <Navbar />
       <main>
         <HeroSection />
-        <ServicesSection />
         <ExperienceSection />
+        <ServicesSection />
+        <TherapistsSection />
         <TestimonialsSection />
+        <GiftSection />
+        <AiBookingJourney />
         <AssistantSection />
-        <FaqSection />
         <ContactSection />
+        <FaqSection />
       </main>
       <Footer />
       <AppErrorBoundary>

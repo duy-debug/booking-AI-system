@@ -1,30 +1,32 @@
-import { MessageCircleIcon } from "@/components/common/Icons";
+import { ArrowRightIcon } from "@/components/common/Icons";
 import { ChatOpenButton } from "@/components/landing/ChatOpenButton";
 import { Container } from "@/components/ui/Container";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 
 const capabilities = [
-  "Tư vấn dịch vụ",
-  "Hỏi giá và thời lượng",
+  "Lắng nghe nhu cầu",
+  "Gợi ý liệu trình",
   "Kiểm tra lịch trống",
-  "Đặt lịch qua hội thoại",
-  "Hỗ trợ đổi hoặc hủy lịch",
+  "Nhắc lại trước khi xác nhận",
 ];
 
 export function AssistantSection() {
   return (
-    <section className="assistant-section" id="assistant">
-      <Container className="assistant-panel">
-        <div className="assistant-icon"><MessageCircleIcon /></div>
+    <section className="assistant-section about-kori" id="assistant">
+      <Container className="about-kori-panel">
         <SectionHeading
-          eyebrow="Kori AI Concierge"
-          title="Một cửa sổ chat cho toàn bộ hành trình."
-          description="Bạn có thể bắt đầu bằng một câu tự nhiên như “Tôi muốn massage thư giãn chiều mai”. Kori sẽ hỏi tiếp những thông tin còn thiếu."
+          eyebrow="Về Kori"
+          title="AI chỉ đứng phía sau để buổi chăm sóc diễn ra nhẹ hơn."
+          description="Kori không thay thế trải nghiệm massage. Trợ lý chỉ giúp anh/chị mô tả nhu cầu, chọn liệu trình và hoàn tất đặt lịch tự nhiên hơn."
         />
         <div className="capability-list">
-          {capabilities.map((item) => <span key={item}>{item}</span>)}
+          {capabilities.map((item) => (
+            <span key={item}>{item}</span>
+          ))}
         </div>
-        <ChatOpenButton>Trò chuyện với Kori</ChatOpenButton>
+        <ChatOpenButton>
+          Đặt lịch với Kori <ArrowRightIcon />
+        </ChatOpenButton>
       </Container>
     </section>
   );

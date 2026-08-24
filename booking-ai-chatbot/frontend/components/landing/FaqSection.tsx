@@ -10,7 +10,7 @@ export function FaqSection() {
           align="center"
           eyebrow="FAQ"
           title="Những câu hỏi thường gặp"
-          description="Nếu câu hỏi của bạn cụ thể hơn, hãy mở Kori để chatbot tra cứu và trả lời theo ngữ cảnh."
+          description="Nếu câu hỏi của anh/chị cụ thể hơn, hãy mở Kori để chatbot tra cứu và trả lời theo ngữ cảnh."
         />
         <div className="faq-list">
           {faqs.map((item) => (
