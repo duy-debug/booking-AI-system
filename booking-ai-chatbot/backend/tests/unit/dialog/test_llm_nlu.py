@@ -313,6 +313,30 @@ async def test_start_booking_preserves_all_supported_secondary_booking_entities(
 
 
 @pytest.mark.asyncio
+async def test_start_booking_ignores_empty_entity_resolver_noise() -> None:
+    fallback, _ = fallback_for(
+        structured(
+            intent="start_booking",
+            confidence=1.0,
+            entities={"booking_date": "2026-08-25"},
+            entity_kind="shop",
+            entity_query=None,
+        )
+    )
+
+    result = await fallback.parse(
+        text="xin chào tôi muốn đặt booking ngày mai",
+        state=BookingState.IDLE,
+    )
+
+    assert result.intent == "start_booking"
+    assert result.resolution_status is NLUResolutionStatus.RESOLVED
+    assert result.entity_kind is None
+    assert result.entity_query is None
+    assert result.merged_entities == {"booking_date": date(2026, 8, 25)}
+
+
+@pytest.mark.asyncio
 async def test_state_prioritization_preserves_secondary_candidate_entities() -> None:
     gateway = FakeLLMGateway(
         LLMResponse(

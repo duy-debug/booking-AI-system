@@ -1299,6 +1299,28 @@ def _normalize_llm_output_payload(payload: Mapping[str, object]) -> dict[str, ob
                 normalized["entity_query"] = question_query
                 entities["query"] = question_query
 
+        # ------------------------------------------------
+        # Đồng bộ entity resolver cho start_booking
+        # ------------------------------------------------
+        #
+        # LLM đôi khi hiểu đúng intent start_booking và ngày đặt lịch,
+        # nhưng lại gắn nhầm:
+        #
+        # entity_kind: "shop"
+        # entity_query: None
+        #
+        # entity_kind chỉ hợp lệ khi có entity_query để resolver search.
+        # Nếu không có query, đây là nhiễu từ LLM và không nên làm rớt
+        # intent start_booking xuống unresolved.
+        # ------------------------------------------------
+
+        if (
+            canonical_intent == "start_booking"
+            and normalized.get("entity_kind") is not None
+            and _non_empty_text(normalized.get("entity_query")) is None
+        ):
+            normalized["entity_kind"] = None
+
         normalized["entities"] = entities
 
 

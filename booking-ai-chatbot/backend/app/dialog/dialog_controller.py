@@ -203,6 +203,16 @@ class DialogTurnResult:
     original_error: ActionExecutionError | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class RequestedEntityConsumption:
+    """
+    Kết quả tiêu thụ các entity người dùng đã nói sớm trong cùng một turn.
+    """
+
+    result: DialogTurnResult
+    blocked_resolution: EntityResolutionResult | None = None
+
+
 class DialogController:
     """
     Điều phối một lượt hội thoại hoàn chỉnh của chatbot.
@@ -948,12 +958,13 @@ async def _process_bound_chat_message(
 
     controller_started = perf_counter()
     result = await container.dialog_controller.handle_turn(context, turn)
-    result = await _consume_requested_entities(
+    consumption = await _consume_requested_entities(
         container=container,
         context=context,
         result=result,
         idempotency_key=idempotency_key,
     )
+    result = consumption.result
     record_turn_metrics(
         intent=result.intent,
         handler=",".join(result.executed_actions) or "none",
@@ -983,6 +994,12 @@ async def _process_bound_chat_message(
             error_code=result.failure_code,
             failed_action=result.failed_action or "none",
         )
+    if consumption.blocked_resolution is not None:
+        return await _entity_response(
+            context,
+            consumption.blocked_resolution,
+            container,
+        )
     response = container.instruction_builder.build_response(
         result=result,
         context=context,
@@ -1004,17 +1021,19 @@ async def _consume_requested_entities(
     context: BookingContext,
     result: DialogTurnResult,
     idempotency_key: str | None,
-) -> DialogTurnResult:
+) -> RequestedEntityConsumption:
     # Tiêu thụ các slot chờ đã validate theo đúng thứ tự workflow production.
     consumed = result
     for _ in range(12):
         if consumed.status is not DialogTurnStatus.SUCCESS:
             break
-        follow_up = await _next_requested_turn(
+        follow_up, blocked_resolution = await _next_requested_turn(
             container=container,
             context=context,
             idempotency_key=idempotency_key,
         )
+        if blocked_resolution is not None:
+            return RequestedEntityConsumption(consumed, blocked_resolution)
         if follow_up is None:
             break
         consumed = await container.dialog_controller.handle_turn(context, follow_up)
@@ -1028,7 +1047,7 @@ async def _consume_requested_entities(
             to_state=consumed.final_state.value,
             status=consumed.status.value,
         )
-    return consumed
+    return RequestedEntityConsumption(consumed)
 
 
 def _stage_requested_entities(result: NLUResult, context: BookingContext) -> None:
@@ -1200,7 +1219,7 @@ async def _next_requested_turn(
     container: ApplicationContainer,
     context: BookingContext,
     idempotency_key: str | None,
-) -> DialogTurnInput | None:
+) -> tuple[DialogTurnInput | None, EntityResolutionResult | None]:
     direct: tuple[str, str, Mapping[str, object]] | None = None
     entity: tuple[str, NLUEntityKind] | None = None
     if context.state is BookingState.SELECTING_SHOP and context.requested_shop_name:
@@ -1278,9 +1297,9 @@ async def _next_requested_turn(
 
     if direct is not None:
         intent, _field, payload = direct
-        return DialogTurnInput(intent, payload, idempotency_key=idempotency_key)
+        return DialogTurnInput(intent, payload, idempotency_key=idempotency_key), None
     if entity is None:
-        return None
+        return None, None
     query, kind = entity
     request = NLUResult(
         intent=None,
@@ -1308,12 +1327,15 @@ async def _next_requested_turn(
             candidate_count=len(resolution.candidates),
             error_code=resolution.failure_code or "none",
         )
-        return None
-    return entity_resolution_to_dialog_turn_input(
-        resolution,
-        state=context.state,
-        intent_policy=container.state_intent_policy,
-        idempotency_key=idempotency_key,
+        return None, resolution
+    return (
+        entity_resolution_to_dialog_turn_input(
+            resolution,
+            state=context.state,
+            intent_policy=container.state_intent_policy,
+            idempotency_key=idempotency_key,
+        ),
+        None,
     )
 
 

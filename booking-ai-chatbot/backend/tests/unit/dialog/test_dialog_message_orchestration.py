@@ -248,6 +248,18 @@ def resolved_nlu() -> NLUResult:
     )
 
 
+def resolved_nlu_with_shop_name(shop_name: str) -> NLUResult:
+    return NLUResult(
+        intent="start_booking",
+        payload={},
+        confidence=1.0,
+        source=NLUSource.LLM,
+        resolution_status=NLUResolutionStatus.RESOLVED,
+        has_unconsumed_entities=True,
+        merged_entities={"shop_name": shop_name},
+    )
+
+
 def entity_nlu(kind: NLUEntityKind = NLUEntityKind.SHOP) -> NLUResult:
     return NLUResult(
         intent=None,
@@ -590,6 +602,35 @@ async def test_valid_llm_result_runs_one_controller_turn() -> None:
     assert len(fake.instruction_builder.calls) == 1
     assert fake.conversation_context_store.saved == [("conversation-a", context)]
     assert response.text == "Safe response"
+
+
+@pytest.mark.asyncio
+async def test_prefilled_entity_not_found_returns_entity_response() -> None:
+    resolution = EntityResolutionResult(
+        EntityResolutionStatus.NOT_FOUND,
+        NLUEntityKind.SHOP,
+        None,
+        {},
+        failure_code="shop_not_found",
+    )
+    context = BookingContext("conversation-a")
+    fake = FakeContainer(
+        context=context,
+        nlu_result=resolved_nlu_with_shop_name("Kimo Nha Trang"),
+        resolution=resolution,
+    )
+    fake.dialog_controller = StateChangingController()
+
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
+
+    assert response.status is DialogTurnStatus.FAILURE_HANDLED
+    assert response.text != "Safe response"
+    assert len(fake.entity_resolution_coordinator.calls) == 1
+    prefilled_request = fake.entity_resolution_coordinator.calls[0][0]
+    assert prefilled_request.entity_query == "Kimo Nha Trang"
+    assert prefilled_request.entity_kind is NLUEntityKind.SHOP
+    assert len(fake.instruction_builder.calls) == 0
+    assert fake.conversation_context_store.saved == [("conversation-a", context)]
 
 
 @pytest.mark.asyncio
