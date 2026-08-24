@@ -30,6 +30,7 @@ from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.dialog.flow_loader import FlowFailure, InvalidFlowConditionError
 from app.domain.booking_context import BookingContext
 from app.domain.booking_models import (
+    AvailableTherapistRequest,
     Booking,
     BookingContextNotReadyError,
     Course,
@@ -41,6 +42,7 @@ from app.domain.booking_models import (
     InvalidBookingDataError,
     Shop,
     SlotConflictError,
+    TherapistAvailabilityGateway,
     TherapistPreference,
     TherapistPreferenceType,
 )
@@ -505,6 +507,19 @@ class FakeCreateBookingHandler(CreateBookingHandler):
         )
 
 
+class FakeTherapistAvailabilityGateway:
+    def __init__(self, therapists: list[TherapistPreference]) -> None:
+        self.therapists = therapists
+        self.calls: list[AvailableTherapistRequest] = []
+
+    async def search_available_therapists(
+        self,
+        request: AvailableTherapistRequest,
+    ) -> list[TherapistPreference]:
+        self.calls.append(request)
+        return self.therapists
+
+
 def production_bridge(
     *,
     search_shop: FakeSearchShopHandler | None = None,
@@ -512,6 +527,7 @@ def production_bridge(
     customer: FakeCustomerLookup | None = None,
     confirmation: FakePhoneConfirmation | None = None,
     create: FakeCreateBookingHandler | None = None,
+    therapist_availability: FakeTherapistAvailabilityGateway | None = None,
 ) -> ActionRegistry:
     check_customer = (
         None
@@ -526,6 +542,10 @@ def production_bridge(
         check_availability_handler=availability,
         check_customer_handler=check_customer,
         create_booking_handler=create,
+        therapist_availability_gateway=cast(
+            TherapistAvailabilityGateway | None,
+            therapist_availability,
+        ),
     )
 
 
@@ -840,6 +860,119 @@ async def test_create_binding_preserves_idempotency_and_does_not_commit_state() 
     ]
     assert booking_context.booking is BOOKING
     assert booking_context.state is BookingState.BOOKING_EXECUTING
+
+
+@pytest.mark.asyncio
+async def test_change_time_keeps_personal_therapist_when_still_available() -> None:
+    therapist = TherapistPreference(
+        TherapistPreferenceType.PERSONAL,
+        therapist_id="therapist-1",
+        therapist_name="Nguyen An",
+    )
+    gateway = FakeTherapistAvailabilityGateway([therapist])
+    bridge = production_bridge(therapist_availability=gateway)
+    booking_context = BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.AWAITING_CONFIRMATION,
+        shop=SHOP,
+        main_course=COURSE,
+        booking_date=date(2099, 8, 1),
+        start_time=time(10, 30),
+        num_customer=1,
+        duration_minutes=60,
+        therapist_preference=therapist,
+        therapist_verified=True,
+        available_slots=(time(13, 0), time(13, 30)),
+    )
+
+    await bridge.execute_action(
+        "change_time",
+        execution_context(
+            booking_context=booking_context,
+            payload={"start_time": time(13, 0)},
+        ),
+    )
+
+    assert booking_context.start_time == time(13, 0)
+    assert booking_context.therapist_preference == therapist
+    assert booking_context.therapist_verified is True
+    assert booking_context.last_failure_code is None
+    assert gateway.calls[0].start_time == time(13, 0)
+    assert gateway.calls[0].end_time == time(14, 0)
+
+
+@pytest.mark.asyncio
+async def test_change_time_clears_personal_therapist_when_unavailable() -> None:
+    therapist = TherapistPreference(
+        TherapistPreferenceType.PERSONAL,
+        therapist_id="therapist-1",
+        therapist_name="Nguyen An",
+    )
+    other_therapist = TherapistPreference(
+        TherapistPreferenceType.PERSONAL,
+        therapist_id="therapist-2",
+        therapist_name="Le Binh",
+    )
+    bridge = production_bridge(
+        therapist_availability=FakeTherapistAvailabilityGateway([other_therapist])
+    )
+    booking_context = BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.AWAITING_CONFIRMATION,
+        shop=SHOP,
+        main_course=COURSE,
+        booking_date=date(2099, 8, 1),
+        start_time=time(10, 30),
+        num_customer=1,
+        duration_minutes=60,
+        therapist_preference=therapist,
+        therapist_verified=True,
+        available_slots=(time(13, 0),),
+    )
+
+    await bridge.execute_action(
+        "change_time",
+        execution_context(
+            booking_context=booking_context,
+            payload={"start_time": time(13, 0)},
+        ),
+    )
+
+    assert booking_context.start_time == time(13, 0)
+    assert booking_context.therapist_preference is None
+    assert booking_context.therapist_verified is False
+    assert booking_context.last_failure_code == "therapist_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_change_time_keeps_group_booking_without_therapist_question() -> None:
+    bridge = production_bridge()
+    booking_context = BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.AWAITING_CONFIRMATION,
+        shop=SHOP,
+        main_course=COURSE,
+        booking_date=date(2099, 8, 1),
+        start_time=time(10, 30),
+        num_customer=2,
+        duration_minutes=60,
+        therapist_verified=True,
+        available_slots=(time(13, 0),),
+    )
+
+    await bridge.execute_action(
+        "change_time",
+        execution_context(
+            booking_context=booking_context,
+            payload={"start_time": time(13, 0)},
+        ),
+    )
+
+    assert booking_context.start_time == time(13, 0)
+    assert booking_context.therapist_preference == TherapistPreference(
+        TherapistPreferenceType.NONE
+    )
+    assert booking_context.therapist_verified is True
 
 
 @pytest.mark.parametrize("num_customer", [2, 3])

@@ -19,6 +19,7 @@ from app.dialog.dialog_controller import (
     _stage_requested_entities,
 )
 from app.dialog.flow_loader import (
+    ChangeRule,
     FlowAutoTransition,
     FlowCondition,
     FlowDefinition,
@@ -30,7 +31,12 @@ from app.dialog.flow_loader import (
 from app.dialog.nlu import NLUResolutionStatus, NLUResult, NLUSource
 from app.dialog.state_machine import StateMachine
 from app.domain.booking_context import BookingContext
-from app.domain.booking_models import Booking, SlotConflictError
+from app.domain.booking_models import (
+    Booking,
+    SlotConflictError,
+    TherapistPreference,
+    TherapistPreferenceType,
+)
 from app.domain.booking_state import BookingState
 
 
@@ -64,12 +70,14 @@ def controller(
     flow: FlowDefinition,
     bridge: ActionRegistry,
     *,
+    change_rules: dict[str, ChangeRule] | None = None,
     max_auto_transitions: int = 8,
 ) -> DialogController:
     return DialogController(
         flow=flow,
         state_machine=StateMachine(flow),
         action_registry=bridge,
+        change_rules=change_rules,
         max_auto_transitions=max_auto_transitions,
     )
 
@@ -710,6 +718,108 @@ async def test_group_booking_auto_skips_therapist_and_enters_phone_state() -> No
         "handle_time_selection",
         "skip_therapist_for_group",
     )
+
+
+@pytest.mark.asyncio
+async def test_change_time_returns_to_confirmation_when_therapist_is_verified() -> None:
+    flow = flow_for(
+        {
+            BookingState.AWAITING_CONFIRMATION: state(
+                transitions=(FlowTransition("change_info", BookingState.AWAITING_CONFIRMATION),),
+                on_enter=FlowOnEnter("final_confirmation"),
+            ),
+            BookingState.SELECTING_THERAPIST: state(on_enter=FlowOnEnter("ask_therapist")),
+        }
+    )
+    context = BookingContext(
+        conversation_id="c-1",
+        state=BookingState.AWAITING_CONFIRMATION,
+        num_customer=1,
+        start_time=time(10, 30),
+        therapist_preference=TherapistPreference(TherapistPreferenceType.NONE),
+        therapist_verified=True,
+        available_slots=(time(13, 0),),
+    )
+
+    result = await controller(
+        flow,
+        ActionRegistry(),
+        change_rules={
+            "time": ChangeRule(
+                reset_action="change_time",
+                next_state=BookingState.SELECTING_TIME,
+                applied_state=BookingState.SELECTING_THERAPIST,
+                prompt_template="change_ask_time",
+            )
+        },
+    ).handle_turn(
+        context,
+        DialogTurnInput(
+            "change_info",
+            {"change_target": "time", "start_time": time(13, 0)},
+        ),
+    )
+
+    assert result.status is DialogTurnStatus.SUCCESS
+    assert result.final_state is BookingState.AWAITING_CONFIRMATION
+    assert result.instruction_template == "final_confirmation"
+    assert context.start_time == time(13, 0)
+    assert context.therapist_verified is True
+
+
+@pytest.mark.asyncio
+async def test_change_time_asks_therapist_again_when_previous_one_is_unavailable() -> None:
+    async def change_time_with_unavailable_therapist(
+        action_context: ActionExecutionContext,
+    ) -> ActionResult:
+        action_context.booking_context.change_start_time(time(13, 0))
+        action_context.booking_context.set_therapist_preference(None)
+        action_context.booking_context.last_failure_code = "therapist_unavailable"
+        return ActionResult("change_time")
+
+    bridge = ActionRegistry()
+    bridge._actions["change_time"] = change_time_with_unavailable_therapist
+    flow = flow_for(
+        {
+            BookingState.AWAITING_CONFIRMATION: state(
+                transitions=(FlowTransition("change_info", BookingState.AWAITING_CONFIRMATION),),
+                on_enter=FlowOnEnter("final_confirmation"),
+            ),
+            BookingState.SELECTING_THERAPIST: state(on_enter=FlowOnEnter("ask_therapist")),
+        }
+    )
+    context = BookingContext(
+        conversation_id="c-1",
+        state=BookingState.AWAITING_CONFIRMATION,
+        num_customer=1,
+        start_time=time(10, 30),
+        therapist_verified=True,
+        available_slots=(time(13, 0),),
+    )
+
+    result = await controller(
+        flow,
+        bridge,
+        change_rules={
+            "time": ChangeRule(
+                reset_action="change_time",
+                next_state=BookingState.SELECTING_TIME,
+                applied_state=BookingState.SELECTING_THERAPIST,
+                prompt_template="change_ask_time",
+            )
+        },
+    ).handle_turn(
+        context,
+        DialogTurnInput(
+            "change_info",
+            {"change_target": "time", "start_time": time(13, 0)},
+        ),
+    )
+
+    assert result.status is DialogTurnStatus.SUCCESS
+    assert result.final_state is BookingState.SELECTING_THERAPIST
+    assert result.instruction_template == "therapist_unavailable"
+    assert context.start_time == time(13, 0)
 
 
 @pytest.mark.asyncio

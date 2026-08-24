@@ -177,8 +177,8 @@ class InstructionBuilder:
             instruction_template=result.instruction_template,
             state=result.final_state,
             status=result.status,
-            quick_replies=_normalize_quick_replies(draft.quick_replies),
-            metadata=_allowlisted_metadata(draft.metadata),
+            quick_replies=draft.quick_replies,
+            metadata=draft.metadata,
         )
 
     # Tổng hợp instruction và context an toàn trước khi gọi LLM NLG.
@@ -505,10 +505,7 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft(
-            "Bạn muốn đặt lịch cho bao nhiêu người?",
-            ("1 người", "2 người", "3 người"),
-        )
+        return DialogResponseDraft("Bạn muốn đặt lịch cho bao nhiêu người?")
 
     @staticmethod
     def _people_too_many(
@@ -516,9 +513,8 @@ class InstructionBuilder:
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
         return DialogResponseDraft(
-            "Hệ thống hiện hỗ trợ tối đa 3 người cho một booking. "
-            "Bạn vui lòng chọn từ 1 đến 3 người.",
-            ("1 người", "2 người", "3 người"),
+            "Số người đã chọn chưa hợp lệ. "
+            "Anh/chị vui lòng chọn theo gợi ý hợp lệ bên dưới.",
         )
 
     @staticmethod
@@ -526,7 +522,10 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft("Bạn muốn chọn thời lượng bao nhiêu phút?")
+        return DialogResponseDraft(
+            "Anh/chị muốn chọn thời lượng bao nhiêu phút? "
+            "Em sẽ gợi ý các thời lượng hợp lệ theo cửa hàng đã chọn bên dưới.",
+        )
 
     @staticmethod
     def _ask_course(
@@ -574,7 +573,10 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft("Thời lượng đã chọn không hợp lệ. Vui lòng chọn lại.")
+        return DialogResponseDraft(
+            "Thời lượng đã chọn không hợp lệ. "
+            "Anh/chị vui lòng chọn thời lượng theo gợi ý hợp lệ của cửa hàng bên dưới.",
+        )
 
     @staticmethod
     def _no_slots_available(
@@ -620,7 +622,10 @@ class InstructionBuilder:
         return DialogResponseDraft(
             "Bạn muốn chọn khung giờ nào?",
             tuple(_format_time(slot) for slot in slots),
-            {"available_slot_count": len(slots)},
+            {
+                "available_slot_count": len(slots),
+                "quick_reply_limit": len(slots),
+            },
         )
 
     @staticmethod
@@ -654,7 +659,11 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft("Kỹ thuật viên đã chọn hiện không khả dụng. Vui lòng chọn lại.")
+        return DialogResponseDraft(
+            "Kỹ thuật viên đã chọn hiện không còn trống ở khung giờ mới. "
+            "Anh/chị có thể chọn Không yêu cầu hoặc chọn kỹ thuật viên khác.",
+            ("Không yêu cầu", "Nam", "Nữ"),
+        )
 
     @staticmethod
     def _ask_phone(

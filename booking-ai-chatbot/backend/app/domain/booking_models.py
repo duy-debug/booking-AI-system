@@ -38,6 +38,10 @@ class TherapistNotAllowedForGroupError(InvalidBookingDataError):
     """Raised when a group booking specifies a therapist preference."""
 
 
+class TherapistUnavailableError(InvalidBookingDataError):
+    """Raised when a previously selected therapist is unavailable for a new slot."""
+
+
 class PhoneNotConfirmedError(InvalidBookingDataError):
     """Raised when booking creation is attempted with an unconfirmed phone."""
 
@@ -64,6 +68,10 @@ class BookingNotFoundError(DomainError):
 
 class BookingConflictError(DomainError):
     """Raised when a booking conflicts with an existing reservation."""
+
+
+MIN_CUSTOMERS_PER_BOOKING = 1
+MAX_CUSTOMERS_PER_BOOKING = 3
 
 
 class CourseType(StrEnum):
@@ -187,7 +195,7 @@ class Booking:
     reservation_code: str | None = None
 
     def __post_init__(self) -> None:
-        if not 1 <= self.num_customer <= 3:
+        if not MIN_CUSTOMERS_PER_BOOKING <= self.num_customer <= MAX_CUSTOMERS_PER_BOOKING:
             raise InvalidCustomerCountError("Number of customers must be between one and three.")
         if self.duration_minutes <= 0 or self.duration_minutes % 15 != 0:
             raise InvalidDurationError("Booking duration must be positive and divisible by 15.")
@@ -215,6 +223,15 @@ class BookingRules:
 
     _PHONE_PATTERN = re.compile(r"^\+?[0-9]{9,15}$")
     _VIETNAM_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
+
+    @classmethod
+    def customer_count_options(cls) -> tuple[int, ...]:
+        return tuple(range(MIN_CUSTOMERS_PER_BOOKING, MAX_CUSTOMERS_PER_BOOKING + 1))
+
+    @staticmethod
+    def validate_customer_count(num_customer: int) -> None:
+        if not MIN_CUSTOMERS_PER_BOOKING <= num_customer <= MAX_CUSTOMERS_PER_BOOKING:
+            raise InvalidCustomerCountError("Number of customers must be between one and three.")
 
     @classmethod
     def validate_phone(cls, phone: str) -> None:
@@ -256,8 +273,9 @@ class BookingRules:
         start_time = context.start_time
         if shop is None or customer is None or booking_date is None or start_time is None:
             raise BookingContextNotReadyError("Booking context is incomplete.")
-        if context.num_customer is None or not 1 <= context.num_customer <= 3:
+        if context.num_customer is None:
             raise InvalidCustomerCountError("Number of customers must be between one and three.")
+        cls.validate_customer_count(context.num_customer)
         if context.duration_minutes is None:
             raise InvalidDurationError("Booking duration is required.")
         cls.validate_course_duration(context.duration_minutes)
@@ -378,8 +396,7 @@ def _validate_booking_shape(
     addon_ids: tuple[UUID, ...],
     therapist_preference: TherapistPreference | None,
 ) -> None:
-    if not 1 <= num_customer <= 3:
-        raise InvalidCustomerCountError("Number of customers must be between one and three.")
+    BookingRules.validate_customer_count(num_customer)
     if duration_minutes <= 0 or duration_minutes % 15 != 0:
         raise InvalidDurationError("Booking duration must be positive and divisible by 15.")
     course_ids = (main_course_id,) + addon_ids

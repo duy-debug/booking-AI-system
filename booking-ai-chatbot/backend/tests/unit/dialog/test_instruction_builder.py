@@ -162,16 +162,26 @@ def test_find_missing_templates_deduplicates_in_declared_order() -> None:
     assert missing == ("not_ready", "another_missing")
 
 
-def test_people_renderer_has_only_supported_quick_replies() -> None:
+def test_people_renderer_defers_quick_replies_to_controller_recovery() -> None:
     response = InstructionBuilder().build_response(
         result=turn_result("ask_people", BookingState.SELECTING_PEOPLE),
         context=BookingContext("conversation-1"),
     )
 
-    assert response.quick_replies == ("1 người", "2 người", "3 người")
+    assert response.quick_replies == ()
 
 
-def test_time_slots_keep_pos_order_and_are_limited() -> None:
+def test_duration_renderer_defers_quick_replies_to_controller_recovery() -> None:
+    response = InstructionBuilder().build_response(
+        result=turn_result("duration_invalid", BookingState.SELECTING_DURATION),
+        context=BookingContext("conversation-1"),
+    )
+
+    assert "gợi ý hợp lệ của cửa hàng" in response.text
+    assert response.quick_replies == ()
+
+
+def test_time_slots_keep_pos_order_and_are_not_limited() -> None:
     slots = tuple(time(8 + index // 4, index % 4 * 15) for index in range(10))
     context = BookingContext("conversation-1", available_slots=slots)
 
@@ -180,7 +190,7 @@ def test_time_slots_keep_pos_order_and_are_limited() -> None:
         context=context,
     )
 
-    assert response.quick_replies == tuple(slot.strftime("%H:%M") for slot in slots[:8])
+    assert response.quick_replies == tuple(slot.strftime("%H:%M") for slot in slots)
     assert response.metadata == {"available_slot_count": len(slots)}
 
 

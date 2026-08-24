@@ -473,7 +473,6 @@ class BookingContext:
     def change_start_time(self, start_time: time | None) -> None:
         """Replace the selected time and invalidate therapist confirmation."""
         self.start_time = start_time
-        self.therapist_preference = None
         self.therapist_verified = False
         self._clear_booking_result()
 

@@ -207,7 +207,8 @@ def test_change_time_preserves_date_and_available_slots() -> None:
     assert context.booking_date == date(2026, 8, 1)
     assert context.available_slots == (time(10, 30), time(11, 0))
     assert context.start_time == time(11, 0)
-    assert context.therapist_preference is None
+    assert context.therapist_preference == TherapistPreference(TherapistPreferenceType.FEMALE)
+    assert context.therapist_verified is False
 
 
 def test_change_therapist_preserves_selected_slot() -> None:

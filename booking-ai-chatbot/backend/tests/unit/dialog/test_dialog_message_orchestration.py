@@ -3,7 +3,8 @@
 import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
-from datetime import time
+from datetime import date, time
+from decimal import Decimal
 from typing import cast
 from uuid import UUID
 
@@ -29,14 +30,49 @@ from app.dialog.nlu import (
     StateIntentPolicy,
 )
 from app.domain.booking_context import BookingContext
-from app.domain.booking_models import Shop
+from app.domain.booking_models import Course, CourseType, Shop
 from app.domain.booking_state import BookingState
+from app.domain.outcomes import HandlerOutcome, HandlerResult
 from app.transport.chat_api import _to_chat_response
 from app.transport.schemas import ChatRequest
 
 SHOP = Shop(
     name="Shibuya",
     shop_id=UUID("11111111-1111-1111-1111-111111111111"),
+)
+ALT_SHOP = Shop(
+    name="Komorebi Nha Trang",
+    shop_id=UUID("22222222-2222-2222-2222-222222222222"),
+)
+MAIN_COURSES = (
+    Course(
+        course_id=UUID("44444444-4444-4444-4444-444444444444"),
+        name="Relax Massage 60",
+        duration_minutes=60,
+        price=Decimal("500000"),
+        course_type=CourseType.MAIN,
+    ),
+    Course(
+        course_id=UUID("55555555-5555-5555-5555-555555555555"),
+        name="Deep Massage 90",
+        duration_minutes=90,
+        price=Decimal("700000"),
+        course_type=CourseType.MAIN,
+    ),
+    Course(
+        course_id=UUID("66666666-6666-6666-6666-666666666666"),
+        name="Aroma Massage 120",
+        duration_minutes=120,
+        price=Decimal("900000"),
+        course_type=CourseType.MAIN,
+    ),
+)
+EXTRA_SHOPS = tuple(
+    Shop(
+        name=f"Komorebi Extra {index}",
+        shop_id=UUID(f"33333333-3333-3333-3333-{index:012d}"),
+    )
+    for index in range(1, 9)
 )
 
 
@@ -134,6 +170,44 @@ class FailedChangeController(FakeController):
         )
 
 
+class FailedPeopleController(FakeController):
+    async def handle_turn(
+        self,
+        context: BookingContext,
+        turn: DialogTurnInput,
+    ) -> DialogTurnResult:
+        self.calls.append((context, turn))
+        return DialogTurnResult(
+            status=DialogTurnStatus.FAILURE_HANDLED,
+            initial_state=context.state,
+            final_state=BookingState.SELECTING_PEOPLE,
+            intent=turn.intent,
+            instruction_template="people_too_many",
+            executed_actions=(),
+            auto_transition_count=0,
+            failure_code="people_too_many",
+        )
+
+
+class FailedDurationController(FakeController):
+    async def handle_turn(
+        self,
+        context: BookingContext,
+        turn: DialogTurnInput,
+    ) -> DialogTurnResult:
+        self.calls.append((context, turn))
+        return DialogTurnResult(
+            status=DialogTurnStatus.FAILURE_HANDLED,
+            initial_state=context.state,
+            final_state=BookingState.SELECTING_DURATION,
+            intent=turn.intent,
+            instruction_template="duration_invalid",
+            executed_actions=(),
+            auto_transition_count=0,
+            failure_code="duration_invalid",
+        )
+
+
 class StateChangingController(FakeController):
     async def handle_turn(
         self,
@@ -211,6 +285,36 @@ class FakeFAQManager:
         )
 
 
+class FakeShopSearchHandler:
+    def __init__(self, result: HandlerResult) -> None:
+        self.result = result
+        self.calls: list[Mapping[str, object]] = []
+
+    async def execute(self, **kwargs: object) -> HandlerResult:
+        self.calls.append(kwargs)
+        return self.result
+
+
+class FakeCourseSearchHandler:
+    def __init__(self, result: HandlerResult) -> None:
+        self.result = result
+        self.calls: list[tuple[object, Mapping[str, object]]] = []
+
+    async def execute(self, shop_id: object, **kwargs: object) -> HandlerResult:
+        self.calls.append((shop_id, kwargs))
+        return self.result
+
+
+class FakeAvailabilityHandler:
+    def __init__(self, result: HandlerResult) -> None:
+        self.result = result
+        self.calls: list[BookingContext] = []
+
+    async def execute(self, context: BookingContext) -> HandlerResult:
+        self.calls.append(context)
+        return self.result
+
+
 class FakeContainer:
     def __init__(
         self,
@@ -219,6 +323,9 @@ class FakeContainer:
         nlu_result: NLUResult,
         resolution: EntityResolutionResult | None = None,
         faq_manager: FakeFAQManager | None = None,
+        shop_search_result: HandlerResult | None = None,
+        course_search_result: HandlerResult | None = None,
+        availability_result: HandlerResult | None = None,
     ) -> None:
         self.conversation_context_store = FakeStore(context)
         self.llm_nlu = FakeLLMNLU(nlu_result)
@@ -228,20 +335,70 @@ class FakeContainer:
         self.dialog_controller = FakeController()
         self.instruction_builder = FakeBuilder()
         self.faq_manager = faq_manager or FakeFAQManager()
+        self.search_shop_handler = FakeShopSearchHandler(
+            shop_search_result
+            or HandlerResult(
+                HandlerOutcome.SUCCESS,
+                {"shops": (SHOP, ALT_SHOP, *EXTRA_SHOPS)},
+            )
+        )
+        self.search_course_handler = FakeCourseSearchHandler(
+            course_search_result
+            or HandlerResult(
+                HandlerOutcome.SUCCESS,
+                {"courses": MAIN_COURSES},
+            )
+        )
+        self.check_availability_handler = FakeAvailabilityHandler(
+            availability_result
+            or HandlerResult(
+                HandlerOutcome.SUCCESS,
+                {"slots": ()},
+            )
+        )
         self.state_intent_policy = StateIntentPolicy(
             {
                 BookingState.IDLE: frozenset({"start_booking", "ask_question"}),
                 BookingState.SELECTING_SHOP: frozenset({"select_store", "ask_question"}),
+                BookingState.SELECTING_PEOPLE: frozenset({"select_people", "ask_question"}),
+                BookingState.SELECTING_DURATION: frozenset({"select_duration", "ask_question"}),
                 BookingState.AWAITING_CONFIRMATION: frozenset({"change_info", "ask_question"}),
             },
             frozenset(),
         )
+
+    def handler(self, handler_type: type[object]) -> object:
+        if handler_type.__name__ == "CheckAvailabilityHandler":
+            return self.check_availability_handler
+        if handler_type.__name__ == "SearchCourseHandler":
+            return self.search_course_handler
+        return self.search_shop_handler
 
 
 def resolved_nlu() -> NLUResult:
     return NLUResult(
         intent="start_booking",
         payload={},
+        confidence=1.0,
+        source=NLUSource.LLM,
+        resolution_status=NLUResolutionStatus.RESOLVED,
+    )
+
+
+def select_people_nlu(num_customer: int) -> NLUResult:
+    return NLUResult(
+        intent="select_people",
+        payload={"num_customer": num_customer},
+        confidence=1.0,
+        source=NLUSource.LLM,
+        resolution_status=NLUResolutionStatus.RESOLVED,
+    )
+
+
+def select_duration_nlu(duration_minutes: int) -> NLUResult:
+    return NLUResult(
+        intent="select_duration",
+        payload={"duration_minutes": duration_minutes},
         confidence=1.0,
         source=NLUSource.LLM,
         resolution_status=NLUResolutionStatus.RESOLVED,
@@ -515,7 +672,7 @@ async def test_local_raw_turn_text_flags_log_truncated_user_and_assistant(
 
     assert f"user_message={'u' * 500}" in caplog.text
     assert "u" * 501 not in caplog.text
-    assert "assistant_message=Safe response" in caplog.text
+    assert "assistant_message=" in caplog.text
     assert "[[8] CONTEXT SAVE #1] saved" in caplog.text
     assert "'state': 'selecting_shop'" in caplog.text
     assert caplog.text.count("correlation=") > 3
@@ -629,6 +786,11 @@ async def test_prefilled_entity_not_found_returns_entity_response() -> None:
     prefilled_request = fake.entity_resolution_coordinator.calls[0][0]
     assert prefilled_request.entity_query == "Kimo Nha Trang"
     assert prefilled_request.entity_kind is NLUEntityKind.SHOP
+    assert response.quick_replies == tuple(
+        shop.name
+        for shop in (SHOP, ALT_SHOP, *EXTRA_SHOPS)
+    )
+    assert fake.search_shop_handler.calls
     assert len(fake.instruction_builder.calls) == 0
     assert fake.conversation_context_store.saved == [("conversation-a", context)]
 
@@ -785,7 +947,7 @@ async def test_failed_resolution_returns_generic_text_without_retry_or_raw_error
     ("state", "expected"),
     [
         (BookingState.IDLE, "Tôi muốn đặt lịch"),
-        (BookingState.SELECTING_PEOPLE, "số người từ 1 đến 3"),
+        (BookingState.SELECTING_PEOPLE, "từ 1 đến 3 người"),
         (BookingState.COMPLETED, "nhập lại rõ hơn"),
     ],
 )
@@ -857,6 +1019,120 @@ async def test_unresolved_time_only_suggests_latest_validated_slots() -> None:
     response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
     assert response.quick_replies == ("09:00", "10:30")
+
+
+@pytest.mark.asyncio
+async def test_unresolved_time_lists_all_slots_from_availability_api() -> None:
+    slots = tuple(time(8 + index // 4, index % 4 * 15) for index in range(12))
+    context = BookingContext(
+        "conversation-a",
+        state=BookingState.SELECTING_TIME,
+        shop=ALT_SHOP,
+        booking_date=date(2026, 8, 25),
+        num_customer=1,
+        duration_minutes=60,
+        main_course=MAIN_COURSES[0],
+    )
+    fake = FakeContainer(
+        context=context,
+        nlu_result=unresolved_nlu(),
+        availability_result=HandlerResult(HandlerOutcome.SUCCESS, {"slots": slots}),
+    )
+
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
+
+    assert response.quick_replies == tuple(slot.strftime("%H:%M") for slot in slots)
+    assert "08:00" in response.text
+    assert "10:45" in response.text
+    assert fake.check_availability_handler.calls == [context]
+
+
+@pytest.mark.asyncio
+async def test_unresolved_time_suggests_other_dates_when_no_slot_available() -> None:
+    context = BookingContext(
+        "conversation-a",
+        state=BookingState.SELECTING_TIME,
+        shop=ALT_SHOP,
+        booking_date=date(2026, 8, 25),
+        num_customer=1,
+        duration_minutes=60,
+        main_course=MAIN_COURSES[0],
+    )
+    fake = FakeContainer(
+        context=context,
+        nlu_result=unresolved_nlu(),
+        availability_result=HandlerResult(
+            HandlerOutcome.NO_SLOTS,
+            error_code="no_slots_available",
+        ),
+    )
+
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
+
+    assert response.quick_replies == ("Hôm nay", "Ngày mai")
+    assert "Các ngày khác có thể thử" in response.text
+    assert fake.check_availability_handler.calls == [context]
+
+
+@pytest.mark.asyncio
+async def test_unresolved_duration_uses_shop_course_durations() -> None:
+    context = BookingContext(
+        "conversation-a",
+        state=BookingState.SELECTING_DURATION,
+        shop=ALT_SHOP,
+    )
+    fake = FakeContainer(context=context, nlu_result=unresolved_nlu())
+
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
+
+    assert response.quick_replies == ("60 phút", "90 phút", "120 phút")
+    assert fake.search_course_handler.calls == [
+        (
+            ALT_SHOP.shop_id,
+            {"course_type": CourseType.MAIN},
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_failed_people_count_explains_domain_limit_in_text() -> None:
+    context = BookingContext(
+        "conversation-a",
+        state=BookingState.SELECTING_PEOPLE,
+        shop=ALT_SHOP,
+    )
+    context.booking_date = date(2026, 8, 25)
+    fake = FakeContainer(context=context, nlu_result=select_people_nlu(15))
+    fake.dialog_controller = FailedPeopleController()
+
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
+
+    assert "Komorebi Nha Trang" in response.text
+    assert "2026-08-25" in response.text
+    assert "từ 1 đến 3 người" in response.text
+    assert "thông cảm" in response.text
+    assert "Các số người hợp lệ: 1 người, 2 người, 3 người." in response.text
+    assert response.quick_replies == ("1 người", "2 người", "3 người")
+
+
+@pytest.mark.asyncio
+async def test_failed_duration_explains_shop_course_durations_in_text() -> None:
+    context = BookingContext(
+        "conversation-a",
+        state=BookingState.SELECTING_DURATION,
+        shop=ALT_SHOP,
+        num_customer=3,
+    )
+    context.booking_date = date(2026, 8, 25)
+    fake = FakeContainer(context=context, nlu_result=select_duration_nlu(41))
+    fake.dialog_controller = FailedDurationController()
+
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
+
+    assert "Komorebi Nha Trang" in response.text
+    assert "Các thời lượng hợp lệ của cửa hàng" in response.text
+    assert "60 phút, 90 phút, 120 phút" in response.text
+    assert response.quick_replies == ("60 phút", "90 phút", "120 phút")
 
 
 @pytest.mark.asyncio

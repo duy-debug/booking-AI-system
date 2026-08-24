@@ -96,6 +96,10 @@ def test_validate_course_duration_rejects_invalid_values(
         BookingRules.validate_course_duration(duration_minutes)
 
 
+def test_customer_count_options_follow_domain_rule() -> None:
+    assert BookingRules.customer_count_options() == (1, 2, 3)
+
+
 def test_validate_booking_datetime_accepts_future_datetime() -> None:
     BookingRules.validate_booking_datetime(
         date(2026, 8, 1),

@@ -46,7 +46,10 @@ from app.dialog.nlu import (
 from app.dialog.state_machine import StateMachine
 from app.domain.booking_context import BookingContext, CourseSelectionMode
 from app.domain.booking_models import (
+    MAX_CUSTOMERS_PER_BOOKING,
+    MIN_CUSTOMERS_PER_BOOKING,
     AvailableTherapistRequest,
+    BookingRules,
     Course,
     CourseType,
     Shop,
@@ -84,7 +87,10 @@ _UNRESOLVED_TEXT = {
     BookingState.IDLE: "Tôi chưa hiểu yêu cầu. Bạn có thể nói: Tôi muốn đặt lịch.",
     BookingState.SELECTING_SHOP: "Vui lòng cho biết cửa hàng hoặc khu vực bạn muốn đặt.",
     BookingState.SELECTING_DATE: "Vui lòng nhập ngày, ví dụ: ngày mai hoặc 15/08.",
-    BookingState.SELECTING_PEOPLE: "Vui lòng cho biết số người từ 1 đến 3.",
+    BookingState.SELECTING_PEOPLE: (
+        "Vui lòng cho biết số người "
+        f"từ {MIN_CUSTOMERS_PER_BOOKING} đến {MAX_CUSTOMERS_PER_BOOKING}."
+    ),
     BookingState.SELECTING_DURATION: "Vui lòng nhập thời lượng, ví dụ: 60 phút.",
     BookingState.SELECTING_SERVICE: "Vui lòng nhập tên liệu trình bạn muốn chọn.",
     BookingState.SELECTING_TIME: "Vui lòng nhập giờ rõ ràng, ví dụ: 19:00 hoặc 7 giờ tối.",
@@ -117,7 +123,6 @@ _DEFAULT_UNRESOLVED_TEXT = "Tôi chưa hiểu yêu cầu. Vui lòng nhập lại
 _RECOVERY_QUICK_REPLIES = {
     BookingState.IDLE: ("Tôi muốn đặt lịch", "Xem danh sách cửa hàng"),
     BookingState.SELECTING_DATE: ("Hôm nay", "Ngày mai"),
-    BookingState.SELECTING_PEOPLE: ("1 người", "2 người", "3 người"),
     BookingState.SELECTING_DURATION: ("45 phút", "60 phút", "90 phút"),
     BookingState.SELECTING_THERAPIST: ("Không yêu cầu", "Nam", "Nữ"),
     BookingState.VERIFYING_PHONE: ("Xác nhận", "Nhập lại"),
@@ -334,6 +339,20 @@ class DialogController:
             )
 
         committed_actions = transition_report.executed_action_names
+        if (
+            change_rule is not None
+            and change_rule.reset_action == "change_time"
+            and has_change_value
+            and booking_context.therapist_verified
+        ):
+            # Nếu therapist cũ vẫn hợp lệ ở giờ mới thì bỏ qua bước hỏi lại therapist.
+            transition = FlowTransition(
+                intent=turn.intent,
+                target=BookingState.AWAITING_CONFIRMATION,
+                actions=transition.actions,
+                conditions=transition.conditions,
+                on_fail=transition.on_fail,
+            )
         # Chỉ commit state sau khi action chính đã thành công.
         self._state_machine.apply_transition(booking_context, transition)
         if booking_context.state is BookingState.CANCELLED:
@@ -359,15 +378,22 @@ class DialogController:
 
         committed_actions += on_enter_report.executed_action_names
         if change_rule is not None:
+            instruction_template = (
+                on_enter.instruction_template
+                if has_change_value
+                else change_rule.prompt_template
+            )
+            if (
+                change_rule.reset_action == "change_time"
+                and has_change_value
+                and booking_context.last_failure_code == "therapist_unavailable"
+            ):
+                instruction_template = "therapist_unavailable"
             return self._success_result(
                 booking_context=booking_context,
                 initial_state=initial_state,
                 intent=turn.intent,
-                instruction_template=(
-                    on_enter.instruction_template
-                    if has_change_value
-                    else change_rule.prompt_template
-                ),
+                instruction_template=instruction_template,
                 committed_actions=committed_actions,
                 auto_transition_count=0,
             )
@@ -401,15 +427,40 @@ class DialogController:
             intent=turn.intent,
             target=rule.applied_state if has_value else rule.next_state,
             actions=(rule.reset_action,),
-            on_fail=(
-                FlowFailure(
-                    condition="*",
-                    target=booking_context.state,
-                    instruction_template="change_invalid",
-                ),
-            ),
+            on_fail=self._change_failures(target, booking_context.state),
         )
         return rule, transition, has_value
+
+    @staticmethod
+    def _change_failures(
+        target: str,
+        current_state: BookingState,
+    ) -> tuple[FlowFailure, ...]:
+        if target == "time":
+            return (
+                FlowFailure(
+                    condition="slot_unavailable",
+                    target=BookingState.SELECTING_TIME,
+                    instruction_template="slot_unavailable",
+                ),
+                FlowFailure(
+                    condition="therapist_unavailable",
+                    target=BookingState.SELECTING_THERAPIST,
+                    instruction_template="therapist_unavailable",
+                ),
+                FlowFailure(
+                    condition="*",
+                    target=current_state,
+                    instruction_template="change_invalid",
+                ),
+            )
+        return (
+            FlowFailure(
+                condition="*",
+                target=current_state,
+                instruction_template="change_invalid",
+            ),
+        )
 
     # Chạy auto transition sau khi context đủ điều kiện, ví dụ booking success sang completed.
     async def _execute_auto_transitions(
@@ -890,10 +941,14 @@ async def _process_bound_chat_message(
 
     if nlu_result.resolution_status is NLUResolutionStatus.UNRESOLVED:
         _trace_route("unresolved_recovery", "unresolved_recovery", nlu_result, context)
-        return _handled_response(
+        response = _handled_response(
             context,
             _UNRESOLVED_TEXT.get(context.state, _DEFAULT_UNRESOLVED_TEXT),
-            _state_recovery_quick_replies(context),
+        )
+        return await _with_state_recovery_suggestions(
+            response,
+            context,
+            container,
         )
 
     if nlu_result.resolution_status is NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED:
@@ -1010,8 +1065,12 @@ async def _process_bound_chat_message(
             container=container,
             context=context,
         )
-    elif not response.quick_replies:
-        response = _with_state_recovery_suggestions(response, context)
+    elif response.status is DialogTurnStatus.FAILURE_HANDLED:
+        response = await _with_state_recovery_suggestions(
+            response,
+            context,
+            container,
+        )
     return response
 
 
@@ -1948,6 +2007,48 @@ async def _entity_response(
             _candidate_names(result),
         )
     if result.status is EntityResolutionStatus.NOT_FOUND:
+        if result.entity_kind is NLUEntityKind.SHOP:
+            shops = list(context.suggested_shops)
+            if not context.suggested_shops_loaded:
+                try:
+                    handler = cast(SearchShopHandler, container.handler(SearchShopHandler))
+                    handler_result = await handler.execute(criteria=_shop_search_criteria(context))
+                    shops = _handler_items(
+                        handler_result,
+                        "shops",
+                        Shop,
+                        allow_not_found=True,
+                    )
+                    context.suggested_shops = tuple(shops)
+                    context.suggested_shops_loaded = True
+                except Exception as error:
+                    trace_log(
+                        logger,
+                        logging.WARNING,
+                        "EntityResolver",
+                        "recovery_suggestion_failed",
+                        entity=result.entity_kind.value,
+                        error_code=type(error).__name__,
+                    )
+                    return _handled_response(context, _NOT_FOUND_TEXT[result.entity_kind])
+            if shops:
+                visible = shops
+                names = tuple(shop.name for shop in visible)
+                lines = "\n".join(
+                    f"{index}. {shop.name}"
+                    for index, shop in enumerate(visible, 1)
+                )
+                return _handled_response(
+                    context,
+                    "Không tìm thấy cửa hàng phù hợp với thông tin bạn vừa nhập. "
+                    "Anh/chị có thể chọn một cửa hàng hiện có:\n"
+                    + lines,
+                    names,
+                    metadata={
+                        "item_count": len(names),
+                        "quick_reply_limit": len(names),
+                    },
+                )
         if result.entity_kind is NLUEntityKind.COURSE and context.shop is not None:
             handler = cast(SearchCourseHandler, container.handler(SearchCourseHandler))
             course_type = (
@@ -2102,33 +2203,277 @@ def _handled_response(
     context: BookingContext,
     text: str,
     quick_replies: tuple[str, ...] = (),
+    metadata: Mapping[str, object] | None = None,
 ) -> DialogResponse:
     from app.dialog.instruction_builder import DialogResponse
+
+    replies = quick_replies or _state_recovery_quick_replies(context)
+    response_metadata = dict(metadata or {})
+    if replies:
+        response_metadata["quick_reply_limit"] = len(replies)
 
     return DialogResponse(
         text=text,
         instruction_template=None,
         state=context.state,
         status=DialogTurnStatus.FAILURE_HANDLED,
-        quick_replies=quick_replies or _state_recovery_quick_replies(context),
+        quick_replies=replies,
+        metadata=response_metadata,
     )
 
 
 # Gắn quick replies theo state hiện tại vào response recovery.
-def _with_state_recovery_suggestions(
+async def _with_state_recovery_suggestions(
     response: DialogResponse,
     context: BookingContext,
+    container: ApplicationContainer,
 ) -> DialogResponse:
     # Bổ sung quick replies an toàn mà không ghi đè phần giải thích lỗi.
     from app.dialog.instruction_builder import DialogResponse
 
+    quick_replies = await _state_recovery_quick_replies_from_context(
+        container,
+        context,
+    )
+    text = response.text
+    if (
+        context.state is BookingState.SELECTING_PEOPLE
+        and response.status is DialogTurnStatus.FAILURE_HANDLED
+    ):
+        text = _people_recovery_text(context)
+    if (
+        context.state is BookingState.SELECTING_DURATION
+        and response.status is DialogTurnStatus.FAILURE_HANDLED
+    ):
+        text = _duration_recovery_text(context)
+    text = _with_inline_recovery_suggestions(
+        text,
+        context,
+        quick_replies,
+    )
+    metadata = dict(response.metadata)
+    if quick_replies:
+        metadata["quick_reply_limit"] = len(quick_replies)
+
     return DialogResponse(
-        text=response.text,
+        text=text,
         instruction_template=response.instruction_template,
         state=response.state,
         status=response.status,
-        quick_replies=_state_recovery_quick_replies(context),
-        metadata=response.metadata,
+        quick_replies=quick_replies,
+        metadata=metadata,
+    )
+
+
+async def _state_recovery_quick_replies_from_context(
+    container: ApplicationContainer,
+    context: BookingContext,
+) -> tuple[str, ...]:
+    """
+    Lấy gợi ý recovery theo state hiện tại bằng dữ liệu đã validate hoặc API authoritative.
+    """
+
+    try:
+        if context.state is BookingState.SELECTING_SHOP:
+            return await _shop_recovery_quick_replies(container, context)
+        if context.state is BookingState.SELECTING_PEOPLE:
+            return _people_recovery_quick_replies()
+        if context.state is BookingState.SELECTING_SERVICE:
+            return await _course_recovery_quick_replies(container, context)
+        if context.state is BookingState.SELECTING_DURATION:
+            return await _duration_recovery_quick_replies(container, context)
+        if context.state is BookingState.SELECTING_TIME:
+            return await _time_recovery_quick_replies(container, context)
+    except Exception as error:
+        trace_log(
+            logger,
+            logging.WARNING,
+            "DialogCtrl",
+            "recovery_suggestions_failed",
+            state=context.state.value,
+            error_code=type(error).__name__,
+        )
+    return _state_recovery_quick_replies(context)
+
+
+async def _shop_recovery_quick_replies(
+    container: ApplicationContainer,
+    context: BookingContext,
+) -> tuple[str, ...]:
+    shops = list(context.suggested_shops)
+    if not context.suggested_shops_loaded:
+        handler = cast(SearchShopHandler, container.handler(SearchShopHandler))
+        result = await handler.execute(criteria=_shop_search_criteria(context))
+        shops = _handler_items(result, "shops", Shop, allow_not_found=True)
+        context.suggested_shops = tuple(shops)
+        context.suggested_shops_loaded = True
+    names = tuple(shop.name for shop in shops)
+    return names or _state_recovery_quick_replies(context)
+
+
+def _people_recovery_quick_replies() -> tuple[str, ...]:
+    """
+    Gợi ý số người từ BookingRules để không hard-code rule nghiệp vụ trong UI text.
+    """
+
+    return tuple(f"{count} người" for count in BookingRules.customer_count_options())
+
+
+def _people_recovery_text(context: BookingContext) -> str:
+    """
+    Diễn giải rule số người ngay trong text vì frontend hiện không hiển thị quick replies.
+    """
+
+    location = f" tại {context.shop.name}" if context.shop is not None else ""
+    booking_date = (
+        f" ngày {context.booking_date.isoformat()}"
+        if context.booking_date is not None
+        else ""
+    )
+    return (
+        f"Số người anh/chị chọn chưa hợp lệ{location}{booking_date}. "
+        "Theo quy định, hệ thống hiện chỉ hỗ trợ đặt booking "
+        f"từ {MIN_CUSTOMERS_PER_BOOKING} đến {MAX_CUSTOMERS_PER_BOOKING} người "
+        "cho một lịch hẹn. Anh/chị thông cảm và chọn lại số người phù hợp giúp em nhé."
+    )
+
+
+def _with_inline_recovery_suggestions(
+    text: str,
+    context: BookingContext,
+    quick_replies: tuple[str, ...],
+) -> str:
+    """
+    Gắn gợi ý vào text vì giao diện chat hiện chỉ hiển thị nội dung message.
+    """
+
+    if not quick_replies or context.state is BookingState.SELECTING_SHOP:
+        return text
+
+    suggestions = ", ".join(quick_replies)
+    label = _inline_suggestion_label(context)
+    line = f"{label}: {suggestions}."
+    if line in text:
+        return text
+    return f"{text}\n\n{line}"
+
+
+def _duration_recovery_text(context: BookingContext) -> str:
+    """
+    Diễn giải lỗi thời lượng cùng context đã biết trước khi liệt kê duration thật.
+    """
+
+    location = f" tại {context.shop.name}" if context.shop is not None else ""
+    booking_date = (
+        f" ngày {context.booking_date.isoformat()}"
+        if context.booking_date is not None
+        else ""
+    )
+    people = (
+        f" với {context.num_customer} người"
+        if context.num_customer is not None
+        else ""
+    )
+    return (
+        f"Thời lượng anh/chị chọn chưa hợp lệ{location}{booking_date}{people}. "
+        "Anh/chị vui lòng chọn lại một thời lượng đang được cửa hàng hỗ trợ."
+    )
+
+
+def _inline_suggestion_label(context: BookingContext) -> str:
+    if context.state is BookingState.SELECTING_DATE:
+        return "Các ngày gợi ý"
+    if context.state is BookingState.SELECTING_PEOPLE:
+        return "Các số người hợp lệ"
+    if context.state is BookingState.SELECTING_DURATION:
+        return "Các thời lượng hợp lệ của cửa hàng"
+    if context.state is BookingState.SELECTING_SERVICE:
+        if context.main_course is not None:
+            return "Các lựa chọn add-on hợp lệ"
+        return "Các liệu trình có thể chọn"
+    if context.state is BookingState.SELECTING_TIME:
+        if not context.available_slots:
+            return "Các ngày khác có thể thử"
+        return "Các khung giờ còn trống"
+    if context.state is BookingState.SELECTING_THERAPIST:
+        return "Các lựa chọn kỹ thuật viên"
+    return "Gợi ý hợp lệ"
+
+
+async def _course_recovery_quick_replies(
+    container: ApplicationContainer,
+    context: BookingContext,
+) -> tuple[str, ...]:
+    if context.shop is None:
+        return _state_recovery_quick_replies(context)
+    course_type = (
+        CourseType.ADDON
+        if context.course_selection_mode is CourseSelectionMode.ADDON
+        or context.main_course is not None
+        else CourseType.MAIN
+    )
+    handler = cast(SearchCourseHandler, container.handler(SearchCourseHandler))
+    result = await handler.execute(
+        context.shop.shop_id,
+        course_type=course_type,
+    )
+    courses = _handler_items(result, "courses", Course, allow_not_found=True)
+    if course_type is CourseType.MAIN and context.duration_minutes is not None:
+        courses = [
+            course
+            for course in courses
+            if course.duration_minutes == context.duration_minutes
+        ]
+    names = tuple(course.name for course in courses[:8])
+    if course_type is CourseType.ADDON:
+        return ("Không chọn add-on", *names)[:8]
+    return names or _state_recovery_quick_replies(context)
+
+
+async def _duration_recovery_quick_replies(
+    container: ApplicationContainer,
+    context: BookingContext,
+) -> tuple[str, ...]:
+    """
+    Gợi ý thời lượng từ course thật của shop hiện tại thay vì chỉ dùng ví dụ tĩnh.
+    """
+
+    if context.shop is None:
+        return _state_recovery_quick_replies(context)
+
+    handler = cast(SearchCourseHandler, container.handler(SearchCourseHandler))
+    result = await handler.execute(
+        context.shop.shop_id,
+        course_type=CourseType.MAIN,
+    )
+    courses = _handler_items(result, "courses", Course, allow_not_found=True)
+    durations = sorted(
+        {
+            course.duration_minutes
+            for course in courses
+            if course.duration_minutes > 0
+        }
+    )
+    replies = tuple(f"{duration} phút" for duration in durations)
+    return replies or _state_recovery_quick_replies(context)
+
+
+async def _time_recovery_quick_replies(
+    container: ApplicationContainer,
+    context: BookingContext,
+) -> tuple[str, ...]:
+    if context.available_slots:
+        return tuple(slot.strftime("%H:%M") for slot in context.available_slots)
+    if _missing_availability_field(context) is not None:
+        return _state_recovery_quick_replies(context)
+    handler = cast(CheckAvailabilityHandler, container.handler(CheckAvailabilityHandler))
+    result = await handler.execute(context)
+    if result.outcome is not HandlerOutcome.SUCCESS:
+        return _date_recovery_quick_replies(context)
+    slots = _handler_items(result, "slots", clock_time, allow_not_found=True)
+    context.set_available_slots(tuple(slots))
+    return tuple(slot.strftime("%H:%M") for slot in slots) or _date_recovery_quick_replies(
+        context
     )
 
 
@@ -2142,6 +2487,8 @@ def _state_recovery_quick_replies(context: BookingContext) -> tuple[str, ...]:
         return names or ("Xem danh sách cửa hàng",)
     if context.state is BookingState.SELECTING_DATE:
         return _date_recovery_quick_replies(context)
+    if context.state is BookingState.SELECTING_PEOPLE:
+        return _people_recovery_quick_replies()
     if context.state is BookingState.SELECTING_SERVICE:
         if context.main_course is not None:
             return ("Không chọn add-on", "Xem danh sách add-on")

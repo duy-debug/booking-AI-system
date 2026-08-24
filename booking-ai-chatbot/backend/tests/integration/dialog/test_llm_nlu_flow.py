@@ -340,7 +340,8 @@ async def test_llm_shop_query_goes_through_entity_resolver_without_domain_object
     assert resolver.calls[0].payload == {}
     assert context.shop is None
     assert "Không tìm thấy cửa hàng" in response.text
-    assert external_requests == []
+    assert len(external_requests) == 1
+    assert external_requests[0].url.path == "/api/shops"
 
 
 @pytest.mark.asyncio

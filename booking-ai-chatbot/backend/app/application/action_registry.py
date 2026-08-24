@@ -5,7 +5,7 @@ import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, fields
-from datetime import date, time
+from datetime import date, datetime, time, timedelta
 from functools import partial
 from time import perf_counter
 from typing import Protocol, TypeAlias, TypeVar
@@ -24,6 +24,7 @@ from app.dialog.flow_loader import (
 )
 from app.domain.booking_context import BookingContext
 from app.domain.booking_models import (
+    AvailableTherapistRequest,
     BookingConflictError,
     BookingContextNotReadyError,
     BookingRules,
@@ -40,9 +41,11 @@ from app.domain.booking_models import (
     Shop,
     ShopSearchCriteria,
     SlotConflictError,
+    TherapistAvailabilityGateway,
     TherapistNotAllowedForGroupError,
     TherapistPreference,
     TherapistPreferenceType,
+    TherapistUnavailableError,
 )
 from app.domain.outcomes import HandlerOutcome, HandlerResult
 from app.infrastructure.context_store import elapsed_ms, trace_log
@@ -163,8 +166,29 @@ def _require_payload_value(
     if value is None or not isinstance(value, expected_type) or invalid_bool:
         raise InvalidActionInputError(
             f"Action '{context.intent}' requires '{key}' to be {expected_type.__name__}."
-        )
+    )
     return value
+
+
+def _contains_personal_therapist(
+    available: Sequence[TherapistPreference],
+    expected: TherapistPreference,
+) -> bool:
+    """
+    So khớp therapist cá nhân theo ID trước, fallback theo tên khi POS không trả ID.
+    """
+
+    expected_id = expected.therapist_id
+    expected_name = expected.therapist_name
+    for therapist in available:
+        if therapist.preference_type is not TherapistPreferenceType.PERSONAL:
+            continue
+        if expected_id is not None and therapist.therapist_id == expected_id:
+            return True
+        if expected_id is None and expected_name is not None:
+            if therapist.therapist_name == expected_name:
+                return True
+    return False
 
 
 class ActionRegistry:
@@ -185,6 +209,7 @@ class ActionRegistry:
         select_booking_info_handler: SelectBookingInfoHandler | None = None,
         select_schedule_handler: SelectScheduleHandler | None = None,
         check_customer_handler: CheckCustomerHandler | None = None,
+        therapist_availability_gateway: TherapistAvailabilityGateway | None = None,
         failure_code_provider: FailureCodeProvider | None = None,
     ) -> None:
         self._actions: dict[str, ActionCallable] = {}
@@ -194,6 +219,7 @@ class ActionRegistry:
         self._select_booking_info_handler = select_booking_info_handler
         self._select_schedule_handler = select_schedule_handler
         self._check_customer_handler = check_customer_handler
+        self._therapist_availability_gateway = therapist_availability_gateway
         self._failure_code_provider = failure_code_provider
         self._register_domain_actions()
         self._register_injected_handler_actions()
@@ -393,7 +419,7 @@ class ActionRegistry:
                 }:
                     return error.reason
                 return "no_slots_available"
-            if action_name == "handle_time_selection":
+            if action_name in {"handle_time_selection", "change_time"}:
                 return "slot_unavailable"
             return "booking_conflict"
         if isinstance(error, CustomerVerificationMismatchError):
@@ -420,7 +446,7 @@ class ActionRegistry:
             return "course_duration_mismatch"
         if isinstance(error, InvalidCourseSelectionError):
             return "combo_not_bookable"
-        if isinstance(error, TherapistNotAllowedForGroupError):
+        if isinstance(error, TherapistNotAllowedForGroupError | TherapistUnavailableError):
             return "therapist_unavailable"
         if isinstance(error, InvalidBookingDataError):
             error_code = str(error)
@@ -844,8 +870,102 @@ class ActionRegistry:
         start_time = context.payload.get("start_time")
         if start_time is not None and type(start_time) is not time:
             raise InvalidActionInputError("Changed start time must be a time.")
+        if start_time is not None:
+            available_slots = context.booking_context.available_slots
+            if available_slots is not None and start_time not in available_slots:
+                raise SlotConflictError(
+                    nearest_slots=available_slots,
+                    reason="Selected changed time is not in the latest available slots.",
+                )
         context.booking_context.change_start_time(start_time)
+        if start_time is not None:
+            await self._revalidate_therapist_after_time_change(context.booking_context)
         return ActionResult("change_time", start_time)
+
+    async def _revalidate_therapist_after_time_change(
+        self,
+        booking_context: BookingContext,
+    ) -> None:
+        """
+        Xác thực lại therapist cũ sau khi đổi giờ mà không phá rule group booking.
+        """
+
+        preference = booking_context.therapist_preference
+        if booking_context.num_customer is not None and booking_context.num_customer >= 2:
+            booking_context.set_therapist_preference(
+                TherapistPreference(TherapistPreferenceType.NONE)
+            )
+            booking_context.set_therapist_verified(True)
+            booking_context.last_failure_code = None
+            return
+        if preference is None:
+            booking_context.set_therapist_preference(
+                TherapistPreference(TherapistPreferenceType.NONE)
+            )
+            booking_context.set_therapist_verified(True)
+            booking_context.last_failure_code = None
+            return
+        if preference.preference_type is TherapistPreferenceType.NONE:
+            booking_context.set_therapist_verified(True)
+            booking_context.last_failure_code = None
+            return
+        gateway = self._therapist_availability_gateway
+        if gateway is None:
+            raise TherapistUnavailableError("Therapist availability gateway is not configured.")
+        available = await gateway.search_available_therapists(
+            self._available_therapist_request(
+                booking_context,
+                preference,
+            )
+        )
+        if preference.preference_type is TherapistPreferenceType.PERSONAL:
+            if not _contains_personal_therapist(available, preference):
+                booking_context.set_therapist_preference(None)
+                booking_context.set_therapist_verified(False)
+                booking_context.last_failure_code = "therapist_unavailable"
+                return
+            booking_context.set_therapist_verified(True)
+            booking_context.last_failure_code = None
+            return
+        if not available:
+            booking_context.set_therapist_preference(None)
+            booking_context.set_therapist_verified(False)
+            booking_context.last_failure_code = "therapist_unavailable"
+            return
+        booking_context.set_therapist_verified(True)
+        booking_context.last_failure_code = None
+
+    @staticmethod
+    def _available_therapist_request(
+        booking_context: BookingContext,
+        preference: TherapistPreference,
+    ) -> AvailableTherapistRequest:
+        if (
+            booking_context.shop is None
+            or booking_context.booking_date is None
+            or booking_context.start_time is None
+            or booking_context.total_duration_minutes is None
+        ):
+            raise InvalidActionInputError(
+                "Action 'change_time' requires shop, date, time and duration."
+            )
+        end_time = (
+            datetime.combine(booking_context.booking_date, booking_context.start_time)
+            + timedelta(minutes=booking_context.total_duration_minutes)
+        ).time()
+        gender = (
+            preference.preference_type
+            if preference.preference_type
+            in {TherapistPreferenceType.MALE, TherapistPreferenceType.FEMALE}
+            else None
+        )
+        return AvailableTherapistRequest(
+            shop_id=booking_context.shop.shop_id,
+            booking_date=booking_context.booking_date,
+            start_time=booking_context.start_time,
+            end_time=end_time,
+            gender=gender,
+        )
 
     # Đổi yêu cầu therapist theo giới tính hoặc bỏ yêu cầu, không tạo booking.
     async def _change_therapist(
