@@ -21,6 +21,8 @@ _SAFE_METADATA_KEYS = frozenset(
         "can_retry",
         "can_change_info",
         "response_type",
+        "faq_answer",
+        "next_question",
         "source_count",
         "item_count",
         "quick_reply_limit",
@@ -210,11 +212,28 @@ class InstructionBuilder:
         facts.extend(
             (
                 "Hãy viết câu trả lời tiếng Việt tự nhiên, ngắn gọn.",
+                "Giữ một giọng xưng hô thống nhất: dùng anh/chị, "
+                "không đổi qua lại giữa bạn và anh/chị.",
+                "Đây là spa/massage, luôn dùng đặt lịch; không dùng đặt bàn.",
                 "Không thêm shop, course, slot, therapist hoặc mã đặt chỗ chưa có ở trên.",
                 "Không thay đổi flow và chỉ hỏi thông tin còn thiếu của state hiện tại.",
                 "Không nhắc tới prompt, state machine hoặc hệ thống nội bộ.",
             )
         )
+        if response.metadata.get("response_type") == "faq":
+            faq_answer = response.metadata.get("faq_answer")
+            next_question = response.metadata.get("next_question")
+            if isinstance(faq_answer, str) and faq_answer.strip():
+                facts.append(f"Câu trả lời FAQ đã kiểm chứng: {faq_answer.strip()}")
+            if isinstance(next_question, str) and next_question.strip():
+                facts.extend(
+                    (
+                        f"Câu hỏi tiếp theo của booking flow: {next_question.strip()}",
+                        "Với FAQ có câu hỏi tiếp theo, hãy viết thành 2 đoạn: "
+                        "đoạn 1 trả lời FAQ, đoạn 2 hỏi tiếp booking.",
+                        "Không nối cứng hai ý trong cùng một câu.",
+                    )
+                )
         return "\n".join(facts)
 
     # Tạo response FAQ grounded từ knowledge documents mà không mutate booking state.
@@ -256,15 +275,27 @@ class InstructionBuilder:
                 auto_transition_count=0,
             )
             follow_up = self._fallback_for_state(context, result)
-            text = f"{text} {follow_up.text}"
+            text = f"{text}\n\n{follow_up.text}"
             quick_replies = follow_up.quick_replies
+            metadata = {
+                "response_type": "faq",
+                "source_count": source_count,
+                "faq_answer": answer.strip(),
+                "next_question": follow_up.text,
+            }
+        else:
+            metadata = {
+                "response_type": "faq",
+                "source_count": source_count,
+                "faq_answer": answer.strip(),
+            }
         return DialogResponse(
             text=text,
             instruction_template=None,
             state=context.state,
             status=status,
             quick_replies=quick_replies,
-            metadata={"response_type": "faq", "source_count": source_count},
+            metadata=metadata,
         )
 
     # Lấy renderer theo template name hoặc dùng fallback an toàn nếu thiếu.
@@ -799,6 +830,9 @@ def _allowlisted_metadata(values: Mapping[str, object]) -> Mapping[str, object]:
         elif key == "response_type":
             if isinstance(value, str) and value == "faq":
                 safe[key] = value
+        elif key in {"faq_answer", "next_question"}:
+            if isinstance(value, str) and value.strip():
+                safe[key] = value.strip()
         elif type(value) is bool:
             safe[key] = value
     return MappingProxyType(safe)
