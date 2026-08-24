@@ -946,7 +946,7 @@ async def test_failed_resolution_returns_generic_text_without_retry_or_raw_error
 @pytest.mark.parametrize(
     ("state", "expected"),
     [
-        (BookingState.IDLE, "Tôi muốn đặt lịch"),
+        (BookingState.IDLE, "đặt lịch mới, sửa lịch đã đặt hoặc hủy lịch đã đặt"),
         (BookingState.SELECTING_PEOPLE, "từ 1 đến 3 người"),
         (BookingState.COMPLETED, "nhập lại rõ hơn"),
     ],
@@ -974,7 +974,7 @@ async def test_unresolved_branch_is_state_aware_and_does_not_dispatch(
 @pytest.mark.parametrize(
     ("state", "expected_replies"),
     [
-        (BookingState.IDLE, ("Tôi muốn đặt lịch", "Xem danh sách cửa hàng")),
+        (BookingState.IDLE, ("Đặt lịch mới", "Sửa lịch đã đặt", "Hủy lịch đã đặt")),
         (BookingState.SELECTING_DATE, ("Hôm nay", "Ngày mai")),
         (BookingState.SELECTING_PEOPLE, ("1 người", "2 người", "3 người")),
         (

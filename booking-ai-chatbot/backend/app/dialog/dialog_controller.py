@@ -84,7 +84,10 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 _UNRESOLVED_TEXT = {
-    BookingState.IDLE: "Tôi chưa hiểu yêu cầu. Bạn có thể nói: Tôi muốn đặt lịch.",
+    BookingState.IDLE: (
+        "Mình chưa nắm rõ yêu cầu của anh/chị. "
+        "Hiện tại mình hỗ trợ đặt lịch mới, sửa lịch đã đặt hoặc hủy lịch đã đặt."
+    ),
     BookingState.SELECTING_SHOP: "Vui lòng cho biết cửa hàng hoặc khu vực bạn muốn đặt.",
     BookingState.SELECTING_DATE: "Vui lòng nhập ngày, ví dụ: ngày mai hoặc 15/08.",
     BookingState.SELECTING_PEOPLE: (
@@ -121,7 +124,7 @@ _UNSUPPORTED_TEXT = {
 _ENTITY_FAILURE_TEXT = "Hệ thống chưa thể tra cứu thông tin lúc này. Vui lòng thử lại."
 _DEFAULT_UNRESOLVED_TEXT = "Tôi chưa hiểu yêu cầu. Vui lòng nhập lại rõ hơn."
 _RECOVERY_QUICK_REPLIES = {
-    BookingState.IDLE: ("Tôi muốn đặt lịch", "Xem danh sách cửa hàng"),
+    BookingState.IDLE: ("Đặt lịch mới", "Sửa lịch đã đặt", "Hủy lịch đã đặt"),
     BookingState.SELECTING_DATE: ("Hôm nay", "Ngày mai"),
     BookingState.SELECTING_DURATION: ("45 phút", "60 phút", "90 phút"),
     BookingState.SELECTING_THERAPIST: ("Không yêu cầu", "Nam", "Nữ"),
