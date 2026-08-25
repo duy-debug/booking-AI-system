@@ -229,6 +229,35 @@ describe("streamChat", () => {
     controller.abort();
     await expect(request).rejects.toMatchObject({ problem: { code: "cancelled" } });
   });
+
+  it("cancels an opened SSE reader and does not render the final message", async () => {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(
+          "event: started\ndata: {\"conversation_id\":\"conversation-1\"}\n\n",
+        ));
+      },
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } }),
+    );
+    const onStarted = vi.fn();
+    const onMessage = vi.fn();
+    const controller = new AbortController();
+    const request = streamChat({
+      conversation_id: "conversation-1",
+      message: "hello",
+      signal: controller.signal,
+    }, { onStarted, onMessage });
+
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+    expect(onStarted).toHaveBeenCalledOnce();
+    controller.abort();
+
+    await expect(request).rejects.toMatchObject({ problem: { code: "cancelled" } });
+    expect(onMessage).not.toHaveBeenCalled();
+  });
 });
 
 describe("sendChat", () => {

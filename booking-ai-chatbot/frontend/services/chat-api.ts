@@ -51,6 +51,13 @@ function invalidResponse(): ChatApiError {
   return new ChatApiError({ code: "invalid_response", detail: "Phản hồi chatbot không hợp lệ." });
 }
 
+function cancelledRequest(): ChatApiError {
+  return new ChatApiError({
+    code: "cancelled",
+    detail: "Yêu cầu đã được hủy.",
+  });
+}
+
 function parseResponse(value: unknown): ChatResponse {
   if (!isRecord(value)) throw invalidResponse();
   const quickReplies = value.quick_replies;
@@ -204,13 +211,35 @@ export async function streamChat(
   const decoder = new TextDecoder();
   const parser = new SseParser();
   const state: { response?: ChatResponse; completed: boolean } = { completed: false };
-  while (true) {
-    const { value, done } = await reader.read();
-    for (const event of parser.feed(decoder.decode(value, { stream: !done }))) {
-      dispatchEvent(event, callbacks, state);
+  const cancelReader = () => {
+    void reader.cancel();
+  };
+  input.signal?.addEventListener("abort", cancelReader, { once: true });
+  try {
+    while (true) {
+      if (input.signal?.aborted) throw cancelledRequest();
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } catch {
+        if (input.signal?.aborted) throw cancelledRequest();
+        throw new ChatApiError({
+          code: "stream_interrupted",
+          detail: "Kết nối bị gián đoạn; trạng thái booking có thể chưa chắc chắn. Không tự động gửi lại.",
+        });
+      }
+      const { value, done } = chunk;
+      if (input.signal?.aborted) throw cancelledRequest();
+      for (const event of parser.feed(decoder.decode(value, { stream: !done }))) {
+        if (input.signal?.aborted) throw cancelledRequest();
+        dispatchEvent(event, callbacks, state);
+      }
+      if (done) break;
     }
-    if (done) break;
+  } finally {
+    input.signal?.removeEventListener("abort", cancelReader);
   }
+  if (input.signal?.aborted) throw cancelledRequest();
   if (parser.hasPendingData() || !state.completed || !state.response) {
     throw new ChatApiError({
       code: "stream_interrupted",
