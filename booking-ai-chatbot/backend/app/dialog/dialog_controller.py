@@ -88,6 +88,9 @@ _UNRESOLVED_TEXT = {
         "Mình chưa nắm rõ yêu cầu của anh/chị. "
         "Hiện tại mình hỗ trợ đặt lịch mới, sửa lịch đã đặt hoặc hủy lịch đã đặt."
     ),
+    BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY: (
+        "Vui lòng cung cấp mã booking và số điện thoại đã đặt lịch để mình kiểm tra trước khi hủy."
+    ),
     BookingState.SELECTING_SHOP: "Vui lòng cho biết cửa hàng hoặc khu vực bạn muốn đặt.",
     BookingState.SELECTING_DATE: "Vui lòng nhập ngày, ví dụ: ngày mai hoặc 15/08.",
     BookingState.SELECTING_PEOPLE: (
@@ -125,6 +128,7 @@ _ENTITY_FAILURE_TEXT = "Hệ thống chưa thể tra cứu thông tin lúc này.
 _DEFAULT_UNRESOLVED_TEXT = "Tôi chưa hiểu yêu cầu. Vui lòng nhập lại rõ hơn."
 _RECOVERY_QUICK_REPLIES = {
     BookingState.IDLE: ("Đặt lịch mới", "Sửa lịch đã đặt", "Hủy lịch đã đặt"),
+    BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY: ("Hủy booking",),
     BookingState.SELECTING_DATE: ("Hôm nay", "Ngày mai"),
     BookingState.SELECTING_DURATION: ("45 phút", "60 phút", "90 phút"),
     BookingState.SELECTING_THERAPIST: ("Không yêu cầu", "Nam", "Nữ"),
@@ -1216,6 +1220,7 @@ def _stage_requested_entities(result: NLUResult, context: BookingContext) -> Non
 def _can_stage_requested_slot(key: str, state: BookingState) -> bool:
     state_order = {
         BookingState.IDLE: 0,
+        BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY: 1,
         BookingState.SELECTING_SHOP: 1,
         BookingState.SELECTING_DATE: 2,
         BookingState.SELECTING_PEOPLE: 3,

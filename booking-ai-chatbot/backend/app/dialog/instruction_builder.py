@@ -357,6 +357,11 @@ class InstructionBuilder:
             ("booking_failed", self._booking_failed),
             ("booking_complete", self._booking_complete),
             ("booking_cancelled", self._booking_cancelled),
+            ("ask_cancel_booking_identity", self._ask_cancel_booking_identity),
+            ("cancel_booking_not_found", self._cancel_booking_not_found),
+            ("cancel_booking_unavailable", self._cancel_booking_unavailable),
+            ("cancel_booking_already_cancelled", self._cancel_booking_already_cancelled),
+            ("existing_booking_cancelled", self._existing_booking_cancelled),
             ("change_ask_shop", self._change_ask_shop),
             ("change_ask_date", self._change_ask_date),
             ("change_ask_people", self._change_ask_people),
@@ -445,6 +450,7 @@ class InstructionBuilder:
     ) -> DialogResponseDraft:
         renderer_by_state: dict[BookingState, InstructionRenderer] = {
             BookingState.IDLE: self._greeting,
+            BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY: self._ask_cancel_booking_identity,
             BookingState.SELECTING_SHOP: self._ask_shop,
             BookingState.SELECTING_DATE: self._ask_date,
             BookingState.SELECTING_PEOPLE: self._ask_people,
@@ -803,6 +809,64 @@ class InstructionBuilder:
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
         return DialogResponseDraft("Yêu cầu đặt lịch đã được hủy.")
+
+    @staticmethod
+    def _ask_cancel_booking_identity(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        missing_parts: list[str] = []
+        if context.cancel_booking_reference is None:
+            missing_parts.append("mã booking")
+        if context.phone is None:
+            missing_parts.append("số điện thoại đã đặt lịch")
+        if missing_parts:
+            missing_text = " và ".join(missing_parts)
+            return DialogResponseDraft(
+                f"Để hủy booking đã đặt, anh/chị vui lòng cung cấp {missing_text}."
+            )
+        return DialogResponseDraft(
+            "Anh/chị vui lòng gửi lại mã booking và số điện thoại đã đặt lịch để em kiểm tra."
+        )
+
+    @staticmethod
+    def _cancel_booking_not_found(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        return DialogResponseDraft(
+            "Em chưa tìm thấy booking khớp với mã booking và số điện thoại anh/chị vừa cung cấp. "
+            "Anh/chị vui lòng kiểm tra lại thông tin giúp em nhé."
+        )
+
+    @staticmethod
+    def _cancel_booking_unavailable(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        return DialogResponseDraft(
+            "Hiện tại hệ thống chưa thể kiểm tra hoặc hủy booking này. "
+            "Anh/chị vui lòng thử lại sau hoặc liên hệ trực tiếp cửa hàng để được hỗ trợ."
+        )
+
+    @staticmethod
+    def _cancel_booking_already_cancelled(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        return DialogResponseDraft("Booking này đã được hủy trước đó rồi ạ.")
+
+    @staticmethod
+    def _existing_booking_cancelled(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        lines = ["Em đã hủy booking của anh/chị thành công."]
+        if context.reservation_code:
+            lines.append(f"Mã booking: {context.reservation_code}")
+        elif context.booking_id is not None:
+            lines.append(f"Mã booking: {context.booking_id}")
+        return DialogResponseDraft("\n".join(lines), metadata={"booking_cancelled": True})
 
 
 def _normalize_quick_replies(

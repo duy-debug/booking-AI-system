@@ -25,8 +25,11 @@ from app.dialog.flow_loader import (
 from app.domain.booking_context import BookingContext
 from app.domain.booking_models import (
     AvailableTherapistRequest,
+    Booking,
     BookingConflictError,
     BookingContextNotReadyError,
+    BookingGateway,
+    BookingNotFoundError,
     BookingRules,
     CourseSelection,
     Customer,
@@ -38,6 +41,14 @@ from app.domain.booking_models import (
     InvalidDurationError,
     InvalidIdempotencyKeyError,
     PhoneNotConfirmedError,
+    POSAuthenticationError,
+    POSAuthorizationError,
+    POSConnectionError,
+    POSContractNotConfiguredError,
+    POSHTTPError,
+    POSNotFoundError,
+    POSTemporaryError,
+    POSTimeoutError,
     Shop,
     ShopSearchCriteria,
     SlotConflictError,
@@ -128,6 +139,14 @@ class InvalidActionInputError(ActionRegistryError):
     """Raised when an action is missing typed input required for execution."""
 
 
+class ExistingBookingIdentityMissingError(ActionRegistryError):
+    """Raised when existing-booking cancellation still needs booking reference or phone."""
+
+
+class ExistingBookingAlreadyCancelledError(ActionRegistryError):
+    """Raised when the requested existing booking is already cancelled."""
+
+
 class ActionExecutionError(ActionRegistryError):
     """Wrap an exception raised while executing a registered action."""
 
@@ -209,6 +228,7 @@ class ActionRegistry:
         select_booking_info_handler: SelectBookingInfoHandler | None = None,
         select_schedule_handler: SelectScheduleHandler | None = None,
         check_customer_handler: CheckCustomerHandler | None = None,
+        booking_gateway: BookingGateway | None = None,
         therapist_availability_gateway: TherapistAvailabilityGateway | None = None,
         failure_code_provider: FailureCodeProvider | None = None,
     ) -> None:
@@ -219,6 +239,7 @@ class ActionRegistry:
         self._select_booking_info_handler = select_booking_info_handler
         self._select_schedule_handler = select_schedule_handler
         self._check_customer_handler = check_customer_handler
+        self._booking_gateway = booking_gateway
         self._therapist_availability_gateway = therapist_availability_gateway
         self._failure_code_provider = failure_code_provider
         self._register_domain_actions()
@@ -301,6 +322,10 @@ class ActionRegistry:
             "flow_configuration_error",
             "slot_api_error",
             "booking_api_error",
+            "cancel_booking_identity_missing",
+            "cancel_booking_not_found",
+            "cancel_booking_already_cancelled",
+            "cancel_booking_unavailable",
             "action_execution_error",
         )
 
@@ -334,8 +359,10 @@ class ActionRegistry:
         except UnknownActionError as error:
             self._restore_booking_context(context.booking_context, snapshot)
             raise ActionExecutionError(normalized_name, (), error) from error
-        except ActionExecutionError:
-            self._restore_booking_context(context.booking_context, snapshot)
+        except ActionExecutionError as error:
+            cause = self._unwrap_action_error(error)
+            if not isinstance(cause, ExistingBookingIdentityMissingError):
+                self._restore_booking_context(context.booking_context, snapshot)
             raise
 
     # Điều phối chuỗi business action và rollback toàn bộ working context nếu có lỗi.
@@ -360,7 +387,9 @@ class ActionRegistry:
                     raise ActionExecutionError(name, (), error) from error
                 results.append(await self._invoke_action(name, action, context))
         except ActionExecutionError as error:
-            self._restore_booking_context(context.booking_context, snapshot)
+            unwrapped = self._unwrap_action_error(error)
+            if not isinstance(unwrapped, ExistingBookingIdentityMissingError):
+                self._restore_booking_context(context.booking_context, snapshot)
             cause = error.__cause__
             assert isinstance(cause, Exception)
             raise ActionExecutionError(
@@ -407,6 +436,24 @@ class ActionRegistry:
     ) -> str:
         if isinstance(error, UnknownActionError):
             return "unknown_action_error"
+        if isinstance(error, ExistingBookingIdentityMissingError):
+            return "cancel_booking_identity_missing"
+        if isinstance(error, ExistingBookingAlreadyCancelledError):
+            return "cancel_booking_already_cancelled"
+        if isinstance(error, BookingNotFoundError | POSNotFoundError):
+            return "cancel_booking_not_found"
+        if isinstance(
+            error,
+            POSAuthenticationError
+            | POSAuthorizationError
+            | POSConnectionError
+            | POSContractNotConfiguredError
+            | POSHTTPError
+            | POSTemporaryError
+            | POSTimeoutError,
+        ):
+            if action_name == "cancel_existing_booking":
+                return "cancel_booking_unavailable"
         if isinstance(error, InvalidActionSequenceError):
             return "action_sequence_invalid"
         if isinstance(error, InvalidFlowConditionError):
@@ -672,6 +719,8 @@ class ActionRegistry:
             self.register_action("mark_phone_confirmed", self._mark_phone_confirmed)
         if self._create_booking_handler is not None:
             self.register_action("create_booking", self._create_booking)
+        if self._booking_gateway is not None:
+            self.register_action("cancel_existing_booking", self._cancel_existing_booking)
 
     # Gọi handler tìm danh sách shop và lưu catalog gợi ý vào BookingContext.
     async def _search_shop(
@@ -1127,6 +1176,41 @@ class ActionRegistry:
         _apply_context_updates(context.booking_context, result)
         return ActionResult("create_booking", result.data["create_result"])
 
+    # Hủy booking đã tạo trước đó sau khi đối chiếu đủ mã booking và số điện thoại chủ booking.
+    async def _cancel_existing_booking(
+        self,
+        context: ActionExecutionContext,
+    ) -> ActionResult:
+        assert self._booking_gateway is not None
+
+        booking_context = context.booking_context
+        reference = _optional_payload_text(context, "booking_reference")
+        phone = _optional_payload_text(context, "phone")
+        if reference is not None:
+            booking_context.cancel_booking_reference = reference
+        if phone is not None:
+            normalized_phone = "".join(phone.split()).replace("-", "")
+            BookingRules.validate_phone(normalized_phone)
+            booking_context.phone = normalized_phone
+
+        reference = booking_context.cancel_booking_reference
+        phone = booking_context.phone
+        if reference is None or phone is None:
+            raise ExistingBookingIdentityMissingError(
+                "cancel_existing_booking requires booking_reference and phone."
+            )
+
+        booking = await self._booking_gateway.lookup_booking(reference, phone)
+        if booking.status == "cancelled":
+            booking_context.booking = booking
+            booking_context.booking_id = booking.booking_id
+            booking_context.reservation_code = booking.reservation_code
+            raise ExistingBookingAlreadyCancelledError("Existing booking is already cancelled.")
+
+        cancelled = await self._booking_gateway.cancel_booking(booking.booking_id, phone)
+        _store_existing_booking(booking_context, cancelled, phone)
+        return ActionResult("cancel_existing_booking", cancelled)
+
 
 
 # Chuyển HandlerResult không thành công thành lỗi để StateMachine đi failure path.
@@ -1146,6 +1230,40 @@ def _typed_result_items(
     if not isinstance(value, tuple) or any(not isinstance(item, item_type) for item in value):
         raise InvalidBookingDataError(f"Handler result '{key}' is invalid.")
     return value
+
+
+def _optional_payload_text(
+    context: ActionExecutionContext,
+    key: str,
+) -> str | None:
+    value = context.payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise InvalidActionInputError(f"Action payload '{key}' must be a string.")
+    normalized = value.strip()
+    return normalized or None
+
+
+def _store_existing_booking(
+    context: BookingContext,
+    booking: Booking,
+    phone: str,
+) -> None:
+    context.booking = booking
+    context.booking_id = booking.booking_id
+    context.reservation_code = booking.reservation_code
+    context.phone = phone
+    context.customer = booking.customer
+    context.shop = booking.shop
+    context.main_course = booking.main_course
+    context.booking_date = booking.booking_date
+    context.start_time = booking.start_time
+    context.num_customer = booking.num_customer
+    context.duration_minutes = booking.duration_minutes
+    context.therapist_preference = booking.therapist_preference
+    context.addons = booking.addons
+    context.last_failure_code = None
 
 
 # Áp dụng context_updates từ handler sau khi đã xác thực field thuộc BookingContext.

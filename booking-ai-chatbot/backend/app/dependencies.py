@@ -285,6 +285,7 @@ async def create_application_container(
             select_booking_info_handler=select_booking_info_handler,
             select_schedule_handler=select_schedule_handler,
             check_customer_handler=check_customer_handler,
+            booking_gateway=booking_gateway,
             therapist_availability_gateway=cast(TherapistAvailabilityGateway, booking_gateway),
         )
         instruction_builder = InstructionBuilder()

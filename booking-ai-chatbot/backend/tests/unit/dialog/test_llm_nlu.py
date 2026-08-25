@@ -480,7 +480,7 @@ async def test_llm_change_output_maps_semantic_targets_without_backend_inference
     assert result.payload == expected_payload
     assert gateway.calls == 1
     prompt = gateway.messages[0].content
-    assert "hãy suy ra change_target từ khái niệm ngữ nghĩa mà người dùng muốn sửa" in prompt
+    assert "Với change_info, suy ra change_target từ khái niệm ngữ nghĩa" in prompt
     assert "Không được đoán target." in prompt
     assert text not in prompt
 
@@ -523,7 +523,7 @@ async def test_existing_booking_change_from_idle_is_not_collapsed_into_change_in
     assert result.payload == {}
     assert gateway.calls == 1
     assert (
-        "Các yêu cầu sửa, dời lịch hoặc hủy một booking đã được tạo trước đó"
+        "Sửa/dời/hủy booking đã tạo không được gộp vào change_info"
         in gateway.messages[0].content
     )
 
@@ -845,12 +845,8 @@ async def test_select_time_prompt_uses_semantic_guidance_instead_of_exact_uttera
     assert gateway.calls == 1
     prompt = gateway.messages[0].content
     assert "Hãy xem trạng thái hiện tại chỉ như ngữ cảnh hội thoại" in prompt
-    assert "Khi người dùng thể hiện một giờ bắt đầu đặt lịch cụ thể" in prompt
-    assert (
-        "Hãy hiểu đúng các cách nói giờ tự nhiên, mang tính hội thoại, "
-        "viết tắt hoặc phụ thuộc ngữ cảnh."
-        in prompt
-    )
+    assert "Khi người dùng nói giờ bắt đầu cụ thể" in prompt
+    assert "Hiểu giờ tự nhiên/viết tắt theo ngữ cảnh" in prompt
     assert "In selecting_time" not in prompt
     assert "In awaiting_confirmation" not in prompt
 

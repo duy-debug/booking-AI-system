@@ -33,6 +33,7 @@ from app.domain.booking_models import (
     AvailableTherapistRequest,
     Booking,
     BookingContextNotReadyError,
+    BookingGateway,
     Course,
     CreateBookingResult,
     Customer,
@@ -520,6 +521,30 @@ class FakeTherapistAvailabilityGateway:
         return self.therapists
 
 
+class FakeExistingBookingGateway:
+    def __init__(self, booking: Booking = BOOKING) -> None:
+        self.booking = booking
+        self.lookup_calls: list[tuple[str, str]] = []
+        self.cancel_calls: list[tuple[UUID, str | None]] = []
+
+    async def lookup_booking(self, booking_reference: str, phone: str) -> Booking:
+        self.lookup_calls.append((booking_reference, phone))
+        return self.booking
+
+    async def cancel_booking(self, booking_id: UUID, phone: str | None = None) -> Booking:
+        self.cancel_calls.append((booking_id, phone))
+        return Booking(
+            booking_id=booking_id,
+            status="cancelled",
+            shop=self.booking.shop,
+            main_course=self.booking.main_course,
+            customer=Customer(phone or self.booking.customer.phone, self.booking.customer.name),
+            booking_date=self.booking.booking_date,
+            start_time=self.booking.start_time,
+            reservation_code=self.booking.reservation_code,
+        )
+
+
 def production_bridge(
     *,
     search_shop: FakeSearchShopHandler | None = None,
@@ -527,6 +552,7 @@ def production_bridge(
     customer: FakeCustomerLookup | None = None,
     confirmation: FakePhoneConfirmation | None = None,
     create: FakeCreateBookingHandler | None = None,
+    booking_gateway: FakeExistingBookingGateway | None = None,
     therapist_availability: FakeTherapistAvailabilityGateway | None = None,
 ) -> ActionRegistry:
     check_customer = (
@@ -542,6 +568,7 @@ def production_bridge(
         check_availability_handler=availability,
         check_customer_handler=check_customer,
         create_booking_handler=create,
+        booking_gateway=cast(BookingGateway | None, booking_gateway),
         therapist_availability_gateway=cast(
             TherapistAvailabilityGateway | None,
             therapist_availability,
@@ -860,6 +887,54 @@ async def test_create_binding_preserves_idempotency_and_does_not_commit_state() 
     ]
     assert booking_context.booking is BOOKING
     assert booking_context.state is BookingState.BOOKING_EXECUTING
+
+
+@pytest.mark.asyncio
+async def test_cancel_existing_booking_looks_up_owner_phone_before_cancel() -> None:
+    gateway = FakeExistingBookingGateway()
+    bridge = production_bridge(booking_gateway=gateway)
+    booking_context = BookingContext(conversation_id="conversation-1")
+
+    report = await bridge.execute_actions(
+        ("cancel_existing_booking",),
+        execution_context(
+            booking_context=booking_context,
+            payload={
+                "booking_reference": str(BOOKING.booking_id),
+                "phone": "0901234567",
+            },
+        ),
+    )
+
+    assert report.executed_action_names == ("cancel_existing_booking",)
+    assert gateway.lookup_calls == [(str(BOOKING.booking_id), "0901234567")]
+    assert gateway.cancel_calls == [(BOOKING.booking_id, "0901234567")]
+    assert booking_context.booking is not None
+    assert booking_context.booking.status == "cancelled"
+    assert booking_context.booking_id == BOOKING.booking_id
+    assert booking_context.phone == "0901234567"
+
+
+@pytest.mark.asyncio
+async def test_cancel_existing_booking_missing_identity_preserves_partial_context() -> None:
+    gateway = FakeExistingBookingGateway()
+    bridge = production_bridge(booking_gateway=gateway)
+    booking_context = BookingContext(conversation_id="conversation-1")
+
+    with pytest.raises(ActionExecutionError) as error_info:
+        await bridge.execute_actions(
+            ("cancel_existing_booking",),
+            execution_context(
+                booking_context=booking_context,
+                payload={"phone": "0901234567"},
+            ),
+        )
+
+    assert bridge.get_failure_code(error_info.value) == "cancel_booking_identity_missing"
+    assert booking_context.phone == "0901234567"
+    assert booking_context.cancel_booking_reference is None
+    assert gateway.lookup_calls == []
+    assert gateway.cancel_calls == []
 
 
 @pytest.mark.asyncio

@@ -24,7 +24,8 @@ interface ChatStreamCallbacks {
 }
 
 const BOOKING_STATES = new Set<BookingState>([
-  "idle", "selecting_shop", "selecting_date", "selecting_people",
+  "idle", "collecting_cancel_booking_identity",
+  "selecting_shop", "selecting_date", "selecting_people",
   "selecting_duration", "selecting_service", "selecting_time",
   "selecting_therapist", "collecting_phone", "collecting_name",
   "verifying_phone", "awaiting_confirmation", "booking_executing",

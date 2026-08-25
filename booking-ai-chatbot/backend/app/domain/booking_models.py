@@ -593,8 +593,8 @@ class BookingGateway(Protocol):
         """Create and return an official booking result."""
         ...
 
-    async def lookup_booking(self, booking_id: UUID) -> Booking:
-        """Return an official booking by its identifier."""
+    async def lookup_booking(self, booking_reference: str, phone: str) -> Booking:
+        """Return an official booking after matching its reference and owner phone."""
         ...
 
     async def reschedule_booking(
@@ -606,7 +606,7 @@ class BookingGateway(Protocol):
         """Reschedule and return the updated official booking."""
         ...
 
-    async def cancel_booking(self, booking_id: UUID) -> Booking:
+    async def cancel_booking(self, booking_id: UUID, phone: str | None = None) -> Booking:
         """Cancel and return the updated official booking."""
         ...
 

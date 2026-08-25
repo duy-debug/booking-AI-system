@@ -89,6 +89,36 @@
                                                                     ]
                                                     },
                                                     {
+                                                        "intent":  "cancel_existing_booking",
+                                                        "target":  "cancelled",
+                                                        "actions":  [
+                                                                        "cancel_existing_booking"
+                                                                    ],
+                                                        "on_fail":  [
+                                                                        {
+                                                                            "condition":  "cancel_booking_identity_missing",
+                                                                            "target":  "collecting_cancel_booking_identity",
+                                                                            "instruction_template":  "ask_cancel_booking_identity"
+                                                                        },
+                                                                        {
+                                                                            "condition":  "cancel_booking_not_found",
+                                                                            "target":  "collecting_cancel_booking_identity",
+                                                                            "instruction_template":  "cancel_booking_not_found"
+                                                                        },
+                                                                        {
+                                                                            "condition":  "cancel_booking_already_cancelled",
+                                                                            "target":  "cancelled",
+                                                                            "instruction_template":  "cancel_booking_already_cancelled"
+                                                                        },
+                                                                        {
+                                                                            "condition":  "*",
+                                                                            "target":  "collecting_cancel_booking_identity",
+                                                                            "instruction_template":  "cancel_booking_unavailable"
+                                                                        }
+                                                                    ],
+                                                        "instruction_template":  "existing_booking_cancelled"
+                                                    },
+                                                    {
                                                         "intent":  "unknown",
                                                         "target":  "idle",
                                                         "actions":  [
@@ -105,6 +135,59 @@
                                                     }
                                                 ]
                             },
+                   "collecting_cancel_booking_identity":  {
+                                                            "description":  "Waiting for booking reference and owner phone before cancelling an existing booking.",
+                                                            "on_enter":  {
+                                                                             "instruction_template":  "ask_cancel_booking_identity"
+                                                                         },
+                                                            "transitions":  [
+                                                                                {
+                                                                                    "intent":  "cancel_existing_booking",
+                                                                                    "target":  "cancelled",
+                                                                                    "actions":  [
+                                                                                                    "cancel_existing_booking"
+                                                                                                ],
+                                                                                    "on_fail":  [
+                                                                                                    {
+                                                                                                        "condition":  "cancel_booking_identity_missing",
+                                                                                                        "target":  "collecting_cancel_booking_identity",
+                                                                                                        "instruction_template":  "ask_cancel_booking_identity"
+                                                                                                    },
+                                                                                                    {
+                                                                                                        "condition":  "cancel_booking_not_found",
+                                                                                                        "target":  "collecting_cancel_booking_identity",
+                                                                                                        "instruction_template":  "cancel_booking_not_found"
+                                                                                                    },
+                                                                                                    {
+                                                                                                        "condition":  "cancel_booking_already_cancelled",
+                                                                                                        "target":  "cancelled",
+                                                                                                        "instruction_template":  "cancel_booking_already_cancelled"
+                                                                                                    },
+                                                                                                    {
+                                                                                                        "condition":  "*",
+                                                                                                        "target":  "collecting_cancel_booking_identity",
+                                                                                                        "instruction_template":  "cancel_booking_unavailable"
+                                                                                                    }
+                                                                                                ],
+                                                                                    "instruction_template":  "existing_booking_cancelled"
+                                                                                },
+                                                                                {
+                                                                                    "intent":  "cancel_flow",
+                                                                                    "target":  "idle",
+                                                                                    "actions":  [
+
+                                                                                                ],
+                                                                                    "instruction_template":  "booking_cancelled"
+                                                                                },
+                                                                                {
+                                                                                    "intent":  "*",
+                                                                                    "target":  "collecting_cancel_booking_identity",
+                                                                                    "actions":  [
+                                                                                                    "ask_to_clarify"
+                                                                                                ]
+                                                                                }
+                                                                            ]
+                                                        },
                    "selecting_shop":  {
                                           "description":  "Waiting for a store selection.",
                                           "on_enter":  {

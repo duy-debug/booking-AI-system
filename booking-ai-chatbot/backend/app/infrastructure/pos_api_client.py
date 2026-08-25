@@ -16,6 +16,7 @@ from app.domain.booking_models import (
     AvailabilityWindowResult,
     AvailableTherapistRequest,
     Booking,
+    BookingNotFoundError,
     ChildReservationReference,
     Course,
     CourseSearchRequest,
@@ -302,12 +303,23 @@ class PosApiClient:
         )
         return _parse_create_booking_result(payload, request)
 
-    # Lookup booking trên POS theo UUID nội bộ khi có workflow cần tra cứu.
-    async def lookup_booking(self, booking_id: UUID) -> Booking:
-        """Fail because the public response cannot populate the domain customer phone."""
-        raise POSContractNotConfiguredError(
-            "POS booking detail omits customer phone required by the domain Booking model."
-        )
+    # Lookup booking trên POS bằng mã booking và số điện thoại để xác thực chủ booking.
+    async def lookup_booking(self, booking_reference: str, phone: str) -> Booking:
+        """Return a public booking only after the POS matches booking reference and phone."""
+        normalized_reference = booking_reference.strip()
+        normalized_phone = "".join(phone.split()).replace("-", "")
+        if not normalized_reference:
+            raise POSRequestMappingError("Booking reference must not be empty.")
+        if not normalized_phone:
+            raise POSRequestMappingError("Booking lookup phone must not be empty.")
+        try:
+            booking_id = UUID(normalized_reference)
+        except ValueError:
+            booking_id = await self._booking_id_from_public_code(
+                normalized_reference,
+                normalized_phone,
+            )
+        return await self._lookup_booking_by_id_and_phone(booking_id, normalized_phone)
 
     # Gửi yêu cầu đổi lịch booking lên POS khi workflow reschedule được bật.
     async def reschedule_booking(
@@ -321,12 +333,58 @@ class PosApiClient:
             "POS update response omits customer phone required by the domain Booking model."
         )
 
-    # Gửi yêu cầu hủy booking lên POS theo booking_id.
-    async def cancel_booking(self, booking_id: UUID) -> Booking:
-        """Fail because the cancel response cannot populate the complete domain booking."""
-        raise POSContractNotConfiguredError(
-            "POS cancel response omits customer phone required by the domain Booking model."
+    # Gửi yêu cầu hủy booking lên POS theo booking_id đã được lookup/xác thực trước đó.
+    async def cancel_booking(self, booking_id: UUID, phone: str | None = None) -> Booking:
+        """Cancel and return the updated public booking."""
+        payload = await self._request_json(
+            operation="cancel_booking",
+            caller="cancel_booking",
+            method="PATCH",
+            path=f"/api/bookings/{booking_id}",
+            json_body={
+                "status": "cancelled",
+                "cancel_reason": "Khách hàng yêu cầu hủy qua chatbot.",
+            },
         )
+        return _parse_public_booking(payload, phone=phone)
+
+    # Gọi endpoint lookup public yêu cầu đồng thời booking_id và phone.
+    async def _lookup_booking_by_id_and_phone(
+        self,
+        booking_id: UUID,
+        phone: str,
+    ) -> Booking:
+        payload = await self._request_json(
+            operation="lookup_booking",
+            caller="lookup_booking",
+            method="POST",
+            path="/api/bookings/lookup",
+            json_body={"booking_id": str(booking_id), "phone": phone},
+        )
+        return _parse_public_booking(payload, phone=phone)
+
+    # Resolve mã hiển thị/POS code thành UUID booking bằng filter public có phone đi kèm.
+    async def _booking_id_from_public_code(
+        self,
+        booking_reference: str,
+        phone: str,
+    ) -> UUID:
+        payload = await self._request_json(
+            operation="lookup_booking_code",
+            caller="lookup_booking",
+            method="GET",
+            path="/api/bookings",
+            params={
+                "pos_booking_code": booking_reference,
+                "phone": phone,
+                "limit": "2",
+            },
+        )
+        root = _mapping(payload, "booking list response")
+        items = _list(root, "data")
+        if len(items) != 1:
+            raise BookingNotFoundError("Booking code did not match exactly one booking.")
+        return _uuid(_mapping(items[0], "booking list item"), "booking_id")
 
     # Gọi HTTP POS, log metadata an toàn và parse JSON response hoặc raise lỗi typed.
     async def _request_json(
@@ -663,6 +721,74 @@ def _parse_create_booking_result(
         reservation_code=booking_code,
         child_reservations=tuple(item.reference for item in reservations),
     )
+
+
+# Parse response public booking từ lookup/cancel thành Booking domain object.
+def _parse_public_booking(
+    payload: object,
+    *,
+    phone: str | None,
+) -> Booking:
+    root = _mapping(payload, "public booking response")
+    data = _mapping(_required(root, "data"), "public booking data")
+    booking_id = _uuid(data, "booking_id")
+    booking_code = _optional_string(data, "booking_code")
+    shop_id = _uuid(data, "shop_id")
+    shop_name = _string(data, "shop_name")
+    booking_date = _date(data, "booking_date")
+    start_time = _time(data, "start_time")
+    _time(data, "end_time")
+    num_customer = _integer(data, "number_of_people")
+    duration_minutes = _integer(data, "total_duration_minutes")
+    status = _string(data, "status")
+    reservations = tuple(
+        _parse_reservation(item, index) for index, item in enumerate(_list(data, "reservations"))
+    )
+    if not reservations:
+        raise POSResponseMappingError("POS public booking response must contain reservations.")
+    first_courses = reservations[0].courses
+    main_courses = tuple(
+        service for service in first_courses if service.course_type is CourseType.MAIN
+    )
+    addons = tuple(service for service in first_courses if service.course_type is CourseType.ADDON)
+    if len(main_courses) != 1:
+        raise POSResponseMappingError("POS public booking response must contain one main course.")
+    return Booking(
+        booking_id=booking_id,
+        status=status,
+        shop=Shop(shop_id=shop_id, name=shop_name),
+        main_course=main_courses[0],
+        customer=Customer(phone=phone or ""),
+        booking_date=booking_date,
+        start_time=start_time,
+        num_customer=num_customer,
+        duration_minutes=duration_minutes,
+        therapist_preference=_public_therapist_preference(data),
+        addons=addons,
+        reservation_code=booking_code,
+    )
+
+
+def _public_therapist_preference(data: Mapping[str, object]) -> TherapistPreference | None:
+    request_type = _string(data, "therapist_request_type")
+    if request_type == "none":
+        return TherapistPreference(TherapistPreferenceType.NONE)
+    if request_type == "gender":
+        gender = _optional_string(data, "requested_gender")
+        if gender == "male":
+            return TherapistPreference(TherapistPreferenceType.MALE)
+        if gender == "female":
+            return TherapistPreference(TherapistPreferenceType.FEMALE)
+        return None
+    if request_type == "specific":
+        therapist_id = _optional_uuid(data, "requested_therapist_id")
+        if therapist_id is None:
+            return None
+        return TherapistPreference(
+            TherapistPreferenceType.PERSONAL,
+            therapist_id=str(therapist_id),
+        )
+    return None
 
 
 # Chặn POS response không khớp request để tránh commit nhầm booking.

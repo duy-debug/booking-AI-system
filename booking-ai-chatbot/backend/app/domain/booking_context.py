@@ -66,6 +66,7 @@ class BookingContext:
     addons: tuple[Course, ...] = ()
     available_slots: tuple[time, ...] | None = None
     booking_id: UUID | None = None
+    cancel_booking_reference: str | None = None
     phone: str | None = None
     phone_confirmed: bool = False
     member_rank: str | None = None
@@ -523,6 +524,7 @@ class BookingContext:
     def _clear_booking_result(self) -> None:
         self.clear_booking_attempt()
         self.booking_id = None
+        self.cancel_booking_reference = None
         self.booking = None
         self.reservation_code = None
         self.last_failure_code = None
@@ -557,6 +559,7 @@ class BookingContext:
         self.addons = ()
         self.available_slots = None
         self.booking_id = None
+        self.cancel_booking_reference = None
         self.phone = None
         self.phone_confirmed = False
         self.member_rank = None

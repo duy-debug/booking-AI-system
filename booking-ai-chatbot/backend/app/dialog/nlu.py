@@ -79,6 +79,7 @@ SUPPORTED_NLU_INTENTS = frozenset(
     {
         "ask_question",
         "ask_why",
+        "cancel_existing_booking",
         "cancel_flow",
         "change_info",
         "confirm",
@@ -406,6 +407,8 @@ def _validate_dispatch_payload(
         expected_keys, expected_type = frozenset({"name"}), str
     elif intent == "ask_question":
         expected_keys, expected_type = frozenset({"query"}), str
+    elif intent == "cancel_existing_booking":
+        expected_keys, expected_type = frozenset({"phone", "booking_reference"}), str
     elif intent in {
         "cancel_flow",
         "confirm",
@@ -427,6 +430,13 @@ def _validate_dispatch_payload(
         expected_keys, expected_type = frozenset({"location_query"}), str
     else:
         raise NLUResultNotDispatchableError("NLU intent has no direct dispatch payload contract.")
+
+    if intent == "cancel_existing_booking":
+        if not set(payload).issubset(expected_keys):
+            raise NLUResultNotDispatchableError("NLU payload does not match the dispatch contract.")
+        if any(type(value) is not str for value in payload.values()):
+            raise NLUResultNotDispatchableError("NLU payload value has an invalid dispatch type.")
+        return
 
     if frozenset(payload) != expected_keys:
         raise NLUResultNotDispatchableError("NLU payload does not match the dispatch contract.")
@@ -497,6 +507,7 @@ class LLMNLUEntities(BaseModel):
     booking_date: StrictStr | None = None
     start_time: StrictStr | None = None
     phone: StrictStr | None = None
+    booking_reference: StrictStr | None = None
     confirmation: StrictBool | None = None
     therapist_gender: Literal["male", "female", "none"] | None = None
     change_target: BookingChangeTarget | None = None
@@ -853,8 +864,9 @@ def _build_llm_messages(
         f"Múi giờ: {business_timezone}. Ngôn ngữ: vi-VN. "
         "Hiểu hôm nay theo ngày nghiệp vụ hiện tại, ngày mai là +1 ngày, và "
         "ngày kia là +2 ngày. Trả về booking_date theo định dạng YYYY-MM-DD. "
-        "Hãy trích xuất mọi entity được nói rõ, kể cả entity phụ. Các entity key được phép là: "
-        "number_of_people, duration_minutes, booking_date, start_time, phone, confirmation, "
+        "Trích xuất entity được nói rõ. Entity key được phép: "
+        "number_of_people, duration_minutes, booking_date, start_time, phone, "
+        "booking_reference, confirmation, "
         "therapist_gender, therapist_name, customer_name, change_target, query, shop_name, "
         "service_name, main_course_name, addon_name, skip_addon. main_course_name là "
         "liệu trình chính; addon_name là tùy chọn; service_name nghĩa là chưa rõ loại. Chỉ đặt "
@@ -863,17 +875,17 @@ def _build_llm_messages(
         "FAQ: entity_query=query=câu hỏi. "
         "chỉ cho discovery. search_shops lưu vị trí trong query. Việc chọn "
         "shop/course/therapist phải dùng entity_kind và entity_query; tuyệt đối không tự tạo ID. "
-        "Khi người dùng thể hiện một giờ bắt đầu đặt lịch cụ thể, hãy phân loại ý định ngữ nghĩa "
-        "là select_time và trích xuất start_time. Hãy hiểu đúng các cách nói giờ tự nhiên, "
-        "mang tính hội thoại, viết tắt hoặc phụ thuộc ngữ cảnh. Chỉ chuẩn hóa sau khi đã hiểu "
-        "đúng nghĩa, và không được tự bịa thông tin giờ còn thiếu. Với change_info, hãy suy ra "
+        "Khi người dùng nói giờ bắt đầu cụ thể, dùng select_time và trích xuất start_time. "
+        "Hiểu giờ tự nhiên/viết tắt theo ngữ cảnh, không bịa giờ còn thiếu. "
+        "Với change_info, suy ra "
         "change_target từ khái niệm ngữ nghĩa mà người dùng muốn sửa, chỉ dùng các giá trị: "
         "shop, date, people, duration, service, time, therapist, phone. Nếu người dùng muốn "
         "chỉnh sửa booking draft hiện tại nhưng chưa nêu rõ trường nào, hãy dùng "
         "intent=change_info với change_target là null. Không được đoán target. change_info có "
         "nghĩa là chỉnh sửa booking draft hiện tại ở các draft state mà flow cho phép. "
-        "Các yêu cầu sửa, dời lịch hoặc hủy một booking đã được tạo trước đó là intent khác và "
-        "không được gộp vào change_info. Ví dụ: "
+        "Sửa/dời/hủy booking đã tạo không được gộp vào change_info. "
+        "Muốn hủy booking đã tạo: intent=cancel_existing_booking, trích xuất phone và "
+        "booking_reference nếu có. Ví dụ: "
         '{"intent":"select_people","confidence":0.9,'
         '"entities":{"number_of_people":2},"entity_kind":null,'
         '"entity_query":null}.'
@@ -929,6 +941,7 @@ _INTENT_TOOL: dict[str, object] = {
                                         ),
                                     },
                                     "phone": {"type": ["string", "null"]},
+                                    "booking_reference": {"type": ["string", "null"]},
                                     "confirmation": {"type": ["boolean", "null"]},
                                     "therapist_gender": {"type": ["string", "null"]},
                                     "therapist_name": {"type": ["string", "null"]},
@@ -1068,6 +1081,15 @@ def _llm_direct_payload(
         return _llm_time_payload(entities.start_time)
     if intent == "provide_phone" and entities.phone is not None:
         return {"phone": entities.phone}
+    if intent == "cancel_existing_booking":
+        payload: dict[str, object] = {}
+        if entities.phone is not None:
+            payload["phone"] = entities.phone
+        if entities.booking_reference is not None:
+            reference = entities.booking_reference.strip()
+            if reference:
+                payload["booking_reference"] = reference
+        return payload
     if intent == "provide_name" and entities.customer_name is not None:
         name = entities.customer_name.strip()
         return {"name": name} if name else None
@@ -1166,6 +1188,7 @@ def _typed_llm_entity(key: str, value: object) -> object | None:
         "customer_name",
         "query",
         "phone",
+        "booking_reference",
     }:
         return value.strip() if isinstance(value, str) and value.strip() else None
     if key in {"number_of_people", "duration_minutes"}:

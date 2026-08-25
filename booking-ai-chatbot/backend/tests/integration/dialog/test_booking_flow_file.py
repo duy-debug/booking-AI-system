@@ -20,7 +20,7 @@ from app.dialog.flow_loader import (
 )
 from app.dialog.state_machine import StateMachine
 from app.domain.booking_context import BookingContext
-from app.domain.booking_models import Booking
+from app.domain.booking_models import Booking, BookingGateway
 from app.domain.booking_state import BookingState
 
 FLOW_PATH = Path(__file__).resolve().parents[3] / "app" / "dialog" / "booking_flow.json"
@@ -113,7 +113,7 @@ def test_flow_loads_all_booking_states(flow: FlowDefinition) -> None:
     assert flow.name == "booking-flow"
     assert flow.initial_state is BookingState.IDLE
     assert set(flow.states) == set(BookingState) - {BookingState.VERIFYING_PHONE}
-    assert len(flow.states) == 15
+    assert len(flow.states) == 16
     assert "selecting_options" not in {state.value for state in flow.states}
 
 
@@ -567,17 +567,19 @@ def test_action_registry_audits_declared_actions_without_reading_json(
         check_availability_handler=cast(CheckAvailabilityHandler, object()),
         check_customer_handler=cast(CheckCustomerHandler, object()),
         create_booking_handler=cast(CreateBookingHandler, object()),
+        booking_gateway=cast(BookingGateway, object()),
     )
     declared_actions = _all_declared_actions(flow)
     unregistered = bridge.find_unregistered_actions(declared_actions)
 
-    assert len(set(declared_actions)) == 26
+    assert len(set(declared_actions)) == 27
     assert {
         "search_shop",
         "load_time_slots",
         "reload_time_slots",
         "handle_phone_collection",
         "create_booking",
+        "cancel_existing_booking",
     }.isdisjoint(unregistered)
     assert "run_final_check" not in declared_actions
     assert "complete_booking" not in declared_actions
@@ -591,6 +593,7 @@ def test_happy_path_actions_are_bound_with_explicit_non_runtime_allowlists(
         check_availability_handler=cast(CheckAvailabilityHandler, object()),
         check_customer_handler=cast(CheckCustomerHandler, object()),
         create_booking_handler=cast(CreateBookingHandler, object()),
+        booking_gateway=cast(BookingGateway, object()),
     )
     happy_path_steps = (
         (BookingState.IDLE, "start_booking"),
@@ -682,6 +685,9 @@ def test_declared_failure_codes_are_audited_against_mapper(
         "slot_api_error",
         "slot_unavailable",
         "course_duration_mismatch",
+        "cancel_booking_identity_missing",
+        "cancel_booking_not_found",
+        "cancel_booking_already_cancelled",
     }.issubset(declared)
     assert {
         "invalid_phone",
@@ -690,6 +696,10 @@ def test_declared_failure_codes_are_audited_against_mapper(
         "booking_api_error",
         "slot_api_error",
         "course_duration_mismatch",
+        "cancel_booking_identity_missing",
+        "cancel_booking_not_found",
+        "cancel_booking_already_cancelled",
+        "cancel_booking_unavailable",
     }.issubset(mapped)
     assert "course_not_found" in declared - mapped
     assert "booking_conflict" in mapped & declared

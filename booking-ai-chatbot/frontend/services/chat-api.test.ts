@@ -89,6 +89,20 @@ describe("streamChat", () => {
     })).resolves.toEqual(chatResponse);
   });
 
+  it("accepts the existing-booking cancellation identity state", async () => {
+    const response: ChatResponse = {
+      ...chatResponse,
+      state: "collecting_cancel_booking_identity",
+      text: "Để hủy booking đã đặt, anh/chị vui lòng cung cấp mã booking và số điện thoại.",
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(streamResponse([successSse(response)]));
+
+    await expect(streamChat({
+      conversation_id: "conversation-1",
+      message: "tôi muốn hủy booking",
+    })).resolves.toEqual(response);
+  });
+
   it("supports multiline data and ignores unknown events", async () => {
     const pretty = JSON.stringify(chatResponse, null, 2)
       .split("\n")

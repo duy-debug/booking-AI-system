@@ -1014,6 +1014,30 @@ async def test_create_timeout_and_malformed_success_do_not_retry() -> None:
 
 
 @pytest.mark.asyncio
+async def test_lookup_booking_uses_public_identity_contract() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=_create_payload())
+
+    gateway_client, gateway = _gateway(handler)
+    try:
+        booking = await gateway.lookup_booking(str(BOOKING_ID), "0901234567")
+    finally:
+        await gateway_client.aclose()
+
+    assert booking.booking_id == BOOKING_ID
+    assert booking.customer.phone == "0901234567"
+    assert requests[0].method == "POST"
+    assert requests[0].url.path == "/api/bookings/lookup"
+    assert json.loads(requests[0].content) == {
+        "booking_id": str(BOOKING_ID),
+        "phone": "0901234567",
+    }
+
+
+@pytest.mark.asyncio
 async def test_blocked_operations_never_call_unverified_endpoints() -> None:
     requests: list[httpx.Request] = []
 
@@ -1023,14 +1047,8 @@ async def test_blocked_operations_never_call_unverified_endpoints() -> None:
 
     gateway_client, gateway = _gateway(handler)
     try:
-        calls: list[Callable[[], Any]] = [
-            lambda: gateway.lookup_booking(BOOKING_ID),
-            lambda: gateway.reschedule_booking(BOOKING_ID, BOOKING_DATE, time(14, 0)),
-            lambda: gateway.cancel_booking(BOOKING_ID),
-        ]
-        for call in calls:
-            with pytest.raises(POSContractNotConfiguredError):
-                await call()
+        with pytest.raises(POSContractNotConfiguredError):
+            await gateway.reschedule_booking(BOOKING_ID, BOOKING_DATE, time(14, 0))
     finally:
         await gateway_client.aclose()
 
