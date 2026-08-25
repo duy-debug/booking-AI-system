@@ -44,6 +44,8 @@ def booking_to_public_response(booking: Booking) -> PublicBookingResponse:
         "shop_id": booking.shop_id,
         "shop_name": booking.shop.name,
         "customer_id": booking.customer_id,
+        "customer_phone": booking.customer.phone if booking.customer else None,
+        "customer_name": booking.customer.name if booking.customer else None,
         "booking_date": booking.booking_date,
         "start_time": booking.start_time,
         "end_time": booking.end_time,

@@ -26,6 +26,7 @@ from app.domain.booking_state import BookingState
 FLOW_PATH = Path(__file__).resolve().parents[3] / "app" / "dialog" / "booking_flow.json"
 CHANGE_HANDLERS_PATH = FLOW_PATH
 CONVERSATIONAL_STATES = (
+    BookingState.AWAITING_CANCEL_CONFIRMATION,
     BookingState.SELECTING_SHOP,
     BookingState.SELECTING_DATE,
     BookingState.SELECTING_PEOPLE,
@@ -113,7 +114,7 @@ def test_flow_loads_all_booking_states(flow: FlowDefinition) -> None:
     assert flow.name == "booking-flow"
     assert flow.initial_state is BookingState.IDLE
     assert set(flow.states) == set(BookingState) - {BookingState.VERIFYING_PHONE}
-    assert len(flow.states) == 16
+    assert len(flow.states) == 17
     assert "selecting_options" not in {state.value for state in flow.states}
 
 
@@ -181,6 +182,28 @@ def test_complete_happy_path(
     target: BookingState,
 ) -> None:
     assert _transition(flow, state, intent).target is target
+
+
+def test_cancel_booking_identity_lookup_requires_confirmation_before_cancel(
+    flow: FlowDefinition,
+) -> None:
+    transition = _transition(flow, BookingState.IDLE, "cancel_existing_booking")
+
+    assert transition.target is BookingState.AWAITING_CANCEL_CONFIRMATION
+    assert transition.actions == ("lookup_existing_booking_for_cancel",)
+
+
+def test_cancel_booking_confirmation_is_the_only_cancel_side_effect(
+    flow: FlowDefinition,
+) -> None:
+    transition = _transition(
+        flow,
+        BookingState.AWAITING_CANCEL_CONFIRMATION,
+        "confirm",
+    )
+
+    assert transition.target is BookingState.CANCELLED
+    assert transition.actions == ("cancel_existing_booking",)
 
 
 @pytest.mark.parametrize("num_customer", [2, 3])
@@ -572,13 +595,14 @@ def test_action_registry_audits_declared_actions_without_reading_json(
     declared_actions = _all_declared_actions(flow)
     unregistered = bridge.find_unregistered_actions(declared_actions)
 
-    assert len(set(declared_actions)) == 27
+    assert len(set(declared_actions)) == 28
     assert {
         "search_shop",
         "load_time_slots",
         "reload_time_slots",
         "handle_phone_collection",
         "create_booking",
+        "lookup_existing_booking_for_cancel",
         "cancel_existing_booking",
     }.isdisjoint(unregistered)
     assert "run_final_check" not in declared_actions

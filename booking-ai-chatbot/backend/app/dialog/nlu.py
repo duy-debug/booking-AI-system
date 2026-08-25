@@ -553,6 +553,11 @@ _LLM_ENTITY_INTENTS = {
     NLUEntityKind.COURSE: "select_course",
     NLUEntityKind.THERAPIST: "select_therapist",
 }
+_LLM_DIRECT_PAYLOAD_INTENTS_WITHOUT_RESOLVER = frozenset(
+    {
+        "cancel_existing_booking",
+    }
+)
 _LLM_NO_PAYLOAD_INTENTS = frozenset(
     {
         "cancel_flow",
@@ -1323,22 +1328,32 @@ def _normalize_llm_output_payload(payload: Mapping[str, object]) -> dict[str, ob
                 entities["query"] = question_query
 
         # ------------------------------------------------
-        # Đồng bộ entity resolver cho start_booking
+        # Đồng bộ entity resolver bị nhiễu từ LLM
         # ------------------------------------------------
         #
-        # LLM đôi khi hiểu đúng intent start_booking và ngày đặt lịch,
-        # nhưng lại gắn nhầm:
+        # Một số intent không dùng entity resolver. Ví dụ:
+        #
+        # - start_booking đi theo flow đặt lịch, không search shop
+        #   nếu LLM chưa có entity_query rõ ràng.
+        #
+        # - cancel_existing_booking dùng direct payload
+        #   phone/booking_reference, không resolve shop/course/therapist.
+        #
+        # Vì vậy nếu LLM hiểu đúng intent nhưng gắn nhầm:
         #
         # entity_kind: "shop"
         # entity_query: None
         #
-        # entity_kind chỉ hợp lệ khi có entity_query để resolver search.
-        # Nếu không có query, đây là nhiễu từ LLM và không nên làm rớt
-        # intent start_booking xuống unresolved.
+        # thì đây là field resolver rỗng, không phải căn cứ để reject
+        # intent đã được LLM chọn. Đoạn này chỉ bỏ nhiễu contract,
+        # không tự suy đoán intent từ raw user text.
         # ------------------------------------------------
 
         if (
-            canonical_intent == "start_booking"
+            (
+                canonical_intent == "start_booking"
+                or canonical_intent in _LLM_DIRECT_PAYLOAD_INTENTS_WITHOUT_RESOLVER
+            )
             and normalized.get("entity_kind") is not None
             and _non_empty_text(normalized.get("entity_query")) is None
         ):

@@ -103,6 +103,20 @@ describe("streamChat", () => {
     })).resolves.toEqual(response);
   });
 
+  it("accepts the existing-booking cancellation confirmation state", async () => {
+    const response: ChatResponse = {
+      ...chatResponse,
+      state: "awaiting_cancel_confirmation",
+      text: "Anh/chá»‹ cÃ³ cháº¯c cháº¯n muá»‘n há»§y booking nÃ y khÃ´ng?",
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(streamResponse([successSse(response)]));
+
+    await expect(streamChat({
+      conversation_id: "conversation-1",
+      message: "0901234567 vÃ  BK-1",
+    })).resolves.toEqual(response);
+  });
+
   it("supports multiline data and ignores unknown events", async () => {
     const pretty = JSON.stringify(chatResponse, null, 2)
       .split("\n")

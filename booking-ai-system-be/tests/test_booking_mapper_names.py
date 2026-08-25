@@ -32,6 +32,7 @@ def test_public_booking_mapper_includes_shop_and_therapist_names() -> None:
         shop_id=uuid4(),
         shop=SimpleNamespace(name="Komorebi Quận 1"),
         customer_id=uuid4(),
+        customer=SimpleNamespace(phone="0901234567", name="Nguyen An"),
         booking_date=date(2026, 7, 20),
         start_time=time(10, 0),
         end_time=time(11, 0),
@@ -52,4 +53,6 @@ def test_public_booking_mapper_includes_shop_and_therapist_names() -> None:
 
     assert result.shop_name == "Komorebi Quận 1"
     assert result.booking_code == "KMB-20260720-ABCDEFGH"
+    assert result.customer_phone == "0901234567"
+    assert result.customer_name == "Nguyen An"
     assert result.reservations[0].therapist_name == "Nguyễn Ngọc Anh"

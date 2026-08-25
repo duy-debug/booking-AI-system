@@ -94,7 +94,7 @@ def test_real_flow_template_audit_has_no_missing_or_unused_renderer() -> None:
         + ("change_invalid",)
     )
 
-    assert len(declared) == 41
+    assert len(declared) == 46
     assert builder.find_missing_templates(declared) == ()
     assert set(builder.registered_templates()) - set(declared) == set()
 
@@ -147,6 +147,92 @@ def test_real_group_completed_template_without_code_hides_internal_ids() -> None
     assert str(CHILD_ID) not in response.text
     assert str(second_child_id) not in response.text
     assert str(CHILD_ID) not in repr(response.metadata)
+
+
+def test_cancel_confirmation_uses_booking_id_without_rendering_pos_code() -> None:
+    context = complete_context(BookingState.AWAITING_CANCEL_CONFIRMATION)
+    context.booking = Booking(
+        booking_id=BOOKING_ID,
+        status="confirmed",
+        shop=SHOP,
+        main_course=COURSE,
+        customer=CUSTOMER,
+        booking_date=date(2026, 8, 2),
+        start_time=time(10, 30),
+        reservation_code="BK-260825-1854",
+    )
+    context.booking_id = BOOKING_ID
+    context.reservation_code = "BK-260825-1854"
+
+    response = InstructionBuilder().build_response(
+        result=result(
+            "cancel_existing_booking_confirmation",
+            BookingState.AWAITING_CANCEL_CONFIRMATION,
+        ),
+        context=context,
+    )
+
+    assert f"Mã booking: {BOOKING_ID}" in response.text
+    assert "BK-260825-1854" not in response.text
+    assert "Mã POS" not in response.text
+    assert "Mã đặt lịch: BK-260825-1854" not in response.text
+
+
+def test_cancel_confirmation_nlg_prompt_does_not_expose_pos_code() -> None:
+    context = complete_context(BookingState.AWAITING_CANCEL_CONFIRMATION)
+    context.booking = Booking(
+        booking_id=BOOKING_ID,
+        status="confirmed",
+        shop=SHOP,
+        main_course=COURSE,
+        customer=CUSTOMER,
+        booking_date=date(2026, 8, 2),
+        start_time=time(10, 30),
+        reservation_code="BK-260825-1854",
+    )
+    context.booking_id = BOOKING_ID
+    context.reservation_code = "BK-260825-1854"
+    builder = InstructionBuilder()
+    response = builder.build_response(
+        result=result(
+            "cancel_existing_booking_confirmation",
+            BookingState.AWAITING_CANCEL_CONFIRMATION,
+        ),
+        context=context,
+    )
+
+    prompt = builder.build_nlg_prompt(response=response, context=context)
+
+    assert f"Mã booking: {BOOKING_ID}" in prompt
+    assert "BK-260825-1854" not in prompt
+    assert "Mã POS" not in prompt
+    assert "Mã đặt lịch: BK-260825-1854" not in prompt
+
+
+def test_existing_booking_cancelled_uses_booking_id_without_rendering_pos_code() -> None:
+    context = complete_context(BookingState.CANCELLED)
+    context.booking = Booking(
+        booking_id=BOOKING_ID,
+        status="cancelled",
+        shop=SHOP,
+        main_course=COURSE,
+        customer=CUSTOMER,
+        booking_date=date(2026, 8, 2),
+        start_time=time(10, 30),
+        reservation_code="BK-260825-1854",
+    )
+    context.booking_id = BOOKING_ID
+    context.reservation_code = "BK-260825-1854"
+
+    response = InstructionBuilder().build_response(
+        result=result("booking_cancelled", BookingState.CANCELLED),
+        context=context,
+    )
+
+    assert f"Mã booking: {BOOKING_ID}" in response.text
+    assert "BK-260825-1854" not in response.text
+    assert "Mã POS" not in response.text
+    assert "Mã đặt lịch: BK-260825-1854" not in response.text
 
 
 def test_slot_failure_instruction_uses_safe_renderer() -> None:

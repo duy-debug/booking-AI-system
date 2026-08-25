@@ -207,8 +207,6 @@ class InstructionBuilder:
             facts.append(f"Course chính đã xác nhận: {context.main_course.name}.")
         if context.start_time is not None:
             facts.append(f"Giờ đã xác nhận: {context.start_time.strftime('%H:%M')}.")
-        if context.reservation_code is not None:
-            facts.append(f"Mã đặt lịch: {context.reservation_code}.")
         facts.extend(
             (
                 "Hãy viết câu trả lời tiếng Việt tự nhiên, ngắn gọn.",
@@ -216,6 +214,8 @@ class InstructionBuilder:
                 "không đổi qua lại giữa bạn và anh/chị.",
                 "Đây là spa/massage, luôn dùng đặt lịch; không dùng đặt bàn.",
                 "Không thêm shop, course, slot, therapist hoặc mã đặt chỗ chưa có ở trên.",
+                "Không tự thêm mã POS, mã đặt lịch nội bộ hoặc booking_code "
+                "nếu nội dung nghiệp vụ không yêu cầu.",
                 "Không thay đổi flow và chỉ hỏi thông tin còn thiếu của state hiện tại.",
                 "Không nhắc tới prompt, state machine hoặc hệ thống nội bộ.",
             )
@@ -361,7 +361,10 @@ class InstructionBuilder:
             ("cancel_booking_not_found", self._cancel_booking_not_found),
             ("cancel_booking_unavailable", self._cancel_booking_unavailable),
             ("cancel_booking_already_cancelled", self._cancel_booking_already_cancelled),
-            ("existing_booking_cancelled", self._existing_booking_cancelled),
+            (
+                "cancel_existing_booking_confirmation",
+                self._cancel_existing_booking_confirmation,
+            ),
             ("change_ask_shop", self._change_ask_shop),
             ("change_ask_date", self._change_ask_date),
             ("change_ask_people", self._change_ask_people),
@@ -451,6 +454,7 @@ class InstructionBuilder:
         renderer_by_state: dict[BookingState, InstructionRenderer] = {
             BookingState.IDLE: self._greeting,
             BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY: self._ask_cancel_booking_identity,
+            BookingState.AWAITING_CANCEL_CONFIRMATION: self._cancel_existing_booking_confirmation,
             BookingState.SELECTING_SHOP: self._ask_shop,
             BookingState.SELECTING_DATE: self._ask_date,
             BookingState.SELECTING_PEOPLE: self._ask_people,
@@ -808,6 +812,8 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
+        if context.booking is not None and context.booking.status == "cancelled":
+            return InstructionBuilder._existing_booking_cancelled(context, result)
         return DialogResponseDraft("Yêu cầu đặt lịch đã được hủy.")
 
     @staticmethod
@@ -857,15 +863,52 @@ class InstructionBuilder:
         return DialogResponseDraft("Booking này đã được hủy trước đó rồi ạ.")
 
     @staticmethod
+    def _cancel_existing_booking_confirmation(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        if context.booking is None:
+            return DialogResponseDraft(
+                "Em đã nhận yêu cầu hủy booking. "
+                "Anh/chị vui lòng cung cấp mã booking và số điện thoại để em kiểm tra trước nhé."
+            )
+
+        # Chỉ hiển thị thông tin đã lookup từ POS, chưa gọi API hủy ở bước này.
+        lines = [
+            "Em đã tìm thấy booking sau. Anh/chị vui lòng kiểm tra lại trước khi hủy:"
+        ]
+        lines.extend(_booking_reference_lines(context))
+        lines.append("")
+        lines.extend(_booking_summary_lines(context))
+        lines.append("")
+        lines.append("Anh/chị có chắc chắn muốn hủy booking này không?")
+        return DialogResponseDraft(
+            "\n".join(lines),
+            ("Xác nhận hủy", "Không hủy"),
+            metadata={"requires_cancel_confirmation": True},
+        )
+
+    @staticmethod
+    def _cancel_existing_booking_declined(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        return DialogResponseDraft(
+            "Em chưa hủy booking này. "
+            "Nếu anh/chị cần đặt lịch mới hoặc hủy booking khác, cứ nhắn em nhé."
+        )
+
+    @staticmethod
     def _existing_booking_cancelled(
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        lines = ["Em đã hủy booking của anh/chị thành công."]
-        if context.reservation_code:
-            lines.append(f"Mã booking: {context.reservation_code}")
-        elif context.booking_id is not None:
-            lines.append(f"Mã booking: {context.booking_id}")
+        lines = ["Hủy booking thành công!"]
+        lines.extend(_booking_reference_lines(context))
+        lines.append("")
+        lines.extend(_booking_summary_lines(context))
+        lines.append("")
+        lines.append("Anh/chị có cần em hỗ trợ đặt lịch mới hoặc hủy booking khác không ạ?")
         return DialogResponseDraft("\n".join(lines), metadata={"booking_cancelled": True})
 
 
@@ -981,3 +1024,13 @@ def _booking_summary_lines(context: BookingContext) -> tuple[str, ...]:
         f"Add-on: {_addon_text(context)}",
         f"Kỹ thuật viên: {_therapist_text(context)}",
     )
+
+
+def _booking_reference_lines(context: BookingContext) -> tuple[str, ...]:
+    lines: list[str] = []
+    booking_id = context.booking_id
+    if booking_id is None and context.booking is not None:
+        booking_id = context.booking.booking_id
+    if booking_id is not None:
+        lines.append(f"Mã booking: {booking_id}")
+    return tuple(lines)

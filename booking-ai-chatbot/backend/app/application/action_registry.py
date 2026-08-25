@@ -452,7 +452,10 @@ class ActionRegistry:
             | POSTemporaryError
             | POSTimeoutError,
         ):
-            if action_name == "cancel_existing_booking":
+            if action_name in {
+                "lookup_existing_booking_for_cancel",
+                "cancel_existing_booking",
+            }:
                 return "cancel_booking_unavailable"
         if isinstance(error, InvalidActionSequenceError):
             return "action_sequence_invalid"
@@ -720,6 +723,10 @@ class ActionRegistry:
         if self._create_booking_handler is not None:
             self.register_action("create_booking", self._create_booking)
         if self._booking_gateway is not None:
+            self.register_action(
+                "lookup_existing_booking_for_cancel",
+                self._lookup_existing_booking_for_cancel,
+            )
             self.register_action("cancel_existing_booking", self._cancel_existing_booking)
 
     # Gọi handler tìm danh sách shop và lưu catalog gợi ý vào BookingContext.
@@ -1177,7 +1184,7 @@ class ActionRegistry:
         return ActionResult("create_booking", result.data["create_result"])
 
     # Hủy booking đã tạo trước đó sau khi đối chiếu đủ mã booking và số điện thoại chủ booking.
-    async def _cancel_existing_booking(
+    async def _lookup_existing_booking_for_cancel(
         self,
         context: ActionExecutionContext,
     ) -> ActionResult:
@@ -1197,7 +1204,7 @@ class ActionRegistry:
         phone = booking_context.phone
         if reference is None or phone is None:
             raise ExistingBookingIdentityMissingError(
-                "cancel_existing_booking requires booking_reference and phone."
+                "lookup_existing_booking_for_cancel requires booking_reference and phone."
             )
 
         booking = await self._booking_gateway.lookup_booking(reference, phone)
@@ -1205,6 +1212,26 @@ class ActionRegistry:
             booking_context.booking = booking
             booking_context.booking_id = booking.booking_id
             booking_context.reservation_code = booking.reservation_code
+            raise ExistingBookingAlreadyCancelledError("Existing booking is already cancelled.")
+
+        _store_existing_booking(booking_context, booking, phone)
+        return ActionResult("lookup_existing_booking_for_cancel", booking)
+
+    # Chỉ hủy booking thật sau khi khách đã xác nhận thông tin booking cần hủy.
+    async def _cancel_existing_booking(
+        self,
+        context: ActionExecutionContext,
+    ) -> ActionResult:
+        assert self._booking_gateway is not None
+
+        booking_context = context.booking_context
+        booking = booking_context.booking
+        phone = booking_context.phone
+        if booking is None or phone is None:
+            raise ExistingBookingIdentityMissingError(
+                "cancel_existing_booking requires a looked-up booking and phone."
+            )
+        if booking.status == "cancelled":
             raise ExistingBookingAlreadyCancelledError("Existing booking is already cancelled.")
 
         cancelled = await self._booking_gateway.cancel_booking(booking.booking_id, phone)

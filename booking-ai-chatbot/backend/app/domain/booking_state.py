@@ -9,7 +9,10 @@ class BookingState(StrEnum):
     IDLE = "idle"  # Chưa có draft booking đang xử lý hoặc vừa reset conversation.
     COLLECTING_CANCEL_BOOKING_IDENTITY = (
         "collecting_cancel_booking_identity"
-    )  # Đang chờ mã booking và số điện thoại để hủy booking đã đặt.
+    )  # Đang chờ mã booking và số điện thoại để tra cứu lịch cần hủy.
+    AWAITING_CANCEL_CONFIRMATION = (
+        "awaiting_cancel_confirmation"
+    )  # Đã tìm thấy booking và đang chờ khách xác nhận hủy.
     SELECTING_SHOP = "selecting_shop"  # Đang chờ người dùng chọn cửa hàng.
     SELECTING_DATE = "selecting_date"  # Đang chờ chọn ngày đặt lịch.
     SELECTING_PEOPLE = "selecting_people"  # Đang chờ số người.

@@ -90,9 +90,9 @@
                                                     },
                                                     {
                                                         "intent":  "cancel_existing_booking",
-                                                        "target":  "cancelled",
+                                                        "target":  "awaiting_cancel_confirmation",
                                                         "actions":  [
-                                                                        "cancel_existing_booking"
+                                                                        "lookup_existing_booking_for_cancel"
                                                                     ],
                                                         "on_fail":  [
                                                                         {
@@ -107,7 +107,7 @@
                                                                         },
                                                                         {
                                                                             "condition":  "cancel_booking_already_cancelled",
-                                                                            "target":  "cancelled",
+                                                                            "target":  "idle",
                                                                             "instruction_template":  "cancel_booking_already_cancelled"
                                                                         },
                                                                         {
@@ -116,7 +116,7 @@
                                                                             "instruction_template":  "cancel_booking_unavailable"
                                                                         }
                                                                     ],
-                                                        "instruction_template":  "existing_booking_cancelled"
+                                                        "instruction_template":  "cancel_existing_booking_confirmation"
                                                     },
                                                     {
                                                         "intent":  "unknown",
@@ -143,9 +143,9 @@
                                                             "transitions":  [
                                                                                 {
                                                                                     "intent":  "cancel_existing_booking",
-                                                                                    "target":  "cancelled",
+                                                                                    "target":  "awaiting_cancel_confirmation",
                                                                                     "actions":  [
-                                                                                                    "cancel_existing_booking"
+                                                                                                    "lookup_existing_booking_for_cancel"
                                                                                                 ],
                                                                                     "on_fail":  [
                                                                                                     {
@@ -160,7 +160,7 @@
                                                                                                     },
                                                                                                     {
                                                                                                         "condition":  "cancel_booking_already_cancelled",
-                                                                                                        "target":  "cancelled",
+                                                                                                        "target":  "idle",
                                                                                                         "instruction_template":  "cancel_booking_already_cancelled"
                                                                                                     },
                                                                                                     {
@@ -169,7 +169,7 @@
                                                                                                         "instruction_template":  "cancel_booking_unavailable"
                                                                                                     }
                                                                                                 ],
-                                                                                    "instruction_template":  "existing_booking_cancelled"
+                                                                                    "instruction_template":  "cancel_existing_booking_confirmation"
                                                                                 },
                                                                                 {
                                                                                     "intent":  "cancel_flow",
@@ -188,6 +188,72 @@
                                                                                 }
                                                                             ]
                                                         },
+                   "awaiting_cancel_confirmation":  {
+                                                       "description":  "Waiting for customer confirmation before cancelling an existing booking.",
+                                                       "on_enter":  {
+                                                                        "instruction_template":  "cancel_existing_booking_confirmation"
+                                                                    },
+                                                       "transitions":  [
+                                                                           {
+                                                                               "intent":  "confirm",
+                                                                               "target":  "cancelled",
+                                                                               "actions":  [
+                                                                                               "cancel_existing_booking"
+                                                                                           ],
+                                                                               "on_fail":  [
+                                                                                               {
+                                                                                                   "condition":  "cancel_booking_not_found",
+                                                                                                   "target":  "collecting_cancel_booking_identity",
+                                                                                                   "instruction_template":  "cancel_booking_not_found"
+                                                                                               },
+                                                                                               {
+                                                                                                   "condition":  "cancel_booking_already_cancelled",
+                                                                                                   "target":  "idle",
+                                                                                                   "instruction_template":  "cancel_booking_already_cancelled"
+                                                                                               },
+                                                                                               {
+                                                                                                   "condition":  "*",
+                                                                                                   "target":  "awaiting_cancel_confirmation",
+                                                                                                   "instruction_template":  "cancel_booking_unavailable"
+                                                                                               }
+                                                                                           ],
+                                                                               "instruction_template":  "existing_booking_cancelled"
+                                                                           },
+                                                                           {
+                                                                               "intent":  "deny",
+                                                                               "target":  "idle",
+                                                                               "actions":  [
+
+                                                                                           ],
+                                                                               "instruction_template":  "cancel_existing_booking_declined"
+                                                                           },
+                                                                           {
+                                                                               "intent":  "cancel_flow",
+                                                                               "target":  "idle",
+                                                                               "actions":  [
+
+                                                                                           ],
+                                                                               "instruction_template":  "cancel_existing_booking_declined"
+                                                                           },
+                                                                           {
+                                                                               "intent":  "unknown",
+                                                                               "target":  "awaiting_cancel_confirmation",
+                                                                               "actions":  [
+                                                                                               "ask_to_clarify"
+                                                                                           ],
+                                                                               "instruction_template":  "cancel_existing_booking_confirmation"
+                                                                           },
+                                                                           {
+                                                                               "intent":  "*",
+                                                                               "target":  "awaiting_cancel_confirmation",
+                                                                               "actions":  [
+                                                                                               "log_unhandled",
+                                                                                               "ask_to_clarify"
+                                                                                           ],
+                                                                               "instruction_template":  "cancel_existing_booking_confirmation"
+                                                                           }
+                                                                       ]
+                                                   },
                    "selecting_shop":  {
                                           "description":  "Waiting for a store selection.",
                                           "on_enter":  {

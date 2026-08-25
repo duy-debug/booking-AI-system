@@ -164,6 +164,8 @@ class PublicBookingResponse(BaseModel):
     shop_id: UUID
     shop_name: str
     customer_id: UUID
+    customer_phone: str | None = None
+    customer_name: str | None = None
     booking_date: date
     start_time: time
     end_time: time

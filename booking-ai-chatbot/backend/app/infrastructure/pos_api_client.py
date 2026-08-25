@@ -735,6 +735,16 @@ def _parse_public_booking(
     booking_code = _optional_string(data, "booking_code")
     shop_id = _uuid(data, "shop_id")
     shop_name = _string(data, "shop_name")
+    customer_phone = (
+        _optional_string(data, "customer_phone")
+        if "customer_phone" in data
+        else phone
+    )
+    customer_name = (
+        _optional_string(data, "customer_name")
+        if "customer_name" in data
+        else None
+    )
     booking_date = _date(data, "booking_date")
     start_time = _time(data, "start_time")
     _time(data, "end_time")
@@ -758,7 +768,7 @@ def _parse_public_booking(
         status=status,
         shop=Shop(shop_id=shop_id, name=shop_name),
         main_course=main_courses[0],
-        customer=Customer(phone=phone or ""),
+        customer=Customer(phone=customer_phone or phone or "", name=customer_name),
         booking_date=booking_date,
         start_time=start_time,
         num_customer=num_customer,

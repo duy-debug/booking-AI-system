@@ -49,7 +49,13 @@ class FakeLLMGateway:
 
 def policy() -> StateIntentPolicy:
     allowed = {
-        BookingState.IDLE: frozenset({"start_booking", "unknown"}),
+        BookingState.IDLE: frozenset({"start_booking", "cancel_existing_booking", "unknown"}),
+        BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY: frozenset(
+            {"cancel_existing_booking", "unknown"}
+        ),
+        BookingState.AWAITING_CANCEL_CONFIRMATION: frozenset(
+            {"confirm", "deny", "cancel_flow", "unknown"}
+        ),
         BookingState.SELECTING_SHOP: frozenset({"select_store", "unknown"}),
         BookingState.SELECTING_DATE: frozenset({"select_date", "unknown"}),
         BookingState.SELECTING_PEOPLE: frozenset({"select_people", "unknown"}),
@@ -334,6 +340,36 @@ async def test_start_booking_ignores_empty_entity_resolver_noise() -> None:
     assert result.entity_kind is None
     assert result.entity_query is None
     assert result.merged_entities == {"booking_date": date(2026, 8, 25)}
+
+
+@pytest.mark.asyncio
+async def test_cancel_booking_ignores_empty_entity_resolver_noise() -> None:
+    fallback, _ = fallback_for(
+        structured(
+            intent="cancel_existing_booking",
+            confidence=1.0,
+            entities={
+                "phone": "0320000031",
+                "booking_reference": "89efd734-832a-45e3-94d0-c27386b11627",
+            },
+            entity_kind="shop",
+            entity_query=None,
+        )
+    )
+
+    result = await fallback.parse(
+        text="89efd734-832a-45e3-94d0-c27386b11627 và 0320000031",
+        state=BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY,
+    )
+
+    assert result.intent == "cancel_existing_booking"
+    assert result.resolution_status is NLUResolutionStatus.RESOLVED
+    assert result.entity_kind is None
+    assert result.entity_query is None
+    assert result.payload == {
+        "phone": "0320000031",
+        "booking_reference": "89efd734-832a-45e3-94d0-c27386b11627",
+    }
 
 
 @pytest.mark.asyncio

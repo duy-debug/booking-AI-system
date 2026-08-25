@@ -890,13 +890,13 @@ async def test_create_binding_preserves_idempotency_and_does_not_commit_state() 
 
 
 @pytest.mark.asyncio
-async def test_cancel_existing_booking_looks_up_owner_phone_before_cancel() -> None:
+async def test_lookup_existing_booking_for_cancel_does_not_cancel_before_confirmation() -> None:
     gateway = FakeExistingBookingGateway()
     bridge = production_bridge(booking_gateway=gateway)
     booking_context = BookingContext(conversation_id="conversation-1")
 
     report = await bridge.execute_actions(
-        ("cancel_existing_booking",),
+        ("lookup_existing_booking_for_cancel",),
         execution_context(
             booking_context=booking_context,
             payload={
@@ -906,8 +906,33 @@ async def test_cancel_existing_booking_looks_up_owner_phone_before_cancel() -> N
         ),
     )
 
-    assert report.executed_action_names == ("cancel_existing_booking",)
+    assert report.executed_action_names == ("lookup_existing_booking_for_cancel",)
     assert gateway.lookup_calls == [(str(BOOKING.booking_id), "0901234567")]
+    assert gateway.cancel_calls == []
+    assert booking_context.booking is not None
+    assert booking_context.booking.status == "confirmed"
+    assert booking_context.booking_id == BOOKING.booking_id
+    assert booking_context.phone == "0901234567"
+
+
+@pytest.mark.asyncio
+async def test_cancel_existing_booking_uses_preloaded_booking_after_confirmation() -> None:
+    gateway = FakeExistingBookingGateway()
+    bridge = production_bridge(booking_gateway=gateway)
+    booking_context = BookingContext(
+        conversation_id="conversation-1",
+        booking=BOOKING,
+        booking_id=BOOKING.booking_id,
+        phone="0901234567",
+    )
+
+    report = await bridge.execute_actions(
+        ("cancel_existing_booking",),
+        execution_context(booking_context=booking_context),
+    )
+
+    assert report.executed_action_names == ("cancel_existing_booking",)
+    assert gateway.lookup_calls == []
     assert gateway.cancel_calls == [(BOOKING.booking_id, "0901234567")]
     assert booking_context.booking is not None
     assert booking_context.booking.status == "cancelled"
@@ -916,14 +941,14 @@ async def test_cancel_existing_booking_looks_up_owner_phone_before_cancel() -> N
 
 
 @pytest.mark.asyncio
-async def test_cancel_existing_booking_missing_identity_preserves_partial_context() -> None:
+async def test_lookup_cancel_missing_identity_preserves_partial_context() -> None:
     gateway = FakeExistingBookingGateway()
     bridge = production_bridge(booking_gateway=gateway)
     booking_context = BookingContext(conversation_id="conversation-1")
 
     with pytest.raises(ActionExecutionError) as error_info:
         await bridge.execute_actions(
-            ("cancel_existing_booking",),
+            ("lookup_existing_booking_for_cancel",),
             execution_context(
                 booking_context=booking_context,
                 payload={"phone": "0901234567"},

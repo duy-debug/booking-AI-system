@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timezone
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
@@ -35,11 +35,13 @@ def _booking():
         assignment_source="auto",
         reservation_courses=[course],
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
+    shop = SimpleNamespace(shop_id=uuid4(), name="Shop test")
     return SimpleNamespace(
         booking_id=uuid4(),
         pos_booking_code=None,
-        shop_id=uuid4(),
+        shop_id=shop.shop_id,
+        shop=shop,
         customer_id=customer.customer_id,
         customer=customer,
         booking_date=date(2026, 7, 22),
@@ -69,6 +71,8 @@ def test_booking_query_service_returns_public_dto():
 
     assert isinstance(response.data, PublicBookingResponse)
     assert response.data.booking_id == booking.booking_id
+    assert response.data.customer_phone == booking.customer.phone
+    assert response.data.customer_name == booking.customer.name
     assert response.data.reservations[0].courses[0].course_name_snapshot == "Massage"
 
 

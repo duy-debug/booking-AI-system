@@ -91,6 +91,9 @@ _UNRESOLVED_TEXT = {
     BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY: (
         "Vui lòng cung cấp mã booking và số điện thoại đã đặt lịch để mình kiểm tra trước khi hủy."
     ),
+    BookingState.AWAITING_CANCEL_CONFIRMATION: (
+        "Anh/chị vui lòng xác nhận có chắc chắn muốn hủy booking này không."
+    ),
     BookingState.SELECTING_SHOP: "Vui lòng cho biết cửa hàng hoặc khu vực bạn muốn đặt.",
     BookingState.SELECTING_DATE: "Vui lòng nhập ngày, ví dụ: ngày mai hoặc 15/08.",
     BookingState.SELECTING_PEOPLE: (
@@ -129,6 +132,7 @@ _DEFAULT_UNRESOLVED_TEXT = "Tôi chưa hiểu yêu cầu. Vui lòng nhập lại
 _RECOVERY_QUICK_REPLIES = {
     BookingState.IDLE: ("Đặt lịch mới", "Sửa lịch đã đặt", "Hủy lịch đã đặt"),
     BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY: ("Hủy booking",),
+    BookingState.AWAITING_CANCEL_CONFIRMATION: ("Xác nhận hủy", "Không hủy"),
     BookingState.SELECTING_DATE: ("Hôm nay", "Ngày mai"),
     BookingState.SELECTING_DURATION: ("45 phút", "60 phút", "90 phút"),
     BookingState.SELECTING_THERAPIST: ("Không yêu cầu", "Nam", "Nữ"),
@@ -1240,6 +1244,7 @@ def _can_stage_requested_slot(key: str, state: BookingState) -> bool:
     state_order = {
         BookingState.IDLE: 0,
         BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY: 1,
+        BookingState.AWAITING_CANCEL_CONFIRMATION: 1,
         BookingState.SELECTING_SHOP: 1,
         BookingState.SELECTING_DATE: 2,
         BookingState.SELECTING_PEOPLE: 3,

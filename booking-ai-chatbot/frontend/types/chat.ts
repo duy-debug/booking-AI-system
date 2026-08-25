@@ -1,5 +1,5 @@
 export type BookingState =
-  | "idle" | "collecting_cancel_booking_identity"
+  | "idle" | "collecting_cancel_booking_identity" | "awaiting_cancel_confirmation"
   | "selecting_shop" | "selecting_date" | "selecting_people"
   | "selecting_duration" | "selecting_service" | "selecting_time"
   | "selecting_therapist" | "collecting_phone" | "collecting_name"

@@ -196,6 +196,8 @@ def _create_payload(
             "shop_id": str(SHOP_ID),
             "shop_name": "Komorebi",
             "customer_id": "550e8400-e29b-41d4-a716-446655440301",
+            "customer_phone": "0901234567",
+            "customer_name": "Nguyen An",
             "booking_date": BOOKING_DATE.isoformat(),
             "start_time": "10:00:00",
             "end_time": "11:15:00",
@@ -1029,6 +1031,7 @@ async def test_lookup_booking_uses_public_identity_contract() -> None:
 
     assert booking.booking_id == BOOKING_ID
     assert booking.customer.phone == "0901234567"
+    assert booking.customer.name == "Nguyen An"
     assert requests[0].method == "POST"
     assert requests[0].url.path == "/api/bookings/lookup"
     assert json.loads(requests[0].content) == {
