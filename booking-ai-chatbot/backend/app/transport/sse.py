@@ -23,10 +23,12 @@ from app.infrastructure.context_store import (
 
 if TYPE_CHECKING:
     from app.dependencies import ApplicationContainer
+    from app.dialog.dialog_controller import DialogStreamEvent
     from app.dialog.instruction_builder import DialogResponse
     from app.transport.schemas import ChatRequest, ChatResponse
 
 ProcessMessage = Callable[..., Awaitable["DialogResponse"]]
+ProcessStreamMessage = Callable[..., AsyncIterator["DialogStreamEvent"]]
 ResponseMapper = Callable[[str, "DialogResponse"], "ChatResponse"]
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,7 @@ class SSEEventType(StrEnum):
     """
 
     STARTED = "started"
+    DELTA = "delta"
     MESSAGE = "message"
     COMPLETED = "completed"
     ERROR = "error"
@@ -88,6 +91,7 @@ async def stream_chat_events(
     request: "ChatRequest",
     container: "ApplicationContainer",
     process_message: ProcessMessage,
+    process_stream_message: ProcessStreamMessage | None = None,
     response_mapper: ResponseMapper,
     correlation_id: str | None = None,
     entrypoint: str | None = None,
@@ -102,6 +106,7 @@ async def stream_chat_events(
             request=request,
             container=container,
             process_message=process_message,
+            process_stream_message=process_stream_message,
             response_mapper=response_mapper,
             correlation_id=correlation_id,
             entrypoint=entrypoint,
@@ -120,6 +125,7 @@ async def _stream_bound_chat_events(
     request: "ChatRequest",
     container: "ApplicationContainer",
     process_message: ProcessMessage,
+    process_stream_message: ProcessStreamMessage | None,
     response_mapper: ResponseMapper,
     correlation_id: str | None,
     entrypoint: str | None,
@@ -139,13 +145,38 @@ async def _stream_bound_chat_events(
     yield started_event
 
     try:
-        dialog_response = await _call_process_message(
-            process_message=process_message,
-            request=request,
-            container=container,
-            correlation_id=correlation_id,
-            entrypoint=entrypoint,
-        )
+        dialog_response: DialogResponse | None = None
+        if process_stream_message is None:
+            dialog_response = await _call_process_message(
+                process_message=process_message,
+                request=request,
+                container=container,
+                correlation_id=correlation_id,
+                entrypoint=entrypoint,
+            )
+        else:
+            async for turn_event in _call_process_stream_message(
+                process_stream_message=process_stream_message,
+                request=request,
+                container=container,
+                correlation_id=correlation_id,
+                entrypoint=entrypoint,
+            ):
+                if turn_event.delta is not None:
+                    delta_event = encode_sse_event(
+                        event=SSEEventType.DELTA,
+                        data={
+                            "conversation_id": request.conversation_id,
+                            "text": turn_event.delta,
+                        },
+                    )
+                    chunk_count += 1
+                    bytes_sent += len(delta_event.encode("utf-8"))
+                    yield delta_event
+                if turn_event.response is not None:
+                    dialog_response = turn_event.response
+            if dialog_response is None:
+                raise RuntimeError("Stream processing finished without a dialog response.")
         response = response_mapper(request.conversation_id, dialog_response)
         message_event = encode_sse_event(
             event=SSEEventType.MESSAGE,
@@ -263,3 +294,22 @@ async def _call_process_message(
     if entrypoint is not None and "entrypoint" in parameters:
         kwargs["entrypoint"] = entrypoint
     return await process_message(**kwargs)
+
+
+# Gọi process_stream_message bằng đúng kwargs mà callback hỗ trợ để giữ tương thích test double.
+async def _call_process_stream_message(
+    *,
+    process_stream_message: ProcessStreamMessage,
+    request: "ChatRequest",
+    container: "ApplicationContainer",
+    correlation_id: str | None,
+    entrypoint: str | None,
+) -> AsyncIterator["DialogStreamEvent"]:
+    parameters = inspect.signature(process_stream_message).parameters
+    kwargs: dict[str, object] = {"request": request, "container": container}
+    if correlation_id is not None and "correlation_id" in parameters:
+        kwargs["correlation_id"] = correlation_id
+    if entrypoint is not None and "entrypoint" in parameters:
+        kwargs["entrypoint"] = entrypoint
+    async for event in process_stream_message(**kwargs):
+        yield event

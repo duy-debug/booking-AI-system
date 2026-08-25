@@ -19,6 +19,7 @@ from app.dependencies import (
     InvalidConversationContextError,
     InvalidConversationIdError,
 )
+from app.dialog.dialog_controller import DialogStreamEvent
 from app.dialog.instruction_builder import DialogResponse
 from app.infrastructure.context_store import (
     consume_completed_turn_metrics,
@@ -156,7 +157,7 @@ def _stream_chat_events(
     correlation_id: str | None = None,
 ) -> AsyncIterator[str]:
     # Tạo generator SSE dùng chung business pipeline với endpoint JSON.
-    async def process_stream_message(
+    async def process_message(
         *,
         request: ChatRequest,
         container: ApplicationContainer,
@@ -171,13 +172,39 @@ def _stream_chat_events(
             kwargs["correlation_id"] = correlation_id
         if "entrypoint" in parameters:
             kwargs["entrypoint"] = "/api/v1/chat/stream"
-        process_message = cast(Callable[..., Awaitable[DialogResponse]], _process_chat_message)
-        return await process_message(**kwargs)
+        callback = cast(Callable[..., Awaitable[DialogResponse]], _process_chat_message)
+        return await callback(**kwargs)
 
+    async def process_stream_message(
+        *,
+        request: ChatRequest,
+        container: ApplicationContainer,
+        correlation_id: str | None = None,
+    ) -> AsyncIterator[DialogStreamEvent]:
+        parameters = inspect.signature(container.dialog_controller.handle_message_stream).parameters
+        kwargs: dict[str, object] = {
+            "conversation_id": request.conversation_id,
+            "message": request.message,
+            "idempotency_key": request.idempotency_key,
+        }
+        if correlation_id is not None and "correlation_id" in parameters:
+            kwargs["correlation_id"] = correlation_id
+        if "entrypoint" in parameters:
+            kwargs["entrypoint"] = "/api/v1/chat/stream"
+        async for event in container.dialog_controller.handle_message_stream(**kwargs):
+            yield event
+
+    dialog_controller = getattr(container, "dialog_controller", None)
+    stream_callback = (
+        process_stream_message
+        if callable(getattr(dialog_controller, "handle_message_stream", None))
+        else None
+    )
     return stream_chat_events(
         request=request,
         container=container,
-        process_message=process_stream_message,
+        process_message=process_message,
+        process_stream_message=stream_callback,
         response_mapper=_to_chat_response,
         correlation_id=correlation_id,
     )

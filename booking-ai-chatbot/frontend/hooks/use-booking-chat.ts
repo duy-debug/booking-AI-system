@@ -53,6 +53,7 @@ export function useBookingChat() {
     setError(null);
     setRetryText(null);
     saveConversationSession(sessionStorage, conversationId);
+    let streamingAssistantId: string | null = null;
     setMessages((current) => [
       ...current,
       {
@@ -68,22 +69,63 @@ export function useBookingChat() {
       await streamChat(
         { conversation_id: conversationId, message: text, signal: controller.signal },
         {
-          onStarted: () => setStreamingStarted(true),
+          onStarted: () => {
+            setStreamingStarted(true);
+            setMessages((current) => current.map((message) => (
+              message.role === "user" && message.status === "sending"
+                ? { ...message, status: "sent" as const }
+                : message
+            )));
+          },
+          onDelta: (event) => {
+            if (!event.text) return;
+            setStreamingStarted(false);
+            setMessages((current) => {
+              if (streamingAssistantId === null) {
+                streamingAssistantId = crypto.randomUUID();
+                return [
+                  ...current,
+                  {
+                    id: streamingAssistantId,
+                    role: "assistant",
+                    text: event.text,
+                    createdAt: Date.now(),
+                  },
+                ];
+              }
+              return current.map((message) => (
+                message.id === streamingAssistantId
+                  ? { ...message, text: message.text + event.text }
+                  : message
+              ));
+            });
+          },
           onMessage: (result) => {
-            setMessages((current) => [
-              ...current.map((message) => (
+            setStreamingStarted(false);
+            setMessages((current) => {
+              const messagesWithSentUser = current.map((message) => (
                 message.role === "user" && message.status === "sending"
                   ? { ...message, status: "sent" as const }
                   : message
-              )),
-              {
-                id: crypto.randomUUID(),
-                role: "assistant",
-                text: result.text,
-                response: result,
-                createdAt: Date.now(),
-              },
-            ]);
+              ));
+              if (streamingAssistantId !== null) {
+                return messagesWithSentUser.map((message) => (
+                  message.id === streamingAssistantId
+                    ? { ...message, text: result.text, response: result }
+                    : message
+                ));
+              }
+              return [
+                ...messagesWithSentUser,
+                {
+                  id: crypto.randomUUID(),
+                  role: "assistant",
+                  text: result.text,
+                  response: result,
+                  createdAt: Date.now(),
+                },
+              ];
+            });
           },
         },
       );
@@ -111,6 +153,7 @@ export function useBookingChat() {
       if (abortRef.current === controller) abortRef.current = null;
       inFlightRef.current = false;
       setIsSending(false);
+      setStreamingStarted(false);
     }
   }, [conversationId]);
 

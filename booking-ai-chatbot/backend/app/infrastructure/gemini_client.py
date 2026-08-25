@@ -1,6 +1,7 @@
 """Application port and data models for language model interaction."""
 # ruff: noqa: E402
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -55,6 +56,15 @@ class LLMGateway(Protocol):
         tools: list[dict[str, object]] | None = None,
     ) -> LLMResponse:
         """Generate a response from prepared messages and optional tools."""
+        ...
+
+    def stream_generate(
+        self,
+        messages: list[LLMMessage],
+        *,
+        tools: list[dict[str, object]] | None = None,
+    ) -> AsyncIterator[str]:
+        """Stream response text chunks from prepared messages and optional tools."""
         ...
 
 
@@ -198,6 +208,111 @@ class GeminiClient:
             return parsed
         raise LLMGatewayUnavailableError("Gemini is unavailable.")
 
+    # Stream chat completion theo OpenAI-compatible SSE để frontend render token dần.
+    async def stream_generate(
+        self,
+        messages: list[LLMMessage],
+        *,
+        tools: list[dict[str, object]] | None = None,
+    ) -> AsyncIterator[str]:
+        """Yield provider response chunks, with the same fallback behavior as generate()."""
+        started_at = perf_counter()
+        if self._api_key is None:
+            self._log_failure("gemini_not_configured", started_at, self._model, 1)
+            raise LLMGatewayUnavailableError("Gemini is not configured.")
+        models = [self._model]
+        if (
+            self._max_retries == 1
+            and self._fallback_model is not None
+            and self._fallback_model != self._model
+        ):
+            models.append(self._fallback_model)
+
+        for attempt, model in enumerate(models, start=1):
+            attempt_started_at = perf_counter()
+            payload: dict[str, object] = {
+                "model": model,
+                "messages": [
+                    {"role": message.role, "content": message.content} for message in messages
+                ],
+                "stream": True,
+            }
+            if tools is not None:
+                payload["tools"] = tools
+            trace_log(
+                _LOGGER,
+                logging.DEBUG,
+                "LLMUsage",
+                "request",
+                provider="gemini",
+                model=model,
+                operation="chat_completion_stream",
+                function="stream_complete",
+                attempt=attempt,
+                input_summary={
+                    "message_count": len(messages),
+                    "character_count": sum(len(message.content) for message in messages),
+                    "tools_enabled": tools is not None,
+                },
+                status="started",
+            )
+            try:
+                async with self._client.stream(
+                    "POST",
+                    f"{self._base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self._api_key}"},
+                    json=payload,
+                ) as response:
+                    response.raise_for_status()
+                    record_turn_metrics(llm_calls=1)
+                    async for line in response.aiter_lines():
+                        stream_data = _stream_data(line)
+                        if stream_data is None:
+                            continue
+                        if stream_data == "[DONE]":
+                            break
+                        delta = _parse_stream_delta(stream_data)
+                        if delta:
+                            yield delta
+                    trace_log(
+                        _LOGGER,
+                        logging.INFO,
+                        "LLMUsage",
+                        "completed",
+                        provider="gemini",
+                        model=model,
+                        operation="chat_completion_stream",
+                        attempt=attempt,
+                        duration_ms=elapsed_ms(started_at),
+                    )
+                    return
+            except httpx.TimeoutException as error:
+                error_code = "gemini_timeout"
+                self._log_failure(error_code, attempt_started_at, model, attempt)
+                if attempt < len(models):
+                    self._log_fallback(model, models[attempt], error_code)
+                    continue
+                raise LLMGatewayTimeoutError("Gemini timed out.") from error
+            except httpx.HTTPStatusError as error:
+                status_code = error.response.status_code
+                error_code = _http_error_code(status_code)
+                self._log_failure(error_code, attempt_started_at, model, attempt)
+                if attempt < len(models) and _is_fallback_status(status_code):
+                    self._log_fallback(model, models[attempt], error_code)
+                    continue
+                raise LLMGatewayUnavailableError("Gemini is unavailable.") from error
+            except httpx.HTTPError as error:
+                error_code = "gemini_unavailable"
+                self._log_failure(error_code, attempt_started_at, model, attempt)
+                if attempt < len(models):
+                    self._log_fallback(model, models[attempt], error_code)
+                    continue
+                raise LLMGatewayUnavailableError("Gemini is unavailable.") from error
+            except InvalidLLMResponseError:
+                self._log_failure("gemini_invalid_response", attempt_started_at, model, attempt)
+                raise
+        raise LLMGatewayUnavailableError("Gemini is unavailable.")
+
     # Log lỗi LLM an toàn, không ghi API key hoặc raw payload.
     def _log_failure(
         self,
@@ -282,6 +397,29 @@ def _parse_response(response: httpx.Response) -> LLMResponse:
     except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
         raise InvalidLLMResponseError("Gemini returned an invalid response.") from error
     return LLMResponse(content=content, tool_calls=tool_calls)
+
+
+# Lấy payload `data:` từ SSE line của provider, bỏ qua keep-alive/comment line.
+def _stream_data(line: str) -> str | None:
+    if not line.startswith("data:"):
+        return None
+    payload = line.removeprefix("data:").strip()
+    return payload or None
+
+
+# Parse một delta chunk từ OpenAI-compatible streaming payload.
+def _parse_stream_delta(payload: str) -> str | None:
+    try:
+        body = json.loads(payload)
+        delta = body["choices"][0].get("delta", {})
+        content = delta.get("content")
+        if content is None:
+            return None
+        if not isinstance(content, str):
+            raise TypeError
+        return content
+    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
+        raise InvalidLLMResponseError("Gemini returned an invalid streaming response.") from error
 
 
 # Parse một tool/function call từ provider để NLU dùng structured candidates.

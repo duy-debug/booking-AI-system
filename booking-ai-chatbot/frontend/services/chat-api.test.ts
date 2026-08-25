@@ -145,6 +145,30 @@ describe("streamChat", () => {
     expect(onMessage).toHaveBeenCalledWith(chatResponse);
   });
 
+  it("parses assistant delta events before the final message", async () => {
+    const onDelta = vi.fn();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(streamResponse([
+      "event: started\ndata: {\"conversation_id\":\"conversation-1\"}\n\n",
+      "event: delta\ndata: {\"conversation_id\":\"conversation-1\",\"text\":\"Xin\"}\n\n",
+      "event: delta\ndata: {\"conversation_id\":\"conversation-1\",\"text\":\" chÃ o\"}\n\n",
+      successSse(),
+    ]));
+
+    await expect(streamChat({
+      conversation_id: "conversation-1",
+      message: "hello",
+    }, { onDelta })).resolves.toEqual(chatResponse);
+
+    expect(onDelta).toHaveBeenNthCalledWith(1, {
+      conversation_id: "conversation-1",
+      text: "Xin",
+    });
+    expect(onDelta).toHaveBeenNthCalledWith(2, {
+      conversation_id: "conversation-1",
+      text: " chÃ o",
+    });
+  });
+
   it("maps an SSE error message without reporting missing completed", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(streamResponse([
       "event: error\ndata: {\"conversation_id\":\"conversation-1\",\"code\":\"chat_processing_failed\",\"message\":\"Thử lại sau\"}\n\n",

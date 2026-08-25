@@ -34,6 +34,22 @@ class FakeLLM:
         return self.response
 
 
+class FakeStreamingLLM(FakeLLM):
+    def __init__(self, chunks: tuple[str, ...]) -> None:
+        super().__init__()
+        self.chunks = chunks
+
+    async def stream_generate(
+        self,
+        messages: list[LLMMessage],
+        *,
+        tools: list[dict[str, object]] | None = None,
+    ):
+        self.messages = messages
+        for chunk in self.chunks:
+            yield chunk
+
+
 def response() -> DialogResponse:
     return DialogResponse(
         "Bạn muốn đặt lịch vào ngày nào?",
@@ -69,3 +85,21 @@ async def test_generator_uses_safe_fallback_on_provider_failure_or_empty_text() 
 
     assert await unavailable.generate(response=response(), context=context) == response()
     assert await empty.generate(response=response(), context=context) == response()
+
+
+async def test_stream_generator_yields_deltas_then_final_response() -> None:
+    gateway = FakeStreamingLLM(("Xin", " chào"))
+    generator = ResponseGenerator(gateway, InstructionBuilder())
+
+    events = [
+        event
+        async for event in generator.stream_generate(
+            response=response(),
+            context=BookingContext("conversation-1", state=BookingState.SELECTING_DATE),
+        )
+    ]
+
+    assert [event.delta for event in events] == ["Xin", " chào", None]
+    assert events[-1].response is not None
+    assert events[-1].response.text == "Xin chào"
+    assert events[-1].response.state is BookingState.SELECTING_DATE

@@ -25,6 +25,7 @@ export interface ChatResponse {
 }
 
 export interface ChatStartedEvent { conversation_id: string }
+export interface ChatDeltaEvent { conversation_id: string; text: string }
 export interface ChatCompletedEvent {
   conversation_id: string;
   stream_status: "completed";

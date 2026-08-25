@@ -9,7 +9,7 @@ import pytest
 
 import app.transport.chat_api as chat_api
 from app.dependencies import ApplicationContainer
-from app.dialog.dialog_controller import DialogTurnStatus
+from app.dialog.dialog_controller import DialogStreamEvent, DialogTurnStatus
 from app.dialog.instruction_builder import DialogResponse
 from app.domain.booking_context import BookingContext
 from app.domain.booking_state import BookingState
@@ -19,6 +19,7 @@ from app.transport.sse import (
     InvalidSSEEventError,
     SSESerializationError,
     encode_sse_event,
+    stream_chat_events,
 )
 
 
@@ -148,6 +149,48 @@ async def test_stream_generator_emits_started_message_completed_once(
         "stream_status": "completed",
         "dialog_status": "success",
     }
+
+
+@pytest.mark.asyncio
+async def test_stream_generator_emits_delta_before_final_message() -> None:
+    async def process_message(
+        *,
+        request: ChatRequest,
+        container: ApplicationContainer,
+    ) -> DialogResponse:
+        raise AssertionError("stream callback should be used")
+
+    async def process_stream_message(
+        *,
+        request: ChatRequest,
+        container: ApplicationContainer,
+    ):
+        yield DialogStreamEvent(delta="Xin")
+        yield DialogStreamEvent(delta=" chào")
+        yield DialogStreamEvent(response=response())
+
+    frames = [
+        frame
+        async for frame in stream_chat_events(
+            request=request(),
+            container=cast(ApplicationContainer, object()),
+            process_message=process_message,
+            process_stream_message=process_stream_message,
+            response_mapper=chat_api._to_chat_response,
+        )
+    ]
+    events = [decode_frame(frame) for frame in frames]
+
+    assert [event for event, _ in events] == [
+        "started",
+        "delta",
+        "delta",
+        "message",
+        "completed",
+    ]
+    assert events[1][1] == {"conversation_id": "conversation-a", "text": "Xin"}
+    assert events[2][1] == {"conversation_id": "conversation-a", "text": " chào"}
+    assert events[3][1]["text"] == response().text
 
 
 @pytest.mark.asyncio

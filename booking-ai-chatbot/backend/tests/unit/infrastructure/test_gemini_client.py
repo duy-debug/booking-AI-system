@@ -63,6 +63,37 @@ async def test_generate_uses_injected_model_endpoint_and_parses_structured_conte
 
 
 @pytest.mark.asyncio
+async def test_stream_generate_uses_stream_payload_and_yields_delta_chunks() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            request=request,
+            content=(
+                'data: {"choices":[{"delta":{"content":"Xin"}}]}\n\n'
+                'data: {"choices":[{"delta":{"content":" chào"}}]}\n\n'
+                "data: [DONE]\n\n"
+            ).encode(),
+        )
+
+    client, adapter = gateway(httpx.MockTransport(handler), model="stream-model")
+    chunks: list[str] = []
+    async for chunk in adapter.stream_generate([LLMMessage("user", "hello")]):
+        chunks.append(chunk)
+
+    assert chunks == ["Xin", " chào"]
+    assert len(requests) == 1
+    assert json.loads(requests[0].content) == {
+        "model": "stream-model",
+        "messages": [{"role": "user", "content": "hello"}],
+        "stream": True,
+    }
+    await client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_generate_parses_openai_compatible_tool_calls() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

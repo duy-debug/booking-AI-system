@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from datetime import time as clock_time
@@ -229,6 +229,19 @@ class RequestedEntityConsumption:
     blocked_resolution: EntityResolutionResult | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class DialogStreamEvent:
+    """
+    Event nội bộ cho SSE.
+
+    `delta` dùng để frontend render chữ dần; `response` là kết quả cuối cùng
+    chứa state/status/quick replies đã được backend kiểm chứng.
+    """
+
+    delta: str | None = None
+    response: "DialogResponse" | None = None
+
+
 class DialogController:
     """
     Điều phối một lượt hội thoại hoàn chỉnh của chatbot.
@@ -288,6 +301,31 @@ class DialogController:
                 correlation_id=correlation_id,
                 entrypoint=entrypoint,
             )
+
+    # Nhận message từ SSE endpoint và yield delta NLG trước khi yield response cuối.
+    async def handle_message_stream(
+        self,
+        *,
+        conversation_id: str,
+        message: str,
+        idempotency_key: str | None = None,
+        correlation_id: str | None = None,
+        entrypoint: str | None = None,
+    ) -> AsyncIterator[DialogStreamEvent]:
+        # Dùng chung business pipeline với handle_message, chỉ khác phần NLG được stream.
+        if self._runtime is None:
+            raise RuntimeError("DialogController runtime is not bound.")
+        runtime = self._runtime
+        async with runtime.conversation_context_store.conversation_lock(conversation_id):
+            async for event in _process_serialized_chat_message_stream(
+                conversation_id=conversation_id,
+                message=message,
+                idempotency_key=idempotency_key,
+                container=runtime,
+                correlation_id=correlation_id,
+                entrypoint=entrypoint,
+            ):
+                yield event
 
     # Chạy một turn đã parse sẵn qua StateMachine và ActionRegistry, chưa render response cuối.
     async def handle_turn(
@@ -846,6 +884,117 @@ async def _process_serialized_chat_message(
             )
         store_completed_turn_metrics()
         return response
+    except Exception as error:
+        trace_log(
+            logger,
+            logging.ERROR,
+            "DialogController",
+            "turn_failed",
+            state=context.state.value,
+            exception_type=type(error).__name__,
+            duration_ms=elapsed_ms(started_at),
+            _exc_info=True,
+        )
+        raise
+    finally:
+        reset_turn_metrics(metrics_token)
+        reset_trace_context(distributed_trace_token)
+        reset_turn(turn_token)
+        reset_correlation_id(correlation_token)
+        reset_conversation(token)
+
+
+async def _process_serialized_chat_message_stream(
+    *,
+    conversation_id: str,
+    message: str,
+    idempotency_key: str | None,
+    container: ApplicationContainer,
+    correlation_id: str | None = None,
+    entrypoint: str | None = None,
+) -> AsyncIterator[DialogStreamEvent]:
+    # Chạy cùng pipeline với JSON endpoint, nhưng stream riêng bước LLM NLG cuối.
+    token = bind_conversation(conversation_id)
+    correlation_token = bind_correlation_id(correlation_id)
+    started_at = perf_counter()
+    context = await container.conversation_context_store.get_copy(conversation_id)
+    turn_token = bind_turn(context.begin_turn())
+    distributed_trace_token = bind_trace_context(
+        trace_id=correlation_id,
+        session_id=conversation_id,
+        turn_id=context.turn_sequence,
+    )
+    metrics_token = begin_turn_metrics()
+    initial_state = context.state
+    trace_log(
+        logger,
+        logging.INFO,
+        "[1] REQUEST",
+        "request_started",
+        method="POST",
+        path=entrypoint or "unknown",
+        message_length=len(message),
+        state=initial_state.value,
+    )
+    _trace_context_loaded(context)
+    trace_log(logger, logging.DEBUG, "DialogController", "turn_started", state=initial_state.value)
+    if _local_debug_enabled("LOG_USER_MESSAGES"):
+        trace_log(
+            logger,
+            logging.DEBUG,
+            "Turn",
+            "user_message",
+            function="handle_message_stream",
+            user_message=message[:500],
+        )
+    try:
+        # Business turn vẫn xử lý trọn vẹn trước: NLU -> route -> action -> draft response.
+        response = await _process_bound_chat_message(
+            conversation_id=conversation_id,
+            message=message,
+            idempotency_key=idempotency_key,
+            container=container,
+            context=context,
+        )
+        if getattr(container, "llm_nlg_required", False):
+            async for generation_event in container.response_generator.stream_generate(
+                response=response,
+                context=context,
+            ):
+                if generation_event.delta is not None:
+                    yield DialogStreamEvent(delta=generation_event.delta)
+                if generation_event.response is not None:
+                    response = generation_event.response
+        _reset_finished_session_context(response=response, context=context)
+        if response.status is not DialogTurnStatus.FAILURE_UNHANDLED:
+            await container.conversation_context_store.save(
+                conversation_id,
+                context,
+            )
+            _trace_context_saved(context)
+        _log_instruction(response)
+        trace_log(
+            logger,
+            logging.INFO,
+            "[7] RESPONSE",
+            "response_ready",
+            state=response.state.value,
+            status=response.status.value,
+            text=response.text,
+            quick_replies=list(response.quick_replies),
+            instruction_template=response.instruction_template or "none",
+        )
+        if _local_debug_enabled("LOG_AI_MESSAGES"):
+            trace_log(
+                logger,
+                logging.DEBUG,
+                "ResponseGenerator",
+                "ai_response_created",
+                function="handle_message_stream",
+                assistant_message=response.text[:1000],
+            )
+        store_completed_turn_metrics()
+        yield DialogStreamEvent(response=response)
     except Exception as error:
         trace_log(
             logger,

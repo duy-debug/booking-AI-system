@@ -2,6 +2,7 @@ import { SseParser, type ParsedSseEvent } from "./sse-parser";
 import type {
   BookingState,
   ChatCompletedEvent,
+  ChatDeltaEvent,
   ChatErrorCode,
   ChatProblem,
   ChatRequest,
@@ -19,6 +20,7 @@ export class ChatApiError extends Error {
 
 interface ChatStreamCallbacks {
   onStarted?: (data: ChatStartedEvent) => void;
+  onDelta?: (data: ChatDeltaEvent) => void;
   onMessage?: (response: ChatResponse) => void;
   onCompleted?: (data: ChatCompletedEvent) => void;
 }
@@ -163,6 +165,12 @@ function dispatchEvent(
   if (parsed.event === "started") {
     if (!isRecord(parsed.data)) throw invalidResponse();
     callbacks.onStarted?.({ conversation_id: stringField(parsed.data, "conversation_id") });
+  } else if (parsed.event === "delta") {
+    if (!isRecord(parsed.data)) throw invalidResponse();
+    callbacks.onDelta?.({
+      conversation_id: stringField(parsed.data, "conversation_id"),
+      text: stringField(parsed.data, "text"),
+    });
   } else if (parsed.event === "message") {
     state.response = parseResponse(parsed.data);
     callbacks.onMessage?.(state.response);
