@@ -14,11 +14,25 @@ function timeLabel(timestamp: number) {
   return new Intl.DateTimeFormat("vi-VN", { hour: "2-digit", minute: "2-digit" }).format(timestamp);
 }
 
+function isStructuredLine(line: string) {
+  return line.startsWith("- ") || /^[^:]{1,40}:\s+\S/.test(line);
+}
+
+function normalizeParagraphLines(lines: string[]) {
+  return lines.map((line) => line.trim()).filter(Boolean).join(" ");
+}
+
 function MessageBody({ text }: { text: string }) {
   if (!text.includes("```")) {
+    const lines = text.split("\n");
+    const hasStructuredLines = lines.some((line) => isStructuredLine(line.trim()));
+    if (!hasStructuredLines) {
+      return <span>{normalizeParagraphLines(lines)}</span>;
+    }
+
     return (
       <span className="message-lines">
-        {text.split("\n").map((line, index) => (
+        {lines.map((line, index) => (
           <span
             className={line.startsWith("- ") ? "message-line detail" : "message-line"}
             key={`${index}-${line}`}
@@ -46,11 +60,15 @@ function MessageBody({ text }: { text: string }) {
 }
 
 export function MessageItem({ message, latest, streaming }: Props) {
+  const showStreamingCaret = message.role === "assistant" && streaming && latest;
+
   return (
     <article className={`message-row ${message.role}${message.text ? "" : " empty"}`}>
       {message.role === "assistant" && <span className="message-avatar"><BotIcon /></span>}
       <div className="message-content">
-        <div className={`bubble ${streaming && latest ? "streaming" : ""}`}><MessageBody text={message.text} /></div>
+        <div className={`bubble ${showStreamingCaret ? "streaming" : ""}`}>
+          <MessageBody text={message.text} />
+        </div>
         <div className="message-meta">
           <time>{timeLabel(message.createdAt)}</time>
           {message.role === "user" ? (

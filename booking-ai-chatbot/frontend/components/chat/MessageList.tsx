@@ -27,6 +27,9 @@ export function MessageList({
   onRetry,
   onScrollNearBottomChange,
 }: MessageListProps) {
+  const latestMessage = messages.at(-1);
+  const showTypingIndicator = loading && latestMessage?.role !== "assistant";
+
   return (
     <div
       ref={scrollRef}
@@ -54,7 +57,7 @@ export function MessageList({
           />
         ))}
 
-        {loading && !streamingStarted && <TypingIndicator />}
+        {showTypingIndicator && <TypingIndicator />}
 
         {error && (
           <ChatErrorBanner

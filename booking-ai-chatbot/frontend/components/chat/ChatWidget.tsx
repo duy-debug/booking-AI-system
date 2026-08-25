@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ChatApp } from "@/components/chat/ChatApp";
-import { MessageCircleIcon } from "@/components/common/Icons";
+import { BotIcon } from "@/components/common/Icons";
 import { OPEN_CHAT_EVENT } from "@/components/landing/ChatOpenButton";
 
 export function ChatWidget() {
@@ -32,8 +32,7 @@ export function ChatWidget() {
         aria-label="Mở trợ lý AI Kori"
         onClick={() => setOpen(true)}
       >
-        <span><MessageCircleIcon /></span>
-        <strong>Chat với Kori</strong>
+        <BotIcon />
       </button>
     </aside>
   );

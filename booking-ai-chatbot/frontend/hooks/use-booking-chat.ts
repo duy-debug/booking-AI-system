@@ -48,7 +48,6 @@ export function useBookingChat() {
     inFlightRef.current = true;
     const controller = new AbortController();
     abortRef.current = controller;
-    const assistantId = crypto.randomUUID();
     setIsSending(true);
     setStreamingStarted(false);
     setError(null);
@@ -63,12 +62,6 @@ export function useBookingChat() {
         createdAt: Date.now(),
         status: "sending",
       },
-      {
-        id: assistantId,
-        role: "assistant",
-        text: "",
-        createdAt: Date.now(),
-      },
     ]);
 
     try {
@@ -77,23 +70,33 @@ export function useBookingChat() {
         {
           onStarted: () => setStreamingStarted(true),
           onMessage: (result) => {
-            setMessages((current) => current.map((message) => {
-              if (message.id === assistantId) return { ...message, text: result.text, response: result };
-              if (message.role === "user" && message.status === "sending") {
-                return { ...message, status: "sent" };
-              }
-              return message;
-            }));
+            setMessages((current) => [
+              ...current.map((message) => (
+                message.role === "user" && message.status === "sending"
+                  ? { ...message, status: "sent" as const }
+                  : message
+              )),
+              {
+                id: crypto.randomUUID(),
+                role: "assistant",
+                text: result.text,
+                response: result,
+                createdAt: Date.now(),
+              },
+            ]);
           },
         },
       );
     } catch (cause) {
       const problem = cause instanceof ChatApiError ? cause.problem : null;
       if (problem?.code === "cancelled") {
-        setMessages((current) => current.filter((message) => message.id !== assistantId));
+        setMessages((current) => current.map((message) => (
+          message.role === "user" && message.status === "sending"
+            ? { ...message, status: "sent" as const }
+            : message
+        )));
       } else {
         setMessages((current) => current
-          .filter((message) => message.id !== assistantId || message.text.length > 0)
           .map((message) => (
             message.role === "user" && message.status === "sending"
               ? { ...message, status: "failed" as const }

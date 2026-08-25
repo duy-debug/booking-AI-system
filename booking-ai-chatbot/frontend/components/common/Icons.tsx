@@ -12,6 +12,7 @@ export {
   RefreshCcw as RefreshIcon,
   Send as SendIcon,
   Sparkles as SparklesIcon,
+  Square as StopIcon,
   Sun as SunIcon,
   ThumbsDown as ThumbsDownIcon,
   ThumbsUp as ThumbsUpIcon,
