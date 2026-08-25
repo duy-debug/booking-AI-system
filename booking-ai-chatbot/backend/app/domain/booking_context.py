@@ -75,6 +75,10 @@ class BookingContext:
     booking: Booking | None = None
     reservation_code: str | None = None
     booking_attempt_id: str | None = None
+    last_booking: Booking | None = None
+    last_booking_id: UUID | None = None
+    last_reservation_code: str | None = None
+    last_booking_phone: str | None = None
     last_failure_code: str | None = None
 
     @property
@@ -571,6 +575,20 @@ class BookingContext:
         self.course_selection_mode = CourseSelectionMode.NONE
         self.last_failure_code = None
         self.turn_sequence = turn_sequence
+
+    # Kết thúc một task booking nhưng giữ lại reference gần nhất cho câu hỏi tiếp theo.
+    def finish_current_task(self) -> None:
+        """Clear the active task while preserving references to the latest official booking."""
+        if self.booking is not None:
+            self.last_booking = self.booking
+            self.last_booking_id = self.booking.booking_id
+            self.last_reservation_code = self.booking.reservation_code or self.reservation_code
+            self.last_booking_phone = self.booking.customer.phone
+        else:
+            self.last_booking_id = self.booking_id or self.last_booking_id
+            self.last_reservation_code = self.reservation_code or self.last_reservation_code
+        self.last_booking_phone = self.phone or self.last_booking_phone
+        self.reset()
 
     # Bắt đầu booking mới từ state chọn shop.
     def restart_booking(self) -> None:

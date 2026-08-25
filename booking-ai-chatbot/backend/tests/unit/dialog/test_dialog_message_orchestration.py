@@ -30,7 +30,7 @@ from app.dialog.nlu import (
     StateIntentPolicy,
 )
 from app.domain.booking_context import BookingContext
-from app.domain.booking_models import Course, CourseType, Shop
+from app.domain.booking_models import Booking, Course, CourseType, Customer, Shop
 from app.domain.booking_state import BookingState
 from app.domain.outcomes import HandlerOutcome, HandlerResult
 from app.transport.chat_api import _to_chat_response
@@ -148,6 +148,29 @@ class FakeController:
             instruction_template="greeting",
             executed_actions=(),
             auto_transition_count=0,
+        )
+
+
+class FinishedFlowController(FakeController):
+    def __init__(self, final_state: BookingState) -> None:
+        super().__init__()
+        self.final_state = final_state
+
+    async def handle_turn(
+        self,
+        context: BookingContext,
+        turn: DialogTurnInput,
+    ) -> DialogTurnResult:
+        self.calls.append((context, turn))
+        context.state = self.final_state
+        return DialogTurnResult(
+            status=DialogTurnStatus.SUCCESS,
+            initial_state=BookingState.BOOKING_EXECUTING,
+            final_state=self.final_state,
+            intent=turn.intent,
+            instruction_template="booking_complete",
+            executed_actions=("create_booking",),
+            auto_transition_count=1,
         )
 
 
@@ -537,6 +560,52 @@ async def test_resolved_branch_runs_controller_renderer_and_save_once() -> None:
     assert len(fake.instruction_builder.calls) == 1
     assert fake.conversation_context_store.saved == [("conversation-a", context)]
     assert response.text == "Safe response"
+
+
+@pytest.mark.parametrize(
+    "finished_state",
+    [BookingState.COMPLETED, BookingState.CANCELLED],
+)
+@pytest.mark.asyncio
+async def test_finished_booking_turn_saves_next_session_as_idle(
+    finished_state: BookingState,
+) -> None:
+    booking = Booking(
+        booking_id=UUID("77777777-7777-7777-7777-777777777777"),
+        status="confirmed",
+        shop=SHOP,
+        main_course=MAIN_COURSES[0],
+        customer=Customer("0901234567", "Nguyen An"),
+        booking_date=date(2099, 8, 1),
+        start_time=time(10, 30),
+        reservation_code="BK-TEST-001",
+    )
+    context = BookingContext(
+        "conversation-a",
+        state=BookingState.IDLE,
+        shop=SHOP,
+        booking=booking,
+        booking_id=booking.booking_id,
+        reservation_code=booking.reservation_code,
+    )
+    fake = FakeContainer(context=context, nlu_result=resolved_nlu())
+    fake.dialog_controller = FinishedFlowController(finished_state)
+
+    response = await _process_controller_pipeline(
+        request=request(idempotency_key="stable-key"),
+        container=as_container(fake),
+    )
+
+    assert response.state is finished_state
+    assert fake.conversation_context_store.saved == [("conversation-a", context)]
+    assert context.state is BookingState.IDLE
+    assert context.shop is None
+    assert context.booking is None
+    assert context.booking_id is None
+    assert context.last_booking == booking
+    assert context.last_booking_id == booking.booking_id
+    assert context.last_reservation_code == "BK-TEST-001"
+    assert context.last_booking_phone == "0901234567"
 
 
 @pytest.mark.asyncio

@@ -811,6 +811,7 @@ async def _process_serialized_chat_message(
                 response=response,
                 context=context,
             )
+        _reset_finished_session_context(response=response, context=context)
         if response.status is not DialogTurnStatus.FAILURE_UNHANDLED:
             # Chỉ commit context sau khi toàn bộ handler/state pipeline đã thành công.
             await container.conversation_context_store.save(
@@ -859,6 +860,24 @@ async def _process_serialized_chat_message(
         reset_turn(turn_token)
         reset_correlation_id(correlation_token)
         reset_conversation(token)
+
+
+def _reset_finished_session_context(
+    *,
+    response: "DialogResponse",
+    context: BookingContext,
+) -> None:
+    # Sau khi đã dựng response thành công cho nghiệp vụ cuối,
+    # context lưu vào session phải quay về idle để lượt chat kế tiếp
+    # có thể bắt đầu đặt/hủy booking mới trong cùng conversation.
+    #
+    # Không đổi `response.state`: frontend vẫn thấy kết quả của lượt vừa xong
+    # là completed/cancelled, còn backend không bị kẹt terminal state.
+    if (
+        response.status is DialogTurnStatus.SUCCESS
+        and response.state in {BookingState.COMPLETED, BookingState.CANCELLED}
+    ):
+        context.finish_current_task()
 
 
 async def _process_bound_chat_message(
