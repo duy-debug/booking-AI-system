@@ -52,7 +52,11 @@ class FakeStreamingLLM(FakeLLM):
 
 def response() -> DialogResponse:
     return DialogResponse(
-        "Bạn muốn đặt lịch vào ngày nào?",
+        (
+            "Anh/chị muốn đặt lịch vào ngày nào? "
+            "Anh/chị có thể nhập hôm nay, ngày mai hoặc một ngày cụ thể "
+            "để mình kiểm tra lịch trống phù hợp."
+        ),
         "ask_date",
         BookingState.SELECTING_DATE,
         DialogTurnStatus.SUCCESS,

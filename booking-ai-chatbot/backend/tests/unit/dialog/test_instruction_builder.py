@@ -202,7 +202,7 @@ def test_group_therapist_renderer_offers_gender_but_not_names() -> None:
         context=context,
     )
 
-    assert "không hỗ trợ chọn kỹ thuật viên theo tên" in response.text
+    assert "chưa hỗ trợ chọn kỹ thuật viên theo tên riêng" in response.text
     assert response.quick_replies == ("Không yêu cầu", "Nam", "Nữ")
 
 
@@ -305,7 +305,11 @@ def test_none_template_uses_state_fallback() -> None:
         context=BookingContext("conversation-1"),
     )
 
-    assert response.text == "Bạn muốn đặt lịch vào ngày nào?"
+    assert response.text == (
+        "Anh/chị muốn đặt lịch vào ngày nào? "
+        "Anh/chị có thể nhập hôm nay, ngày mai hoặc một ngày cụ thể "
+        "để mình kiểm tra lịch trống phù hợp."
+    )
     assert response.instruction_template is None
 
 

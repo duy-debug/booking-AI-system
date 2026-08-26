@@ -172,6 +172,21 @@
                                                                                     "instruction_template":  "cancel_existing_booking_confirmation"
                                                                                 },
                                                                                 {
+                                                                                    "intent":  "start_booking",
+                                                                                    "target":  "selecting_shop",
+                                                                                    "actions":  [
+                                                                                                    "restart_booking",
+                                                                                                    "search_shop"
+                                                                                                ],
+                                                                                    "on_fail":  [
+                                                                                                    {
+                                                                                                        "condition":  "*",
+                                                                                                        "target":  "collecting_cancel_booking_identity",
+                                                                                                        "instruction_template":  "shop_lookup_unavailable"
+                                                                                                    }
+                                                                                                ]
+                                                                                },
+                                                                                {
                                                                                     "intent":  "cancel_flow",
                                                                                     "target":  "idle",
                                                                                     "actions":  [

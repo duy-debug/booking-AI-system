@@ -51,7 +51,7 @@ def policy() -> StateIntentPolicy:
     allowed = {
         BookingState.IDLE: frozenset({"start_booking", "cancel_existing_booking", "unknown"}),
         BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY: frozenset(
-            {"cancel_existing_booking", "unknown"}
+            {"start_booking", "cancel_existing_booking", "unknown"}
         ),
         BookingState.AWAITING_CANCEL_CONFIRMATION: frozenset(
             {"confirm", "deny", "cancel_flow", "unknown"}

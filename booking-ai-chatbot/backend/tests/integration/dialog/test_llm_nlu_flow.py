@@ -481,7 +481,7 @@ async def test_state_disallowed_llm_intent_returns_clarification_without_control
     assert controller.calls == []
     assert context.state is BookingState.SELECTING_PEOPLE
     assert context.num_customer is None
-    assert "số người từ 1 đến 3" in response.text
+    assert "từ 1 đến 3 người" in response.text
     assert external_requests == []
 
 
@@ -549,5 +549,5 @@ async def test_low_confidence_or_provider_failure_is_safe_and_non_mutating(
     assert controller.calls == []
     assert context.state is BookingState.SELECTING_PEOPLE
     assert context.num_customer is None
-    assert "số người từ 1 đến 3" in response.text
+    assert "từ 1 đến 3 người" in response.text
     assert external_requests == []

@@ -9,7 +9,11 @@ from typing import TypeAlias
 
 from app.dialog.dialog_controller import DialogTurnResult, DialogTurnStatus
 from app.domain.booking_context import BookingContext
-from app.domain.booking_models import TherapistPreferenceType
+from app.domain.booking_models import (
+    MAX_CUSTOMERS_PER_BOOKING,
+    MIN_CUSTOMERS_PER_BOOKING,
+    TherapistPreferenceType,
+)
 from app.domain.booking_state import BookingState
 
 _TEMPLATE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -209,7 +213,10 @@ class InstructionBuilder:
             facts.append(f"Giờ đã xác nhận: {context.start_time.strftime('%H:%M')}.")
         facts.extend(
             (
-                "Hãy viết câu trả lời tiếng Việt tự nhiên, ngắn gọn.",
+                "Hãy viết câu trả lời tiếng Việt tự nhiên, thân thiện và đủ ngữ cảnh.",
+                "Không trả lời cụt một câu nếu response đang hỏi bước tiếp theo của booking flow.",
+                "Ưu tiên 1-3 câu rõ ràng: xác nhận ngắn thông tin đã có, "
+                "rồi hỏi đúng thông tin còn thiếu.",
                 "Giữ một giọng xưng hô thống nhất: dùng anh/chị, "
                 "không đổi qua lại giữa bạn và anh/chị.",
                 "Đây là spa/massage, luôn dùng đặt lịch; không dùng đặt bàn.",
@@ -383,42 +390,61 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft("Bạn muốn đổi sang cửa hàng nào?")
+        return DialogResponseDraft(
+            "Anh/chị muốn đổi lịch sang cửa hàng nào? "
+            "Anh/chị có thể nhập tên chi nhánh hoặc khu vực để mình kiểm tra lại lựa chọn phù hợp."
+        )
 
     @staticmethod
     def _change_ask_date(
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft("Bạn muốn đổi sang ngày nào?")
+        return DialogResponseDraft(
+            "Anh/chị muốn đổi lịch sang ngày nào? "
+            "Anh/chị có thể nhập hôm nay, ngày mai hoặc một ngày cụ thể "
+            "để mình kiểm tra lịch trống."
+        )
 
     @staticmethod
     def _change_ask_people(
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft("Bạn muốn đổi thành bao nhiêu người?")
+        return DialogResponseDraft(
+            "Anh/chị muốn đổi lịch thành bao nhiêu người? "
+            "Mình sẽ kiểm tra lại theo giới hạn đặt lịch hiện tại trước khi xác nhận thay đổi."
+        )
 
     @staticmethod
     def _change_ask_duration(
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft("Bạn muốn đổi sang thời lượng bao nhiêu phút?")
+        return DialogResponseDraft(
+            "Anh/chị muốn đổi sang thời lượng bao nhiêu phút? "
+            "Mình sẽ đối chiếu với các thời lượng mà cửa hàng đang hỗ trợ."
+        )
 
     @staticmethod
     def _change_ask_course(
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft("Bạn muốn đổi sang liệu trình nào?")
+        return DialogResponseDraft(
+            "Anh/chị muốn đổi sang liệu trình nào? "
+            "Anh/chị có thể nhập tên liệu trình mong muốn để mình kiểm tra lại khả dụng."
+        )
 
     @staticmethod
     def _change_ask_time(
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft("Bạn muốn đổi sang khung giờ nào?")
+        return DialogResponseDraft(
+            "Anh/chị muốn đổi sang khung giờ nào? "
+            "Mình sẽ kiểm tra lại khung giờ đó với cửa hàng và kỹ thuật viên nếu có."
+        )
 
     @staticmethod
     def _change_ask_therapist(
@@ -426,7 +452,8 @@ class InstructionBuilder:
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
         return DialogResponseDraft(
-            "Bạn muốn chọn Nam, Nữ hay Không yêu cầu?",
+            "Anh/chị muốn đổi yêu cầu kỹ thuật viên như thế nào? "
+            "Anh/chị có thể chọn Không yêu cầu, chọn giới tính hoặc nhập tên kỹ thuật viên cụ thể.",
             ("Không yêu cầu", "Nam", "Nữ"),
         )
 
@@ -435,7 +462,10 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft("Vui lòng nhập số điện thoại mới.")
+        return DialogResponseDraft(
+            "Anh/chị vui lòng nhập số điện thoại mới để mình kiểm tra thông tin khách hàng "
+            "trước khi cập nhật lịch."
+        )
 
     @staticmethod
     def _change_invalid(
@@ -477,23 +507,40 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft("Xin chào! Tôi có thể giúp bạn đặt lịch tại cửa hàng.")
+        return DialogResponseDraft(
+            "Xin chào anh/chị, mình là Kori. "
+            "Mình có thể hỗ trợ anh/chị đặt lịch mới, điều chỉnh lịch đang tạo "
+            "hoặc hủy booking đã đặt."
+        )
 
     @staticmethod
     def _ask_shop(
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft("Bạn muốn đặt lịch tại cửa hàng nào?")
+        return DialogResponseDraft(
+            "Anh/chị muốn đặt lịch tại cửa hàng hoặc khu vực nào? "
+            "Anh/chị có thể nhập tên chi nhánh, ví dụ Komorebi Nha Trang, để mình kiểm tra tiếp."
+        )
 
     @staticmethod
     def _ask_date(
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        text = "Bạn muốn đặt lịch vào ngày nào?"
+        if context.shop is not None:
+            text = (
+                f"Mình đã ghi nhận cửa hàng {context.shop.name}. "
+                "Anh/chị muốn đặt lịch vào ngày nào?"
+            )
+        else:
+            text = "Anh/chị muốn đặt lịch vào ngày nào?"
         if context.booking_date is not None:
             text += f" Ngày đang chọn là {_format_date(context.booking_date)}."
+        text += (
+            " Anh/chị có thể nhập hôm nay, ngày mai hoặc một ngày cụ thể "
+            "để mình kiểm tra lịch trống phù hợp."
+        )
         return DialogResponseDraft(text)
 
     @staticmethod
@@ -515,7 +562,18 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft("Bạn muốn đặt lịch cho bao nhiêu người?")
+        details: list[str] = []
+        if context.shop is not None:
+            details.append(f"tại {context.shop.name}")
+        if context.booking_date is not None:
+            details.append(f"ngày {_format_date(context.booking_date)}")
+        prefix = f"Mình đã ghi nhận lịch {' '.join(details)}. " if details else ""
+        return DialogResponseDraft(
+            prefix
+            + "Anh/chị muốn đặt lịch cho bao nhiêu người? "
+            + "Hiện hệ thống hỗ trợ từ "
+            + f"{MIN_CUSTOMERS_PER_BOOKING} đến {MAX_CUSTOMERS_PER_BOOKING} người cho một booking."
+        )
 
     @staticmethod
     def _people_too_many(
@@ -532,9 +590,16 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
+        details: list[str] = []
+        if context.shop is not None:
+            details.append(context.shop.name)
+        if context.num_customer is not None:
+            details.append(f"{context.num_customer} người")
+        prefix = f"Với thông tin đã chọn ({', '.join(details)}), " if details else ""
         return DialogResponseDraft(
-            "Anh/chị muốn chọn thời lượng bao nhiêu phút? "
-            "Em sẽ gợi ý các thời lượng hợp lệ theo cửa hàng đã chọn bên dưới.",
+            prefix
+            + "anh/chị muốn chọn thời lượng bao nhiêu phút? "
+            + "Mình sẽ dựa trên dữ liệu thật của cửa hàng để gợi ý các thời lượng đang hỗ trợ."
         )
 
     @staticmethod
@@ -542,9 +607,15 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        text = "Bạn muốn chọn liệu trình chính nào?"
+        text = (
+            "Anh/chị muốn chọn liệu trình chính nào? "
+            "Anh/chị có thể nhập tên liệu trình hoặc chọn trong danh sách mình gợi ý."
+        )
         if context.main_course is not None:
-            text = f"Bạn đã chọn {context.main_course.name}. Bạn muốn chọn thêm add-on nào?"
+            text = (
+                f"Anh/chị đã chọn liệu trình chính {context.main_course.name}. "
+                "Anh/chị muốn chọn thêm add-on nào, hay bỏ qua bước add-on để tiếp tục?"
+            )
             if context.addons:
                 addon_names = ", ".join(item.name for item in context.addons)
                 text += f" Add-on đang chọn: {addon_names}."
@@ -566,7 +637,10 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft("Bạn cần chọn một liệu trình chính để tiếp tục.")
+        return DialogResponseDraft(
+            "Anh/chị cần chọn một liệu trình chính trước để mình kiểm tra thời lượng, "
+            "khung giờ và các add-on phù hợp."
+        )
 
     @staticmethod
     def _combo_not_bookable_retry(
@@ -574,7 +648,8 @@ class InstructionBuilder:
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
         return DialogResponseDraft(
-            "Tổ hợp liệu trình này chưa thể đặt. Vui lòng chọn lại.",
+            "Tổ hợp liệu trình hiện tại chưa thể đặt ở cửa hàng đã chọn. "
+            "Anh/chị vui lòng chọn lại liệu trình hoặc add-on khác để mình kiểm tra tiếp.",
             metadata={"can_retry": True},
         )
 
@@ -630,7 +705,8 @@ class InstructionBuilder:
     ) -> DialogResponseDraft:
         slots = context.available_slots or ()
         return DialogResponseDraft(
-            "Bạn muốn chọn khung giờ nào?",
+            "Mình đã kiểm tra được các khung giờ còn trống. "
+            "Anh/chị muốn chọn khung giờ nào để tiếp tục đặt lịch?",
             tuple(_format_time(slot) for slot in slots),
             {
                 "available_slot_count": len(slots),
@@ -655,12 +731,14 @@ class InstructionBuilder:
     ) -> DialogResponseDraft:
         if context.num_customer in (2, 3):
             return DialogResponseDraft(
-                "Đặt nhóm không hỗ trợ chọn kỹ thuật viên theo tên. "
-                "Bạn có thể yêu cầu giới tính kỹ thuật viên hoặc không yêu cầu.",
+                "Với booking nhóm, hệ thống chưa hỗ trợ chọn kỹ thuật viên theo tên riêng. "
+                "Anh/chị có thể chọn giới tính kỹ thuật viên hoặc chọn Không yêu cầu "
+                "để cửa hàng sắp xếp phù hợp.",
                 ("Không yêu cầu", "Nam", "Nữ"),
             )
         return DialogResponseDraft(
-            "Bạn có thể nhập tên kỹ thuật viên cụ thể, chọn giới tính hoặc bỏ qua.",
+            "Anh/chị muốn chọn kỹ thuật viên như thế nào? "
+            "Anh/chị có thể nhập tên kỹ thuật viên cụ thể, chọn giới tính hoặc chọn Không yêu cầu.",
             ("Không yêu cầu", "Nam", "Nữ"),
         )
 
@@ -680,7 +758,10 @@ class InstructionBuilder:
         context: BookingContext,
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
-        return DialogResponseDraft("Vui lòng nhập số điện thoại để kiểm tra thông tin khách hàng.")
+        return DialogResponseDraft(
+            "Anh/chị vui lòng nhập số điện thoại để mình kiểm tra thông tin khách hàng "
+            "và hoàn tất bước xác nhận lịch."
+        )
 
     @staticmethod
     def _ask_customer_name(
@@ -688,7 +769,8 @@ class InstructionBuilder:
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
         return DialogResponseDraft(
-            "Đây là lần đầu số điện thoại này đặt lịch. Vui lòng cho biết tên khách hàng."
+            "Mình chưa có tên khách hàng cho số điện thoại này. "
+            "Anh/chị vui lòng cho mình biết tên khách hàng để lưu vào thông tin đặt lịch."
         )
 
     @staticmethod

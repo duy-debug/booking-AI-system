@@ -644,6 +644,7 @@ class ActionRegistry:
     def _register_domain_actions(self) -> None:
         bindings: tuple[tuple[str, ActionCallable], ...] = (
             ("handle_store_selection", self._handle_store_selection),
+            ("restart_booking", self._restart_booking),
             ("handle_date_selection", self._handle_date_selection),
             ("handle_people_selection", self._handle_people_selection),
             ("handle_duration_selection", self._handle_duration_selection),
@@ -693,6 +694,16 @@ class ActionRegistry:
         """Acknowledge a renderer/state-machine marker with no domain mutation."""
         del context
         return ActionResult(action_name)
+
+    async def _restart_booking(self, context: ActionExecutionContext) -> ActionResult:
+        """
+        Reset task hiện tại trước khi bắt đầu một draft đặt lịch mới.
+
+        Dùng khi khách đang ở flow khác, ví dụ hủy booking, nhưng đổi ý sang đặt lịch mới.
+        """
+
+        context.booking_context.restart_booking()
+        return ActionResult("restart_booking")
 
     async def _clear_course_for_reselect(self, context: ActionExecutionContext) -> ActionResult:
         context.booking_context.change_course_selection(None)

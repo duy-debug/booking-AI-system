@@ -122,6 +122,11 @@ def test_flow_loads_all_booking_states(flow: FlowDefinition) -> None:
     ("state", "intent", "target"),
     [
         (BookingState.IDLE, "start_booking", BookingState.SELECTING_SHOP),
+        (
+            BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY,
+            "start_booking",
+            BookingState.SELECTING_SHOP,
+        ),
         (BookingState.SELECTING_SHOP, "select_store", BookingState.SELECTING_DATE),
         (
             BookingState.SELECTING_DATE,
@@ -595,7 +600,7 @@ def test_action_registry_audits_declared_actions_without_reading_json(
     declared_actions = _all_declared_actions(flow)
     unregistered = bridge.find_unregistered_actions(declared_actions)
 
-    assert len(set(declared_actions)) == 28
+    assert len(set(declared_actions)) == 29
     assert {
         "search_shop",
         "load_time_slots",
