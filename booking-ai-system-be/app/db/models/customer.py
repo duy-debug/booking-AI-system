@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -34,6 +34,7 @@ class Customer(TimestampMixin, Base):
     )
 
     bookings = relationship("Booking", back_populates="customer")
+    restrictions = relationship("CustomerRestriction", back_populates="customer")
 
     # Tạo chuỗi đại diện chứa số điện thoại và tên khách hàng khi kiểm tra dữ liệu ORM.
     def __repr__(self) -> str:

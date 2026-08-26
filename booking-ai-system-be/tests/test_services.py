@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import AppError
 from app.db.models.booking import Booking
 from app.db.models.customer import Customer
+from app.db.models.customer_restriction import CustomerRestriction
 from app.db.models.reservation import Reservation
 from app.db.models.reservation_course import ReservationCourse
 from app.db.session import SessionLocal
@@ -623,6 +624,79 @@ class TestEligibilityService:
             service.check_eligibility(phone="0999000000", shop_id=uuid.uuid4())
         assert exc.value.status_code == 404
         assert exc.value.detail["code"] == "SHOP_NOT_FOUND"
+
+    def test_check_eligibility_blocks_customer_restricted_by_customer_id(self, db: Session, test_data: dict):
+        phone = f"0999{TAG}rid"
+        customer = Customer(phone=phone, name="Restricted by ID")
+        db.add(customer)
+        db.flush()
+        db.add(
+            CustomerRestriction(
+                phone=f"{phone}old",
+                customer_id=customer.customer_id,
+                reason="Restricted by customer_id",
+                is_active=True,
+            )
+        )
+        db.flush()
+
+        service = EligibilityService(db)
+        with pytest.raises(AppError) as exc:
+            service.check_eligibility(
+                phone=phone,
+                shop_id=uuid.UUID(test_data["shop_id"]),
+            )
+
+        assert exc.value.status_code == 403
+        assert exc.value.detail["code"] == "CUSTOMER_IN_NG_LIST"
+
+    def test_check_eligibility_blocks_legacy_phone_only_restriction(self, db: Session, test_data: dict):
+        phone = f"0999{TAG}rph"
+        db.add(
+            CustomerRestriction(
+                phone=phone,
+                customer_id=None,
+                reason="Legacy phone-only restriction",
+                is_active=True,
+            )
+        )
+        db.flush()
+
+        service = EligibilityService(db)
+        with pytest.raises(AppError) as exc:
+            service.check_eligibility(
+                phone=phone,
+                shop_id=uuid.UUID(test_data["shop_id"]),
+            )
+
+        assert exc.value.status_code == 403
+        assert exc.value.detail["code"] == "CUSTOMER_IN_NG_LIST"
+
+    def test_check_eligibility_remains_linked_after_customer_name_changes(self, db: Session, test_data: dict):
+        phone = f"0999{TAG}rnm"
+        customer = Customer(phone=phone, name="Before")
+        db.add(customer)
+        db.flush()
+        db.add(
+            CustomerRestriction(
+                phone=phone,
+                customer_id=customer.customer_id,
+                reason="Name change should not affect restriction",
+                is_active=True,
+            )
+        )
+        customer.name = "After"
+        db.flush()
+
+        service = EligibilityService(db)
+        with pytest.raises(AppError) as exc:
+            service.check_eligibility(
+                phone=phone,
+                shop_id=uuid.UUID(test_data["shop_id"]),
+            )
+
+        assert exc.value.status_code == 403
+        assert exc.value.detail["code"] == "CUSTOMER_IN_NG_LIST"
 
 
 class TestTherapistScheduleService:

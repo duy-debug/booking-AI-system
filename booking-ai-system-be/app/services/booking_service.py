@@ -17,6 +17,7 @@ from app.repositories import (
     CourseRepository,
     CustomerRepository,
     ReservationRepository,
+    RestrictionRepository,
     ShiftRepository,
     ShopRepository,
     TherapistRepository,
@@ -57,6 +58,7 @@ class BookingService:
         self.course_repo = CourseRepository(session)
         self.customer_repo = CustomerRepository(session)
         self.reservation_repo = ReservationRepository(session)
+        self.restriction_repo = RestrictionRepository(session)
         self.shift_repo = ShiftRepository(session)
         self.therapist_repo = TherapistRepository(session)
         self.availability_service = TherapistAvailabilityService(session)
@@ -112,6 +114,18 @@ class BookingService:
             self.customer_repo.save(customer)
 
         # Validate courses + tính tổng thời lượng
+        # Chặn NG list ngay trong create booking để không phụ thuộc caller đã gọi eligibility trước đó.
+        restriction = self.restriction_repo.find_active_for_customer(
+            customer_id=customer.customer_id,
+            phone=customer.phone,
+        )
+        if restriction:
+            raise AppError(
+                403,
+                code="CUSTOMER_IN_NG_LIST",
+                detail="Số điện thoại này không được phép đặt booking",
+            )
+
         main_course = None
         total_duration = 0
         for c in body.courses:

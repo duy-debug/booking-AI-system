@@ -704,8 +704,9 @@ class InstructionBuilder:
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
         return DialogResponseDraft(
-            "Không thể tiếp tục đặt lịch trực tuyến. Vui lòng liên hệ trực tiếp "
-            "cửa hàng để được hỗ trợ."
+            "Số điện thoại anh/chị vừa cung cấp hiện đang bị hạn chế đặt lịch "
+            "trực tuyến trên hệ thống. Anh/chị có thể kiểm tra lại số điện thoại, "
+            "dùng số điện thoại khác hoặc liên hệ trực tiếp cửa hàng để được hỗ trợ."
         )
 
     @staticmethod

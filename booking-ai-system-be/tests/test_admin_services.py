@@ -27,6 +27,7 @@ from app.db.models.shop import Shop
 from app.db.models.course import Course
 from app.db.models.therapist import Therapist
 from app.db.models.therapist_shift import TherapistShift
+from app.db.models.customer import Customer
 from app.db.models.customer_restriction import CustomerRestriction
 
 TAG = f"as{uuid.uuid4().hex[:4]}"
@@ -560,6 +561,60 @@ class TestRestrictionService:
         r = svc.create(RestrictionCreate(phone=phone, reason="Test"))
         assert r.restriction_id is not None
         assert r.phone == phone
+
+    def test_create_for_existing_customer_stores_customer_id_and_phone(self, db: Session):
+        phone = self._unique_phone("rcid1")
+        customer = Customer(phone=phone, name="Restricted Customer")
+        db.add(customer)
+        db.flush()
+
+        svc = RestrictionService(db)
+        restriction = svc.create(RestrictionCreate(phone=phone, reason="Existing customer"))
+
+        assert restriction.customer_id == customer.customer_id
+        assert restriction.phone == phone
+        assert restriction.customer == customer
+
+    def test_find_active_for_customer_prefers_customer_id(self, db: Session):
+        phone = self._unique_phone("rcid2")
+        legacy_phone = f"{phone}old"
+        customer = Customer(phone=phone, name="Renamed Customer")
+        db.add(customer)
+        db.flush()
+        restriction = CustomerRestriction(
+            phone=legacy_phone,
+            customer_id=customer.customer_id,
+            reason="Linked by customer_id",
+            is_active=True,
+        )
+        db.add(restriction)
+        db.flush()
+
+        repo = RestrictionRepository(db)
+        found = repo.find_active_for_customer(
+            customer_id=customer.customer_id,
+            phone=phone,
+        )
+
+        assert found is not None
+        assert found.restriction_id == restriction.restriction_id
+
+    def test_find_active_for_customer_falls_back_to_legacy_phone(self, db: Session):
+        phone = self._unique_phone("rcid3")
+        restriction = CustomerRestriction(
+            phone=phone,
+            customer_id=None,
+            reason="Legacy phone-only restriction",
+            is_active=True,
+        )
+        db.add(restriction)
+        db.flush()
+
+        repo = RestrictionRepository(db)
+        found = repo.find_active_for_customer(customer_id=None, phone=phone)
+
+        assert found is not None
+        assert found.restriction_id == restriction.restriction_id
 
     def test_create_active_exists(self, db: Session):
         phone = self._unique_phone("rc2")

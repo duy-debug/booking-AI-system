@@ -29,12 +29,16 @@ class RestrictionService:
     # Tạo restriction mới — kiểm tra không có restriction active cho phone đó
     def create(self, body: RestrictionCreate) -> CustomerRestriction:
         try:
+            customer_id = self.repo.find_customer_id_by_phone(body.phone)
             if body.is_active:
-                existing = self.repo.find_active_by_phone(body.phone)
+                existing = self.repo.find_active_for_customer(
+                    customer_id=customer_id,
+                    phone=body.phone,
+                )
                 if existing:
                     raise AppError(409, code="CUSTOMER_RESTRICTION_ALREADY_EXISTS", detail="Phone đã có restriction còn hiệu lực")
 
-            restriction = CustomerRestriction(**body.model_dump())
+            restriction = CustomerRestriction(**body.model_dump(), customer_id=customer_id)
             self.repo.save(restriction)
             self.session.commit()
             self.repo.refresh(restriction)

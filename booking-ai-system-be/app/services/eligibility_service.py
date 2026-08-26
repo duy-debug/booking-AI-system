@@ -4,7 +4,7 @@ import uuid
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import AppError
-from app.repositories import ShopRepository, RestrictionRepository, CustomerRepository
+from app.repositories import CustomerRepository, RestrictionRepository, ShopRepository
 from app.schemas.booking import BookingEligibilityCheckResponse
 
 
@@ -24,11 +24,14 @@ class EligibilityService:
         if not shop.is_active:
             raise AppError(422, code="SHOP_INACTIVE", detail="Shop không hoạt động")
 
-        restriction = self.restriction_repo.find_active_by_phone(phone)
+        customer = self.customer_repo.find_by_phone(phone)
+        restriction = self.restriction_repo.find_active_for_customer(
+            customer_id=customer.customer_id if customer else None,
+            phone=phone,
+        )
         if restriction:
             raise AppError(403, code="CUSTOMER_IN_NG_LIST", detail="Số điện thoại này không được phép đặt booking")
 
-        customer = self.customer_repo.find_by_phone(phone)
         customer_data = None
         if customer:
             customer_data = {
