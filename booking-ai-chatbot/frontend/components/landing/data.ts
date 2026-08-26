@@ -1,6 +1,5 @@
 export const navItems = [
   { href: "#services", label: "Dịch vụ" },
-  { href: "#pricing", label: "Bảng giá" },
   { href: "#experience", label: "Trải nghiệm" },
   { href: "#assistant", label: "Về Kori" },
 ];

@@ -2,7 +2,6 @@ import { AppErrorBoundary } from "@/components/common/AppErrorBoundary";
 import { ChatWidget } from "@/components/chat/ChatWidget";
 import { AiBookingJourney } from "@/components/landing/AiBookingJourney";
 import { AssistantSection } from "@/components/landing/AssistantSection";
-import { ContactSection } from "@/components/landing/ContactSection";
 import { ExperienceSection } from "@/components/landing/ExperienceSection";
 import { FaqSection } from "@/components/landing/FaqSection";
 import { Footer } from "@/components/landing/Footer";
@@ -26,7 +25,6 @@ export default function Home() {
         <GiftSection />
         <AiBookingJourney />
         <AssistantSection />
-        <ContactSection />
         <FaqSection />
       </main>
       <Footer />
