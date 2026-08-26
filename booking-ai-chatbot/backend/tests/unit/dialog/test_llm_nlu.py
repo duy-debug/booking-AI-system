@@ -60,7 +60,7 @@ def policy() -> StateIntentPolicy:
         BookingState.SELECTING_DATE: frozenset({"select_date", "unknown"}),
         BookingState.SELECTING_PEOPLE: frozenset({"select_people", "unknown"}),
         BookingState.SELECTING_DURATION: frozenset({"select_duration", "unknown"}),
-        BookingState.SELECTING_SERVICE: frozenset({"select_course", "unknown"}),
+        BookingState.SELECTING_SERVICE: frozenset({"select_course", "deny", "unknown"}),
         BookingState.SELECTING_TIME: frozenset({"select_time", "unknown"}),
         BookingState.SELECTING_THERAPIST: frozenset({"select_therapist", "deny", "unknown"}),
         BookingState.COLLECTING_PHONE: frozenset({"provide_phone", "unknown"}),
@@ -710,6 +710,25 @@ async def test_course_entities_bridge_to_entity_resolution_request(
     assert result.payload == {}
     assert result.entity_kind is NLUEntityKind.COURSE
     assert result.entity_query == expected_query
+
+
+@pytest.mark.asyncio
+async def test_skip_addon_entity_under_select_course_maps_to_deny() -> None:
+    fallback, _ = fallback_for(
+        structured(
+            intent="select_course",
+            entities={"skip_addon": True},
+        )
+    )
+
+    result = await fallback.parse(
+        text="tôi bỏ qua bước này",
+        state=BookingState.SELECTING_SERVICE,
+    )
+
+    assert result.intent == "deny"
+    assert result.payload == {}
+    assert result.resolution_status is NLUResolutionStatus.RESOLVED
 
 
 @pytest.mark.asyncio

@@ -739,6 +739,11 @@ class LLMNLU:
     ) -> NLUResult:
         raw_intent = output.intent.strip()
         intent = _LLM_INTENT_ALIASES.get(raw_intent, raw_intent)
+        if output.entities.skip_addon is True and intent == "select_course":
+            # LLM đã hiểu đúng ý nghĩa "bỏ qua add-on", nhưng đôi khi vẫn giữ intent chọn course.
+            # Canonicalize về deny để dùng đúng transition skip_addon
+            # có sẵn trong booking_flow.json.
+            intent = "deny"
         if intent == "unknown" or output.confidence < self._min_confidence:
             # Chặn candidate dưới ngưỡng trước khi đi vào flow để log rõ lý do unresolved.
             trace_log(
