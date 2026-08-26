@@ -251,6 +251,47 @@ class StateChangingController(FakeController):
         )
 
 
+class DurationStepController(FakeController):
+    async def handle_turn(
+        self,
+        context: BookingContext,
+        turn: DialogTurnInput,
+    ) -> DialogTurnResult:
+        self.calls.append((context, turn))
+        initial_state = context.state
+        context.state = BookingState.SELECTING_DURATION
+        return DialogTurnResult(
+            status=DialogTurnStatus.SUCCESS,
+            initial_state=initial_state,
+            final_state=context.state,
+            intent=turn.intent,
+            instruction_template="ask_duration",
+            executed_actions=(),
+            auto_transition_count=0,
+        )
+
+
+class DurationSelectedController(FakeController):
+    async def handle_turn(
+        self,
+        context: BookingContext,
+        turn: DialogTurnInput,
+    ) -> DialogTurnResult:
+        self.calls.append((context, turn))
+        initial_state = context.state
+        context.set_duration(30)
+        context.state = BookingState.SELECTING_SERVICE
+        return DialogTurnResult(
+            status=DialogTurnStatus.SUCCESS,
+            initial_state=initial_state,
+            final_state=context.state,
+            intent=turn.intent,
+            instruction_template="ask_course",
+            executed_actions=(),
+            auto_transition_count=0,
+        )
+
+
 class FakeBuilder:
     def __init__(self) -> None:
         self.calls: list[tuple[DialogTurnResult, BookingContext]] = []
@@ -1155,6 +1196,60 @@ async def test_unresolved_duration_uses_shop_course_durations() -> None:
     response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
     assert response.quick_replies == ("60 phút", "90 phút", "120 phút")
+    assert fake.search_course_handler.calls == [
+        (
+            ALT_SHOP.shop_id,
+            {"course_type": CourseType.MAIN},
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_entering_duration_step_suggests_shop_course_durations() -> None:
+    context = BookingContext(
+        "conversation-a",
+        state=BookingState.SELECTING_PEOPLE,
+        shop=ALT_SHOP,
+        num_customer=3,
+    )
+    context.booking_date = date(2026, 8, 25)
+    fake = FakeContainer(context=context, nlu_result=select_people_nlu(3))
+    fake.dialog_controller = DurationStepController()
+
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
+
+    assert response.state is BookingState.SELECTING_DURATION
+    assert response.quick_replies == ("60 phút", "90 phút", "120 phút")
+    assert "Cửa hàng hiện hỗ trợ các thời lượng" in response.text
+    assert "1. 60 phút" in response.text
+    assert fake.search_course_handler.calls == [
+        (
+            ALT_SHOP.shop_id,
+            {"course_type": CourseType.MAIN},
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_selected_duration_without_matching_main_course_suggests_valid_durations() -> None:
+    context = BookingContext(
+        "conversation-a",
+        state=BookingState.SELECTING_DURATION,
+        shop=ALT_SHOP,
+        num_customer=3,
+    )
+    context.booking_date = date(2026, 8, 25)
+    fake = FakeContainer(context=context, nlu_result=select_duration_nlu(30))
+    fake.dialog_controller = DurationSelectedController()
+
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
+
+    assert response.state is BookingState.SELECTING_DURATION
+    assert context.state is BookingState.SELECTING_DURATION
+    assert context.duration_minutes is None
+    assert response.quick_replies == ("60 phút", "90 phút", "120 phút")
+    assert "30 phút" in response.text
+    assert "1. 60 phút" in response.text
     assert fake.search_course_handler.calls == [
         (
             ALT_SHOP.shop_id,

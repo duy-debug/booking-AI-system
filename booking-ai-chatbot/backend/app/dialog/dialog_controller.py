@@ -1714,6 +1714,13 @@ async def _with_proactive_suggestions(
                 shops = _handler_items(result, "shops", Shop)
             return _shop_catalog_response(context, shops, filtered=False)
 
+        if context.state is BookingState.SELECTING_DURATION and context.shop is not None:
+            # Khi đã biết shop, chủ động lấy duration thật từ course chính của POS.
+            # Như vậy khách không phải nhập sai trước rồi hệ thống mới gợi ý lại.
+            durations = await _duration_recovery_quick_replies(container, context)
+            if durations:
+                return _duration_step_response(context, durations)
+
         if context.state is BookingState.SELECTING_SERVICE and context.shop is not None:
             course_type = (
                 CourseType.ADDON
@@ -1730,11 +1737,29 @@ async def _with_proactive_suggestions(
             )
             courses = _handler_items(result, "courses", Course)
             if course_type is CourseType.MAIN and context.duration_minutes is not None:
-                courses = [
+                selected_duration = context.duration_minutes
+                matching_courses = [
                     service
                     for service in courses
-                    if service.duration_minutes == context.duration_minutes
+                    if service.duration_minutes == selected_duration
                 ]
+                if not matching_courses:
+                    # Duration đúng format nhưng không có liệu trình chính tương ứng ở shop.
+                    # Quay lại bước chọn duration và gợi ý duration thật từ course POS vừa tải.
+                    durations = _duration_quick_replies_from_courses(courses)
+                    context.change_duration(None)
+                    context.state = BookingState.SELECTING_DURATION
+                    if durations:
+                        return _duration_mismatch_response(
+                            context,
+                            selected_duration,
+                            durations,
+                        )
+                    return _handled_response(
+                        context,
+                        "POS hiện không có liệu trình chính phù hợp để gợi ý thời lượng.",
+                    )
+                courses = matching_courses
             return _service_step_response(
                 context,
                 courses,
@@ -2088,6 +2113,47 @@ def _service_catalog_response(
     names = tuple(item.name for item in courses[:8])
     text = "\n".join(sections) + "\nBạn muốn chọn liệu trình nào?"
     return _catalog_response(context, text, names, len(courses))
+
+
+def _duration_quick_replies_from_courses(courses: list[Course]) -> tuple[str, ...]:
+    durations = sorted(
+        {
+            course.duration_minutes
+            for course in courses
+            if course.course_type is CourseType.MAIN and course.duration_minutes > 0
+        }
+    )
+    return tuple(f"{duration} phút" for duration in durations)
+
+
+# Render gợi ý duration ngay khi vào bước chọn thời lượng.
+def _duration_step_response(
+    context: BookingContext,
+    durations: tuple[str, ...],
+) -> DialogResponse:
+    text = (
+        "Cửa hàng hiện hỗ trợ các thời lượng:\n"
+        + "\n".join(f"{index}. {duration}" for index, duration in enumerate(durations, 1))
+        + "\nAnh/chị muốn chọn thời lượng nào ạ?"
+    )
+    return _catalog_response(context, text, durations, len(durations))
+
+
+# Render lỗi duration không khớp course thật và gợi ý lại duration hợp lệ.
+def _duration_mismatch_response(
+    context: BookingContext,
+    selected_duration: int,
+    durations: tuple[str, ...],
+) -> DialogResponse:
+    shop_name = context.shop.name if context.shop is not None else "cửa hàng đã chọn"
+    text = (
+        f"Thời lượng {selected_duration} phút hiện chưa có liệu trình chính phù hợp "
+        f"tại {shop_name}.\n"
+        "Cửa hàng hiện hỗ trợ các thời lượng:\n"
+        + "\n".join(f"{index}. {duration}" for index, duration in enumerate(durations, 1))
+        + "\nAnh/chị vui lòng chọn lại một thời lượng trong danh sách trên."
+    )
+    return _catalog_response(context, text, durations, len(durations))
 
 
 # Render gợi ý theo bước chọn liệu trình chính hoặc add-on trong booking flow.
@@ -2628,14 +2694,7 @@ async def _duration_recovery_quick_replies(
         course_type=CourseType.MAIN,
     )
     courses = _handler_items(result, "courses", Course, allow_not_found=True)
-    durations = sorted(
-        {
-            course.duration_minutes
-            for course in courses
-            if course.duration_minutes > 0
-        }
-    )
-    replies = tuple(f"{duration} phút" for duration in durations)
+    replies = _duration_quick_replies_from_courses(courses)
     return replies or _state_recovery_quick_replies(context)
 
 
