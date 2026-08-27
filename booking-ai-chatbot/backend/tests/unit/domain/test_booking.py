@@ -111,6 +111,19 @@ def test_service_rejects_invalid_duration(duration_minutes: int) -> None:
         )
 
 
+def test_addon_allows_positive_duration_outside_slot_grid() -> None:
+    addon = Course(
+        course_id=ADDON_ID,
+        name="Foot acupressure",
+        duration_minutes=20,
+        price=Decimal("100000.00"),
+        course_type=CourseType.ADDON,
+    )
+
+    assert addon.duration_minutes == 20
+    assert addon.course_type is CourseType.ADDON
+
+
 def test_create_customer() -> None:
     customer = make_customer()
 

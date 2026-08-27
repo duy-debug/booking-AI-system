@@ -16,6 +16,7 @@ from app.dialog.dialog_controller import (
     DialogTurnInput,
     DialogTurnResult,
     DialogTurnStatus,
+    _consume_requested_entities,
     _process_serialized_chat_message,
 )
 from app.dialog.instruction_builder import DialogResponse
@@ -903,6 +904,36 @@ async def test_prefilled_entity_not_found_returns_entity_response() -> None:
     assert fake.search_shop_handler.calls
     assert len(fake.instruction_builder.calls) == 0
     assert fake.conversation_context_store.saved == [("conversation-a", context)]
+
+
+@pytest.mark.asyncio
+async def test_prefilled_course_waits_until_service_state() -> None:
+    context = BookingContext("conversation-a", state=BookingState.SELECTING_DURATION)
+    context.requested_main_course_name = "Massage thư giãn"
+    fake = FakeContainer(
+        context=context,
+        nlu_result=resolved_nlu(),
+    )
+    result = DialogTurnResult(
+        status=DialogTurnStatus.SUCCESS,
+        initial_state=BookingState.SELECTING_DURATION,
+        final_state=BookingState.SELECTING_DURATION,
+        intent="select_store",
+        instruction_template="ask_duration",
+        executed_actions=(),
+        auto_transition_count=0,
+    )
+
+    consumption = await _consume_requested_entities(
+        container=as_container(fake),
+        context=context,
+        result=result,
+        idempotency_key=None,
+    )
+
+    assert consumption.result is result
+    assert fake.entity_resolution_coordinator.calls == []
+    assert context.requested_main_course_name == "Massage thư giãn"
 
 
 @pytest.mark.asyncio

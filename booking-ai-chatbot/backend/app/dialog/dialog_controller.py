@@ -1494,12 +1494,6 @@ async def _next_requested_turn(
                 "duration_minutes",
                 {"duration_minutes": context.duration_minutes},
             )
-        elif context.requested_main_course_name:
-            course_query, context.requested_main_course_name = (
-                context.requested_main_course_name,
-                None,
-            )
-            entity = (course_query, NLUEntityKind.COURSE)
     elif context.state is BookingState.SELECTING_SERVICE:
         if context.main_course is None and context.requested_main_course_name:
             main_query, context.requested_main_course_name = (
@@ -2451,7 +2445,8 @@ def _global_intent_response(intent: str, context: BookingContext) -> DialogRespo
         }:
             text = (
                 "Hiện tại tôi chưa tải được khung giờ từ POS. Thông tin cửa hàng, ngày, "
-                "số người và liệu trình vẫn được giữ. Anh/chị có thể thử lại hoặc chọn liệu trình khác."
+                "số người và liệu trình vẫn được giữ. "
+                "Anh/chị có thể thử lại hoặc chọn liệu trình khác."
             )
         else:
             text = f"Bước hiện tại: {prompt}"

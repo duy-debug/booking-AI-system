@@ -146,8 +146,12 @@ class Course:
     course_type: CourseType = CourseType.MAIN
 
     def __post_init__(self) -> None:
-        if self.duration_minutes <= 0 or self.duration_minutes % 15 != 0:
-            raise InvalidDurationError("Course duration must be positive and divisible by 15.")
+        if self.duration_minutes <= 0:
+            raise InvalidDurationError("Course duration must be positive.")
+        if self.course_type is CourseType.MAIN and self.duration_minutes % 15 != 0:
+            raise InvalidDurationError(
+                "Main course duration must be positive and divisible by 15."
+            )
 
 
 @dataclass(frozen=True, slots=True)
