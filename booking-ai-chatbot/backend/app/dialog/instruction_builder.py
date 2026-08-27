@@ -377,9 +377,11 @@ class InstructionBuilder:
             ("change_ask_people", self._change_ask_people),
             ("change_ask_duration", self._change_ask_duration),
             ("change_ask_course", self._change_ask_course),
+            ("change_ask_addon", self._change_ask_addon),
             ("change_ask_time", self._change_ask_time),
             ("change_ask_therapist", self._change_ask_therapist),
             ("change_ask_phone", self._change_ask_phone),
+            ("change_ask_customer_name", self._change_ask_customer_name),
             ("change_invalid", self._change_invalid),
         )
         for name, renderer in templates:
@@ -437,6 +439,17 @@ class InstructionBuilder:
         )
 
     @staticmethod
+    def _change_ask_addon(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        return DialogResponseDraft(
+            "Anh/chị muốn đổi dịch vụ đi kèm như thế nào? "
+            "Anh/chị có thể chọn add-on mới hoặc báo không chọn add-on "
+            "để mình kiểm tra lại lịch trống."
+        )
+
+    @staticmethod
     def _change_ask_time(
         context: BookingContext,
         result: DialogTurnResult,
@@ -465,6 +478,15 @@ class InstructionBuilder:
         return DialogResponseDraft(
             "Anh/chị vui lòng nhập số điện thoại mới để mình kiểm tra thông tin khách hàng "
             "trước khi cập nhật lịch."
+        )
+
+    @staticmethod
+    def _change_ask_customer_name(
+        context: BookingContext,
+        result: DialogTurnResult,
+    ) -> DialogResponseDraft:
+        return DialogResponseDraft(
+            "Anh/chị vui lòng nhập tên khách hàng mới để mình cập nhật lại thông tin xác nhận."
         )
 
     @staticmethod

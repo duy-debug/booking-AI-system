@@ -1002,6 +1002,56 @@ async def test_change_time_keeps_personal_therapist_when_still_available() -> No
 
 
 @pytest.mark.asyncio
+async def test_change_customer_name_preserves_phone_verification() -> None:
+    bridge = production_bridge()
+    booking_context = BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.AWAITING_CONFIRMATION,
+        phone="0901234567",
+        phone_confirmed=True,
+        customer=Customer(phone="0901234567", name="Nguyen An"),
+    )
+
+    await bridge.execute_action(
+        "change_customer_name",
+        execution_context(
+            booking_context=booking_context,
+            payload={"name": "Le Minh"},
+        ),
+    )
+
+    assert booking_context.phone == "0901234567"
+    assert booking_context.phone_confirmed is True
+    assert booking_context.customer == Customer(phone="0901234567", name="Le Minh")
+
+
+@pytest.mark.asyncio
+async def test_change_addon_preserves_main_course_and_clears_availability() -> None:
+    bridge = production_bridge()
+    booking_context = BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.AWAITING_CONFIRMATION,
+        main_course=COURSE,
+        start_time=time(10, 30),
+        available_slots=(time(10, 30),),
+        therapist_preference=TherapistPreference(TherapistPreferenceType.FEMALE),
+        therapist_verified=True,
+    )
+
+    await bridge.execute_action(
+        "change_addon",
+        execution_context(booking_context=booking_context),
+    )
+
+    assert booking_context.main_course == COURSE
+    assert booking_context.addons == ()
+    assert booking_context.available_slots is None
+    assert booking_context.start_time is None
+    assert booking_context.therapist_preference is None
+    assert booking_context.therapist_verified is False
+
+
+@pytest.mark.asyncio
 async def test_change_time_clears_personal_therapist_when_unavailable() -> None:
     therapist = TherapistPreference(
         TherapistPreferenceType.PERSONAL,

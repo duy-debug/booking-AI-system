@@ -657,9 +657,11 @@ class ActionRegistry:
             ("change_people", self._change_people),
             ("change_duration", self._change_duration),
             ("change_course", self._change_course),
+            ("change_addon", self._change_addon),
             ("change_time", self._change_time),
             ("change_therapist", self._change_therapist),
             ("change_phone", self._change_phone),
+            ("change_customer_name", self._change_customer_name),
             ("skip_therapist", self._skip_therapist),
             ("skip_therapist_for_group", self._skip_therapist_for_group),
             ("clear_phone_confirmation", self._clear_phone_confirmation),
@@ -932,6 +934,14 @@ class ActionRegistry:
         context.booking_context.change_course_selection(selection)
         return ActionResult("change_course", selection)
 
+    # Đổi riêng add-on: giữ main course, clear add-on cũ và buộc reload slot/time sau đó.
+    async def _change_addon(self, context: ActionExecutionContext) -> ActionResult:
+        selection = context.payload.get("course_selection")
+        if selection is not None and not isinstance(selection, CourseSelection):
+            raise InvalidActionInputError("Changed add-on must be a CourseSelection.")
+        context.booking_context.change_addon_selection(selection)
+        return ActionResult("change_addon", selection)
+
     # Đổi giờ booking và yêu cầu xác thực lại therapist nếu có.
     async def _change_time(self, context: ActionExecutionContext) -> ActionResult:
         start_time = context.payload.get("start_time")
@@ -1057,6 +1067,14 @@ class ActionRegistry:
             BookingRules.validate_phone(phone)
         context.booking_context.change_phone(phone)
         return ActionResult("change_phone", phone)
+
+    # Đổi tên khách hàng trong draft xác nhận nhưng không reset phone đã nhập.
+    async def _change_customer_name(self, context: ActionExecutionContext) -> ActionResult:
+        name = context.payload.get("name")
+        if name is not None and not isinstance(name, str):
+            raise InvalidActionInputError("Changed customer name must be a string.")
+        context.booking_context.change_customer_name(name)
+        return ActionResult("change_customer_name", name)
 
     # Lưu lựa chọn không yêu cầu therapist cho booking một người.
     async def _skip_therapist(

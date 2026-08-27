@@ -157,9 +157,11 @@ class FlowLoader:
             "people",
             "duration",
             "main_course",
+            "addon",
             "time",
             "therapist",
             "phone",
+            "customer_name",
         }
         if set(root) != allowed_targets:
             raise InvalidFlowDefinitionError(

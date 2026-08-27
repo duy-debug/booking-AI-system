@@ -94,7 +94,7 @@ def test_real_flow_template_audit_has_no_missing_or_unused_renderer() -> None:
         + ("change_invalid",)
     )
 
-    assert len(declared) == 46
+    assert len(declared) == 48
     assert builder.find_missing_templates(declared) == ()
     assert set(builder.registered_templates()) - set(declared) == set()
 

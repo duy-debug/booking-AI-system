@@ -34,6 +34,12 @@
                                                 "applied_state":  "selecting_time",
                                                 "prompt_template":  "change_ask_course"
                                             },
+                            "addon":  {
+                                          "reset_action":  "change_addon",
+                                          "next_state":  "selecting_service",
+                                          "applied_state":  "selecting_time",
+                                          "prompt_template":  "change_ask_addon"
+                                      },
                             "time":  {
                                          "reset_action":  "change_time",
                                          "next_state":  "selecting_time",
@@ -51,6 +57,12 @@
                                           "next_state":  "collecting_phone",
                                           "applied_state":  "awaiting_confirmation",
                                           "prompt_template":  "change_ask_phone"
+                                      },
+                            "customer_name":  {
+                                                  "reset_action":  "change_customer_name",
+                                                  "next_state":  "collecting_name",
+                                                  "applied_state":  "awaiting_confirmation",
+                                                  "prompt_template":  "change_ask_customer_name"
                                       }
                         },
     "states":  {

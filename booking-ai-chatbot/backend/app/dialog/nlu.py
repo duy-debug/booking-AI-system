@@ -68,10 +68,13 @@ BookingChangeTarget: TypeAlias = Literal[
     "date",
     "people",
     "duration",
+    "main_course",
     "service",
+    "addon",
     "time",
     "therapist",
     "phone",
+    "customer_name",
 ]
 
 LLM_NLU_MIN_CONFIDENCE = 0.70
@@ -313,7 +316,7 @@ class NLUResult:
                 or not isinstance(self.entity_kind, NLUEntityKind)
             ):
                 raise ValueError("Entity resolution result requires a query and kind.")
-            if self.change_target not in {None, "shop", "service"}:
+            if self.change_target not in {None, "shop", "main_course", "service", "addon"}:
                 raise ValueError("Entity resolution change target is invalid.")
         elif (
             self.entity_query is not None
@@ -460,10 +463,13 @@ def _validate_change_payload(payload: Mapping[str, object]) -> None:
         "date": ("booking_date", date),
         "people": ("num_customer", int),
         "duration": ("duration_minutes", int),
+        "main_course": ("course_selection", CourseSelection),
         "service": ("course_selection", CourseSelection),
+        "addon": ("course_selection", CourseSelection),
         "time": ("start_time", time),
         "therapist": ("therapist_gender", str),
         "phone": ("phone", str),
+        "customer_name": ("name", str),
     }
     if not isinstance(target, str) or target not in value_contracts:
         raise NLUResultNotDispatchableError("Booking change target is not supported.")
@@ -772,7 +778,9 @@ class LLMNLU:
             change_kind_matches = (
                 change_target is None
                 or (change_target == "shop" and entity_kind is NLUEntityKind.SHOP)
+                or (change_target == "main_course" and entity_kind is NLUEntityKind.COURSE)
                 or (change_target == "service" and entity_kind is NLUEntityKind.COURSE)
+                or (change_target == "addon" and entity_kind is NLUEntityKind.COURSE)
             )
             if (
                 intent != expected_intent
@@ -889,7 +897,8 @@ def _build_llm_messages(
         "Hiểu giờ tự nhiên/viết tắt theo ngữ cảnh, không bịa giờ còn thiếu. "
         "Với change_info, suy ra "
         "change_target từ khái niệm ngữ nghĩa mà người dùng muốn sửa, chỉ dùng các giá trị: "
-        "shop, date, people, duration, service, time, therapist, phone. Nếu người dùng muốn "
+        "shop, date, people, duration, main_course, addon, time, therapist, phone, customer_name. "
+        "Nếu người dùng muốn "
         "chỉnh sửa booking draft hiện tại nhưng chưa nêu rõ trường nào, hãy dùng "
         "intent=change_info với change_target là null. Không được đoán target. change_info có "
         "nghĩa là chỉnh sửa booking draft hiện tại ở các draft state mà flow cho phép. "
@@ -916,9 +925,10 @@ _INTENT_TOOL: dict[str, object] = {
             "dùng. Hãy hiểu thời gian theo ngữ nghĩa trước, rồi mới chuẩn hóa giờ đặt lịch "
             "cụ thể sang HH:MM theo định dạng 24 giờ. Với các yêu cầu sửa booking draft, "
             "hãy đặt change_target thành một trong các giá trị shop, date, people, duration, "
-            "service, time, therapist, phone; chỉ để null khi người dùng muốn sửa booking "
-            "draft hiện tại nhưng chưa nói rõ trường nào. Không được gộp các yêu cầu liên "
-            "quan đến booking đã được tạo trước đó vào change_info."
+            "main_course, addon, time, therapist, phone, customer_name; chỉ để null khi người dùng "
+            "muốn sửa booking draft hiện tại nhưng chưa nói rõ trường nào. "
+            "Không được gộp các yêu cầu "
+            "liên quan đến booking đã được tạo trước đó vào change_info."
         ),
         "parameters": {
             "type": "object",
@@ -963,10 +973,13 @@ _INTENT_TOOL: dict[str, object] = {
                                             "date",
                                             "people",
                                             "duration",
+                                            "main_course",
                                             "service",
+                                            "addon",
                                             "time",
                                             "therapist",
                                             "phone",
+                                            "customer_name",
                                             None,
                                         ],
                                         "description": (
@@ -1131,6 +1144,8 @@ def _llm_change_payload(
         payload["therapist_gender"] = entities.therapist_gender
     elif target == "phone" and entities.phone is not None:
         payload["phone"] = entities.phone
+    elif target == "customer_name" and entities.customer_name is not None:
+        payload["name"] = entities.customer_name
     return payload
 
 
@@ -1627,7 +1642,7 @@ class EntityResolutionCoordinator:
             return await self._resolve_course(
                 query,
                 context,
-                change=change_target == "service",
+                change_target=change_target,
             )
         return await self._resolve_therapist(query, context)
 
@@ -1703,7 +1718,7 @@ class EntityResolutionCoordinator:
         query: str,
         context: BookingContext,
         *,
-        change: bool = False,
+        change_target: str | None = None,
     ) -> EntityResolutionResult:
         if context.shop is None:
             return _failure(
@@ -1712,7 +1727,11 @@ class EntityResolutionCoordinator:
             )
         try:
             course_type = None
-            if not change:
+            if change_target in {"main_course", "service"}:
+                course_type = CourseType.MAIN
+            elif change_target == "addon":
+                course_type = CourseType.ADDON
+            else:
                 course_type = (
                     CourseType.ADDON
                     if context.course_selection_mode is CourseSelectionMode.ADDON
@@ -1752,19 +1771,19 @@ class EntityResolutionCoordinator:
             selection = _build_course_selection(
                 service,
                 context,
-                replace_existing=change,
+                replace_existing=change_target in {"main_course", "service"},
             )
             if selection is None:
                 return _unsupported(NLUEntityKind.COURSE, "main_course_required")
             dispatches.append(
                 _CandidateDispatch(
-                    "change_info" if change else "select_course",
+                    "change_info" if change_target is not None else "select_course",
                     (
                         {
-                            "change_target": "service",
+                            "change_target": change_target,
                             "course_selection": selection,
                         }
-                        if change
+                        if change_target is not None
                         else {"course_selection": selection}
                     ),
                 )
@@ -1915,7 +1934,9 @@ def _validate_resolution_request(
         )
     expected_change_kind = {
         "shop": NLUEntityKind.SHOP,
+        "main_course": NLUEntityKind.COURSE,
         "service": NLUEntityKind.COURSE,
+        "addon": NLUEntityKind.COURSE,
     }
     if (
         result.change_target is not None
@@ -2047,7 +2068,7 @@ def _validate_resolution_payload(
         expected_change: tuple[str, type[object]]
         if target == "shop":
             expected_change = ("shop", Shop)
-        elif target == "service":
+        elif target in {"main_course", "service", "addon"}:
             expected_change = ("course_selection", CourseSelection)
         else:
             raise EntityResolutionNotDispatchableError(

@@ -493,6 +493,16 @@ async def test_llm_change_info_is_supported_across_draft_states_when_policy_allo
             {"change_target": "phone"},
             {"change_target": "phone"},
         ),
+        (
+            "đổi tên khách hàng thành Lê Minh",
+            {"change_target": "customer_name", "customer_name": "Lê Minh"},
+            {"change_target": "customer_name", "name": "Lê Minh"},
+        ),
+        (
+            "mình muốn đổi add-on",
+            {"change_target": "addon"},
+            {"change_target": "addon"},
+        ),
     ],
 )
 async def test_llm_change_output_maps_semantic_targets_without_backend_inference(

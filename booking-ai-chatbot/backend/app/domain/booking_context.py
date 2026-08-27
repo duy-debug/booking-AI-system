@@ -474,6 +474,26 @@ class BookingContext:
             CourseSelectionMode.MAIN if selection is None else CourseSelectionMode.ADDON
         )
 
+    # Đổi riêng add-on: giữ main course hiện tại nhưng buộc kiểm tra lại slot/time.
+    def change_addon_selection(
+        self,
+        selection: CourseSelection | None = None,
+    ) -> None:
+        """Replace add-ons while preserving the selected main course."""
+        self.last_unavailable_date = None
+        if selection is None:
+            self.addons = ()
+        else:
+            if self.main_course is not None and selection.main_course != self.main_course:
+                raise InvalidCourseSelectionError(
+                    "Changed add-ons must preserve the selected main course."
+                )
+            self.main_course = selection.main_course
+            self.addons = selection.addons
+        self._clear_availability_and_therapist()
+        self._clear_booking_result()
+        self.course_selection_mode = CourseSelectionMode.ADDON
+
     # Đổi giờ booking và reset trạng thái therapist_verified.
     def change_start_time(self, start_time: time | None) -> None:
         """Replace the selected time and invalidate therapist confirmation."""
@@ -508,6 +528,16 @@ class BookingContext:
         self.clear_phone()
         if phone is not None:
             self.phone = phone
+        self._clear_booking_result()
+
+    # Đổi tên khách hàng nhưng giữ số điện thoại đã xác minh trong draft hiện tại.
+    def change_customer_name(self, name: str | None) -> None:
+        """Replace customer name while preserving the confirmed phone."""
+        if name is not None and not name.strip():
+            raise InvalidBookingDataError("Customer name must not be empty.")
+        if self.phone is None:
+            raise InvalidBookingDataError("Customer phone is required before changing name.")
+        self.customer = Customer(phone=self.phone, name=name.strip() if name is not None else None)
         self._clear_booking_result()
 
     # Clear course và toàn bộ dữ liệu availability phụ thuộc course/duration.

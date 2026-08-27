@@ -1366,11 +1366,13 @@ async def test_generic_change_request_returns_change_menu_without_dispatching_tu
         "Đổi số người",
         "Đổi thời lượng",
         "Đổi liệu trình",
+        "Đổi add-on",
         "Đổi giờ",
         "Đổi kỹ thuật viên",
         "Đổi số điện thoại",
+        "Đổi tên khách hàng",
     )
-    assert "Bạn muốn chỉnh sửa thông tin nào?" in response.text
+    assert "Anh/chị muốn chỉnh sửa thông tin nào?" in response.text
 
 
 def test_request_validation_trims_only_contract_fields() -> None:

@@ -461,7 +461,7 @@ class DialogController:
         booking_context: BookingContext,
         turn: DialogTurnInput,
     ) -> tuple[ChangeRule, FlowTransition, bool]:
-        target = turn.payload.get("change_target")
+        target = _change_rule_target(turn.payload.get("change_target"))
         if not isinstance(target, str):
             raise InvalidDialogTurnError("A booking change requires a supported change target.")
         try:
@@ -2810,12 +2810,21 @@ def _change_menu_response(context: BookingContext) -> DialogResponse:
             "Đổi số người",
             "Đổi thời lượng",
             "Đổi liệu trình",
+            "Đổi add-on",
             "Đổi giờ",
             "Đổi kỹ thuật viên",
             "Đổi số điện thoại",
+            "Đổi tên khách hàng",
         ),
-        metadata={"can_change_info": True},
+        metadata={"can_change_info": True, "quick_reply_limit": 10},
     )
+
+
+# Chuẩn hóa alias cũ của NLU để flow config chỉ cần giữ một key cho liệu trình chính.
+def _change_rule_target(raw: object) -> object:
+    if raw == "service":
+        return "main_course"
+    return raw
 
 
 # Lấy danh sách item typed từ HandlerResult cho các path discovery/retry.

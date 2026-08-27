@@ -49,9 +49,11 @@ def test_change_handlers_define_one_rule_per_supported_target() -> None:
         "people",
         "duration",
         "main_course",
+        "addon",
         "time",
         "therapist",
         "phone",
+        "customer_name",
     }
     assert rules["date"].reset_action == "change_date"
     assert rules["date"].next_state is BookingState.SELECTING_DATE

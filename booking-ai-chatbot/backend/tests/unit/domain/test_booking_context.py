@@ -540,6 +540,31 @@ def test_changing_course_clears_slots_time_and_therapist() -> None:
     assert context.therapist_verified is False
 
 
+def test_changing_addon_preserves_main_course_and_clears_slots() -> None:
+    context = make_change_context()
+    context.start_time = time(10, 30)
+
+    context.change_addon_selection()
+
+    assert context.main_course is COURSE
+    assert context.addons == ()
+    assert context.available_slots is None
+    assert context.start_time is None
+    assert context.therapist_preference is None
+    assert context.therapist_verified is False
+    assert context.course_selection_mode.value == "addon"
+
+
+def test_changing_customer_name_preserves_confirmed_phone() -> None:
+    context = make_ready_context()
+
+    context.change_customer_name("Le Minh")
+
+    assert context.phone == "0901234567"
+    assert context.phone_confirmed is True
+    assert context.customer == Customer(phone="0901234567", name="Le Minh")
+
+
 def test_changing_time_requires_therapist_revalidation() -> None:
     context = make_ready_context()
     preference = TherapistPreference(TherapistPreferenceType.FEMALE)
