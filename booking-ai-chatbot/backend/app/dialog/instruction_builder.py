@@ -848,7 +848,7 @@ class InstructionBuilder:
         result: DialogTurnResult,
     ) -> DialogResponseDraft:
         return DialogResponseDraft(
-            "Đang kiểm tra và tạo lịch đặt của bạn...",
+            "Đang kiểm tra và tạo lịch đặt của anh/chị...",
             metadata={"booking_created": False},
         )
 

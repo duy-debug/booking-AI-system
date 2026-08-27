@@ -94,16 +94,16 @@ _UNRESOLVED_TEXT = {
     BookingState.AWAITING_CANCEL_CONFIRMATION: (
         "Anh/chị vui lòng xác nhận có chắc chắn muốn hủy booking này không."
     ),
-    BookingState.SELECTING_SHOP: "Vui lòng cho biết cửa hàng hoặc khu vực bạn muốn đặt.",
+    BookingState.SELECTING_SHOP: "Vui lòng cho biết cửa hàng hoặc khu vực anh/chị muốn đặt.",
     BookingState.SELECTING_DATE: "Vui lòng nhập ngày, ví dụ: ngày mai hoặc 15/08.",
     BookingState.SELECTING_PEOPLE: (
         "Vui lòng cho biết số người "
         f"từ {MIN_CUSTOMERS_PER_BOOKING} đến {MAX_CUSTOMERS_PER_BOOKING}."
     ),
     BookingState.SELECTING_DURATION: "Vui lòng nhập thời lượng, ví dụ: 60 phút.",
-    BookingState.SELECTING_SERVICE: "Vui lòng nhập tên liệu trình bạn muốn chọn.",
+    BookingState.SELECTING_SERVICE: "Vui lòng nhập tên liệu trình anh/chị muốn chọn.",
     BookingState.SELECTING_TIME: "Vui lòng nhập giờ rõ ràng, ví dụ: 19:00 hoặc 7 giờ tối.",
-    BookingState.SELECTING_THERAPIST: "Bạn có thể chọn Nam, Nữ hoặc Không yêu cầu.",
+    BookingState.SELECTING_THERAPIST: "Anh/chị có thể chọn Nam, Nữ hoặc Không yêu cầu.",
     BookingState.COLLECTING_PHONE: "Vui lòng nhập số điện thoại hợp lệ.",
     BookingState.COLLECTING_NAME: "Vui lòng nhập tên khách hàng.",
 }
@@ -1902,7 +1902,7 @@ async def _handle_discovery(
             if context.shop is None:
                 return _handled_response(
                     context,
-                    "Bạn hãy chọn cửa hàng trước để tôi tải danh sách liệu trình từ POS.",
+                    "Anh/chị hãy chọn cửa hàng trước để tôi tải danh sách liệu trình từ POS.",
                 )
             course_type = (
                 CourseType.ADDON if nlu_result.intent == "list_addons" else CourseType.MAIN
@@ -1928,7 +1928,11 @@ async def _handle_discovery(
                     if course_type is CourseType.ADDON
                     or service.duration_minutes == context.duration_minutes
                 ]
-            return _service_catalog_response(context, courses)
+            return _service_catalog_response(
+                context,
+                courses,
+                course_type=course_type,
+            )
 
         if nlu_result.intent == "list_available_times":
             missing = _missing_availability_field(context)
@@ -2070,7 +2074,7 @@ def _shop_not_found_response(
     ):
         return _handled_response(
             context,
-            "Hiện chưa tìm thấy cửa hàng nào có kỹ thuật viên đúng giới tính bạn yêu cầu.",
+            "Hiện chưa tìm thấy cửa hàng nào có kỹ thuật viên đúng giới tính anh/chị yêu cầu.",
         )
     if (
         error_code == "requested_shop_time_not_available"
@@ -2081,7 +2085,7 @@ def _shop_not_found_response(
             (
                 f"Hiện chưa có cửa hàng nào còn đúng khung giờ "
                 f"{context.requested_start_time.strftime('%H:%M')} "
-                "với các điều kiện bạn đã cung cấp. "
+                "với các điều kiện anh/chị đã cung cấp. "
                 "Bạn muốn đổi thời gian hoặc bớt điều kiện trước không?"
             ),
         )
@@ -2097,22 +2101,49 @@ def _shop_not_found_response(
 def _service_catalog_response(
     context: BookingContext,
     courses: list[Course],
+    *,
+    course_type: CourseType,
 ) -> DialogResponse:
-    if not courses:
-        return _handled_response(
-            context,
-            "POS không trả về liệu trình phù hợp với cửa hàng và thời lượng hiện tại.",
+    if course_type is CourseType.MAIN:
+        if not courses:
+            return _handled_response(
+                context,
+                "POS không có liệu trình chính phù hợp với thời lượng đã chọn.",
+            )
+        visible = courses[:8]
+        text = (
+            "Các liệu trình chính phù hợp:\n"
+            + _numbered_course_names(visible)
+            + "\nAnh/chị hãy chọn một liệu trình chính."
         )
-    main = [item for item in courses if item.course_type is CourseType.MAIN]
-    addons = [item for item in courses if item.course_type is CourseType.ADDON]
-    sections: list[str] = []
-    if main:
-        sections.append("Liệu trình chính:\n" + _numbered_course_names(main))
-    if addons:
-        sections.append("Add-on:\n" + _numbered_course_names(addons))
-    names = tuple(item.name for item in courses[:8])
-    text = "\n".join(sections) + "\nBạn muốn chọn liệu trình nào?"
-    return _catalog_response(context, text, names, len(courses))
+        return _catalog_response(
+            context,
+            text,
+            tuple(service.name for service in visible),
+            len(courses),
+        )
+
+    if context.main_course is None:
+        raise ValueError("An add-on suggestion requires a selected main course.")
+    visible = courses[:7]
+    if visible:
+        text = (
+            f"Liệu trình chính đã chọn: {context.main_course.name}.\n"
+            "Các add-on có thể chọn thêm:\n"
+            + _numbered_course_names(visible)
+            + "\nAnh/chị hãy chọn một add-on hoặc bỏ qua bước này."
+        )
+    else:
+        text = (
+            f"Liệu trình chính đã chọn: {context.main_course.name}. "
+            "Cửa hàng hiện không có add-on khả dụng; anh/chị có thể tiếp tục chọn giờ."
+        )
+    return _catalog_response(
+        context,
+        text,
+        tuple(service.name for service in visible) + ("Không chọn add-on",),
+        len(courses),
+    )
 
 
 def _duration_quick_replies_from_courses(courses: list[Course]) -> tuple[str, ...]:
@@ -2190,12 +2221,12 @@ def _service_step_response(
             f"Liệu trình chính đã chọn: {context.main_course.name}.\n"
             "Các add-on có thể chọn thêm:\n"
             + _numbered_course_names(visible)
-            + "\nBạn hãy chọn một add-on hoặc bỏ qua bước này."
+            + "\nAnh/chị hãy chọn một add-on hoặc bỏ qua bước này."
         )
     else:
         text = (
             f"Liệu trình chính đã chọn: {context.main_course.name}. "
-            "Cửa hàng hiện không có add-on khả dụng; bạn có thể tiếp tục chọn giờ."
+            "Cửa hàng hiện không có add-on khả dụng; anh/chị có thể tiếp tục chọn giờ."
         )
     return _catalog_response(
         context,
@@ -2232,11 +2263,11 @@ def _catalog_response(
 # Xác định field còn thiếu trước khi được phép gọi availability POS.
 def _missing_availability_field(context: BookingContext) -> str | None:
     required_fields = (
-        (context.shop, "Bạn hãy chọn cửa hàng trước khi xem giờ trống."),
-        (context.booking_date, "Bạn hãy chọn ngày trước khi xem giờ trống."),
-        (context.num_customer, "Bạn hãy chọn số người trước khi xem giờ trống."),
-        (context.duration_minutes, "Bạn hãy chọn thời lượng trước khi xem giờ trống."),
-        (context.main_course, "Bạn hãy chọn liệu trình trước khi xem giờ trống."),
+        (context.shop, "Anh/chị hãy chọn cửa hàng trước khi xem giờ trống."),
+        (context.booking_date, "Anh/chị hãy chọn ngày trước khi xem giờ trống."),
+        (context.num_customer, "Anh/chị hãy chọn số người trước khi xem giờ trống."),
+        (context.duration_minutes, "Anh/chị hãy chọn thời lượng trước khi xem giờ trống."),
+        (context.main_course, "Anh/chị hãy chọn liệu trình trước khi xem giờ trống."),
     )
     return next((message for value, message in required_fields if value is None), None)
 
@@ -2287,7 +2318,7 @@ async def _entity_response(
                 )
                 return _handled_response(
                     context,
-                    "Không tìm thấy cửa hàng phù hợp với thông tin bạn vừa nhập. "
+                    "Không tìm thấy cửa hàng phù hợp với thông tin anh/chị vừa nhập. "
                     "Anh/chị có thể chọn một cửa hàng hiện có:\n"
                     + lines,
                     names,
@@ -2324,7 +2355,7 @@ async def _entity_response(
                 visible = courses[:8]
                 return _handled_response(
                     context,
-                    f"Không tìm thấy {noun} phù hợp. Bạn có thể chọn:\n"
+                    f"Không tìm thấy {noun} phù hợp. Anh/chị có thể chọn:\n"
                     + _numbered_course_names(visible),
                     tuple(service.name for service in visible),
                 )
@@ -2390,7 +2421,7 @@ async def _retry_availability(
         return _handled_response(
             context,
             "Tôi vẫn chưa tải được khung giờ từ POS. Các thông tin đã chọn "
-            "vẫn được giữ; bạn có thể thử lại hoặc bỏ add-on.",
+            "vẫn được giữ; anh/chị có thể thử lại hoặc bỏ add-on.",
             ("Thử lại", "Không chọn add-on"),
         )
 
@@ -2402,15 +2433,15 @@ def _global_intent_response(intent: str, context: BookingContext) -> DialogRespo
     if intent == "greeting":
         if context.has_meaningful_booking_progress():
             text = (
-                "Xin chào! Thông tin đặt lịch hiện tại của bạn vẫn được giữ. "
-                "Bạn vui lòng cung cấp thêm thông tin còn thiếu để tiếp tục nhé."
+                "Xin chào! Thông tin đặt lịch hiện tại của anh/chị vẫn được giữ. "
+                "Anh/chị vui lòng cung cấp thêm thông tin còn thiếu để tiếp tục nhé."
             )
         else:
-            text = "Xin chào! Mình có thể giúp bạn đặt lịch hoặc giải đáp thông tin dịch vụ."
+            text = "Xin chào! Mình có thể giúp anh/chị đặt lịch hoặc giải đáp thông tin dịch vụ."
     elif intent == "thanks":
-        text = "Rất vui được hỗ trợ bạn."
+        text = "Rất vui được hỗ trợ anh/chị."
     elif intent == "restart_booking":
-        text = "Mình đã bắt đầu lại. Bạn hãy chọn cửa hàng."
+        text = "Mình đã bắt đầu lại. Anh/chị hãy chọn cửa hàng."
     else:
         prompt = _UNRESOLVED_TEXT.get(context.state, _DEFAULT_UNRESOLVED_TEXT)
         if context.last_failure_code in {
@@ -2420,7 +2451,7 @@ def _global_intent_response(intent: str, context: BookingContext) -> DialogRespo
         }:
             text = (
                 "Hiện tại tôi chưa tải được khung giờ từ POS. Thông tin cửa hàng, ngày, "
-                "số người và liệu trình vẫn được giữ. Bạn có thể thử lại hoặc chọn liệu trình khác."
+                "số người và liệu trình vẫn được giữ. Anh/chị có thể thử lại hoặc chọn liệu trình khác."
             )
         else:
             text = f"Bước hiện tại: {prompt}"
@@ -2772,8 +2803,8 @@ def _change_menu_response(context: BookingContext) -> DialogResponse:
 
     return DialogResponse(
         text=(
-            "Bạn muốn chỉnh sửa thông tin nào? Việc chỉnh sửa sẽ không tạo booking "
-            "cho đến khi bạn xác nhận lại."
+            "Anh/chị muốn chỉnh sửa thông tin nào? Việc chỉnh sửa sẽ không tạo booking "
+            "cho đến khi anh/chị xác nhận lại."
         ),
         instruction_template=None,
         state=context.state,

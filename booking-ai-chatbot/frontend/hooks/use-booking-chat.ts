@@ -9,7 +9,7 @@ import {
 } from "@/services/chat-session";
 import type { ChatMessage } from "@/types/chat";
 
-const WELCOME_TEXT = "Xin chào! Mình là Kori, trợ lý wellness của Komorebi. Mình có thể giúp bạn đặt lịch và giải đáp thông tin dịch vụ. Hôm nay bạn cần mình hỗ trợ gì?";
+const WELCOME_TEXT = "Xin chào! Mình là Kori, trợ lý wellness của Komorebi. Mình có thể giúp anh/chị đặt lịch và giải đáp thông tin dịch vụ. Hôm nay anh/chị cần mình hỗ trợ gì?";
 
 function welcomeMessage(): ChatMessage {
   return {
