@@ -210,11 +210,14 @@ COURSE_TEMPLATES = [
     ("steam-sauna", "薬草蒸し風呂", 30, "2800", "addon"),
 ]
 
-SHOPS = VIETNAMESE_SHOPS
+MAX_SHOPS = 5
+SEED_END_DATE = date(date.today().year, 12, 31)
+
+SHOPS = VIETNAMESE_SHOPS[:MAX_SHOPS]
 COURSE_TEMPLATES = VIETNAMESE_COURSE_TEMPLATES
 
 COURSES = {
-    shop["shop_code"]: list(COURSE_TEMPLATES)
+    shop["shop_code"]: list(COURSE_TEMPLATES[shop["shop_code"]])
     for shop in SHOPS
 }
 
@@ -242,7 +245,13 @@ JAPANESE_MALE_NAMES = [
 
 THERAPISTS_PER_SHOP = 24
 CUSTOMER_COUNT = 240
-SEED_DAYS = 21
+
+
+def iter_seed_dates():
+    current_date = date.today()
+    while current_date <= SEED_END_DATE:
+        yield current_date
+        current_date += timedelta(days=1)
 
 
 # Sinh danh sách kỹ thuật viên tên Việt cho từng cửa hàng với mã POS và giới tính.
@@ -338,7 +347,7 @@ BOOKING_START_TIMES = [
 
 def clean(db: Session):
     print("  Xoá dữ liệu cũ...")
-    for table in ["reservation_courses", "reservations", "bookings", "therapist_shifts", "therapists", "courses", "shops", "customers", "customer_restrictions"]:
+    for table in ["reservation_courses", "reservations", "bookings", "therapist_shifts", "therapists", "courses", "shops", "customer_restrictions", "customers"]:
         db.execute(text(f"DELETE FROM {table}"))
     db.commit()
 
@@ -378,15 +387,13 @@ def seed_therapists(db: Session, shops: dict[str, Shop]) -> dict[str, list[Thera
         result[shop_code] = lst
     return result
 
-# Tạo ca làm toàn ngày trong ba tuần cho từng therapist, bỏ qua Chủ nhật theo lịch vận hành mẫu.
+# Tạo ca làm cho từng therapist đến hết ngày seed cuối năm, bỏ qua Chủ nhật theo lịch vận hành mẫu.
 def seed_shifts(db: Session, shops: dict[str, Shop], therapists: dict[str, list[Therapist]]):
     print("  Tạo ca làm...")
-    today = date.today()
     for shop_code, tlist in therapists.items():
         shop = shops[shop_code]
         for t in tlist:
-            for offset in range(SEED_DAYS):
-                d = today + timedelta(days=offset)
+            for d in iter_seed_dates():
                 if d.weekday() == 6:
                     continue
                 db.add(TherapistShift(therapist_id=t.therapist_id, shop_id=shop.shop_id,
@@ -421,7 +428,7 @@ def seed_bookings(
 ) -> int:
     print("  Tạo booking mẫu...")
     booking_number = 0
-    today = date.today()
+    pending_rows = 0
 
     for shop_index, (shop_code, shop) in enumerate(shops.items()):
         shop_courses = db.query(Course).filter(Course.shop_id == shop.shop_id).all()
@@ -429,8 +436,7 @@ def seed_bookings(
         addons = [course for course in shop_courses if course.course_type == "addon"]
         shop_therapists = therapists[shop_code]
 
-        for day_offset in range(SEED_DAYS):
-            booking_date = today + timedelta(days=day_offset)
+        for booking_date in iter_seed_dates():
             if booking_date.weekday() == 6:
                 continue
 
@@ -451,6 +457,7 @@ def seed_bookings(
                 status = "cancelled" if booking_number % 13 == 0 else "confirmed"
 
                 booking = Booking(
+                    booking_id=uuid.uuid4(),
                     shop_id=shop.shop_id,
                     customer_id=customer.customer_id,
                     pos_booking_code=f"BK-{booking_date.strftime('%y%m%d')}-{booking_number:04d}",
@@ -465,7 +472,7 @@ def seed_bookings(
                     idempotency_key=uuid.uuid4(),
                 )
                 db.add(booking)
-                db.flush()
+                pending_rows += 1
 
                 therapist_start = (booking_number * 3) % len(shop_therapists)
                 for person_index in range(1, number_of_people + 1):
@@ -473,6 +480,7 @@ def seed_bookings(
                         (therapist_start + person_index - 1) % len(shop_therapists)
                     ]
                     reservation = Reservation(
+                        reservation_id=uuid.uuid4(),
                         booking_id=booking.booking_id,
                         person_index=person_index,
                         therapist_id=assigned_therapist.therapist_id,
@@ -482,10 +490,11 @@ def seed_bookings(
                         assignment_source="auto",
                     )
                     db.add(reservation)
-                    db.flush()
+                    pending_rows += 1
 
                     for course in selected_courses:
                         db.add(ReservationCourse(
+                            reservation_course_id=uuid.uuid4(),
                             reservation_id=reservation.reservation_id,
                             course_id=course.course_id,
                             course_role=course.course_type,
@@ -493,6 +502,10 @@ def seed_bookings(
                             price_snapshot=course.price,
                             course_name_snapshot=course.name,
                         ))
+                        pending_rows += 1
+                if pending_rows >= 500:
+                    db.flush()
+                    pending_rows = 0
     db.flush()
     return booking_number
 
@@ -519,7 +532,7 @@ def main():
     print(f"   - {len(CUSTOMERS)} khách hàng")
     print(f"   - {len(RESTRICTIONS)} NG list")
     print(f"   - {total_bookings} booking mẫu (có booking nhóm 2-3 người)")
-    print(f"   - Ca làm: 6 ngày/tuần x 3 tuần")
+    print(f"   - Ca làm và slot từ hôm nay đến {SEED_END_DATE.isoformat()} (nghỉ Chủ nhật)")
 
 if __name__ == "__main__":
     main()

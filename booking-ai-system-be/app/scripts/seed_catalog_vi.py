@@ -23,20 +23,53 @@ SHOPS = [
     {"shop_code": "matsuyama-dogo", "pos_shop_code": "POS-MY-001", "name": "Komorebi Hạ Long", "address": "88 Hạ Long, phường Bãi Cháy, Quảng Ninh", "phone": "02033821220", "therapist_break_minutes": 10},
 ]
 
-COURSE_TEMPLATES = [
-    ("body-care-60", "Massage thư giãn toàn thân 60 phút", 60, "450000", "main"),
-    ("body-care-90", "Massage thư giãn toàn thân 90 phút", 90, "620000", "main"),
-    ("thai-care-60", "Massage Thái truyền thống 60 phút", 60, "520000", "main"),
-    ("thai-care-90", "Massage Thái truyền thống 90 phút", 90, "720000", "main"),
-    ("aroma-oil-60", "Massage tinh dầu toàn thân 60 phút", 60, "580000", "main"),
-    ("aroma-oil-90", "Massage tinh dầu toàn thân 90 phút", 90, "790000", "main"),
-    ("hot-stone-60", "Massage đá nóng 60 phút", 60, "650000", "main"),
-    ("hot-stone-90", "Massage đá nóng 90 phút", 90, "880000", "main"),
-    ("herbal-footbath", "Ngâm chân thảo dược", 30, "180000", "addon"),
-    ("head-spa", "Chăm sóc da đầu thư giãn", 30, "250000", "addon"),
-    ("neck-shoulder", "Massage chuyên sâu cổ vai gáy", 30, "220000", "addon"),
-    ("steam-sauna", "Xông hơi thảo dược", 30, "200000", "addon"),
-]
+COURSE_TEMPLATES = {
+    "tokyo-sakura": [
+        ("zen-balance", "Massage cân bằng Zen", 60, "450000", "main"),
+        ("zen-balance-plus", "Massage cân bằng Zen chuyên sâu", 90, "620000", "main"),
+        ("deep-reset", "Massage phục hồi cơ sâu", 75, "690000", "main"),
+        ("aroma-unwind", "Massage tinh dầu thư giãn", 90, "790000", "main"),
+        ("matcha-foot-ritual", "Nghi thức ngâm chân matcha", 30, "180000", "addon"),
+        ("scalp-clarity", "Chăm sóc da đầu thanh lọc", 30, "250000", "addon"),
+        ("warm-herb-compress", "Chườm thảo mộc ấm", 30, "220000", "addon"),
+    ],
+    "osaka-nagomi": [
+        ("nagomi-flow", "Massage thư giãn Nagomi", 60, "470000", "main"),
+        ("thai-stretch-journey", "Massage kéo giãn trị liệu", 90, "730000", "main"),
+        ("pressure-point-revive", "Massage bấm huyệt phục hồi", 75, "680000", "main"),
+        ("oil-serenity", "Massage tinh dầu an yên", 90, "810000", "main"),
+        ("yuzu-foot-soak", "Ngâm chân yuzu", 30, "190000", "addon"),
+        ("shoulder-release", "Giải tỏa cổ vai gáy", 30, "230000", "addon"),
+        ("steam-reset", "Xông hơi thư giãn", 30, "210000", "addon"),
+    ],
+    "kyoto-tsukikage": [
+        ("moonlight-therapy", "Massage trị liệu Ánh Trăng", 60, "490000", "main"),
+        ("kyoto-aroma-ritual", "Nghi thức tinh dầu Kyoto", 90, "820000", "main"),
+        ("meridian-renewal", "Massage khai mở kinh lạc", 75, "710000", "main"),
+        ("hot-stone-harmony", "Massage đá nóng hài hòa", 90, "890000", "main"),
+        ("rice-bran-footbath", "Ngâm chân cám gạo", 30, "200000", "addon"),
+        ("head-spa-ritual", "Nghi thức thư giãn da đầu", 30, "260000", "addon"),
+        ("herbal-eye-relief", "Thư giãn mắt thảo mộc", 20, "170000", "addon"),
+    ],
+    "yokohama-minato": [
+        ("harbor-recovery", "Massage phục hồi năng lượng", 60, "460000", "main"),
+        ("marine-breeze-aroma", "Massage tinh dầu gió biển", 90, "800000", "main"),
+        ("athlete-reset", "Massage phục hồi vận động", 75, "720000", "main"),
+        ("stone-wave-therapy", "Massage đá nóng tuần hoàn", 90, "870000", "main"),
+        ("sea-salt-foot-soak", "Ngâm chân muối khoáng", 30, "185000", "addon"),
+        ("back-release", "Thư giãn lưng vai chuyên sâu", 30, "235000", "addon"),
+        ("cooling-face-mask", "Mặt nạ làm dịu da", 20, "190000", "addon"),
+    ],
+    "sapporo-yuki": [
+        ("snow-calm", "Massage thư giãn Tuyết", 60, "455000", "main"),
+        ("winter-warm-oil", "Massage tinh dầu giữ ấm", 90, "795000", "main"),
+        ("muscle-melt", "Massage tan cơ mỏi", 75, "700000", "main"),
+        ("nordic-stone-care", "Massage đá nóng phục hồi", 90, "885000", "main"),
+        ("ginger-footbath", "Ngâm chân gừng ấm", 30, "195000", "addon"),
+        ("scalp-warm-oil", "Ủ đầu tinh dầu ấm", 30, "255000", "addon"),
+        ("herbal-sauna", "Xông thảo dược giữ ấm", 30, "205000", "addon"),
+    ],
+}
 
 SURNAMES = ["Nguyễn", "Trần", "Lê", "Phạm", "Hoàng", "Huỳnh", "Phan", "Vũ", "Võ", "Đặng", "Bùi", "Đỗ", "Hồ", "Ngô", "Dương", "Lý", "Đinh", "Mai", "Trịnh", "Đoàn", "Lâm", "Tạ", "Cao", "Chu", "Quách", "La", "Tôn", "Thái", "Hà", "Kiều"]
 FEMALE_NAMES = ["Ngọc Anh", "Minh Anh", "Thùy Linh", "Khánh Linh", "Phương Thảo", "Thu Trang", "Hồng Nhung", "Bảo Ngọc", "Thanh Huyền", "Kim Oanh", "Hải Yến", "Mai Chi", "Diệu Linh", "Quỳnh Anh", "Tú Anh", "Ánh Dương", "Nhã Phương", "Uyên Nhi", "Thảo Vy", "Hoài An", "Trúc Linh", "Mỹ Duyên", "Thiên Hương", "Thanh Mai"]
