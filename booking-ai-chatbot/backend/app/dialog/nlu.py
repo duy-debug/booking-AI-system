@@ -553,6 +553,7 @@ _LLM_INTENT_ALIASES = {
     "select_service": "select_course",
     "collect_phone": "provide_phone",
     "change_booking_field": "change_info",
+    "skip_addon": "deny",
 }
 _LLM_ENTITY_INTENTS = {
     NLUEntityKind.SHOP: "select_store",
@@ -745,11 +746,23 @@ class LLMNLU:
     ) -> NLUResult:
         raw_intent = output.intent.strip()
         intent = _LLM_INTENT_ALIASES.get(raw_intent, raw_intent)
-        if output.entities.skip_addon is True and intent == "select_course":
-            # LLM đã hiểu đúng ý nghĩa "bỏ qua add-on", nhưng đôi khi vẫn giữ intent chọn course.
-            # Canonicalize về deny để dùng đúng transition skip_addon
-            # có sẵn trong booking_flow.json.
+        if output.entities.skip_addon is True and intent in {
+            "select_course",
+            "list_addons",
+            "list_services",
+        }:
+            # LLM đã hiểu đúng ý nghĩa "bỏ qua add-on", nhưng đôi khi trả intent
+            # discovery/list thay vì intent flow. Canonicalize về deny để dùng đúng
+            # transition skip_addon có sẵn trong booking_flow.json.
             intent = "deny"
+        if (
+            state is BookingState.SELECTING_SERVICE
+            and intent in {"list_addons", "list_services"}
+            and _course_query_from_entities(output) is not None
+        ):
+            # Ở bước chọn course/add-on, nếu LLM đã trích xuất tên dịch vụ cụ thể
+            # thì đây là thao tác chọn course, không phải yêu cầu liệt kê discovery.
+            intent = "select_course"
         if intent == "unknown" or output.confidence < self._min_confidence:
             # Chặn candidate dưới ngưỡng trước khi đi vào flow để log rõ lý do unresolved.
             trace_log(
@@ -769,7 +782,7 @@ class LLMNLU:
             )
             return _llm_unresolved("invalid_nlu_output")
 
-        entity_kind, entity_query = _llm_entity_reference(output)
+        entity_kind, entity_query = _llm_entity_reference(output, intent)
         if entity_kind is not None:
             change_target = output.entities.change_target
             expected_intent = (
@@ -1047,6 +1060,7 @@ def _parse_llm_candidates(response: LLMResponse) -> list[IntentCandidate]:
 # Chuyển entity reference từ LLM thành yêu cầu resolver, không tự tạo domain object.
 def _llm_entity_reference(
     output: LLMNLUOutput,
+    canonical_intent: str,
 ) -> tuple[NLUEntityKind | None, str | None]:
     if output.entity_kind is not None:
         entity_kind = NLUEntityKind(output.entity_kind)
@@ -1054,17 +1068,12 @@ def _llm_entity_reference(
         if entity_kind is NLUEntityKind.THERAPIST:
             entity_query = _normalize_therapist_query(entity_query)
         return entity_kind, entity_query
-    canonical_intent = _LLM_INTENT_ALIASES.get(output.intent.strip(), output.intent.strip())
     if canonical_intent == "select_store":
         shop_query = _non_empty_text(output.entities.shop_name)
         if shop_query is not None:
             return NLUEntityKind.SHOP, shop_query
     if canonical_intent == "select_course":
-        course_query = (
-            _non_empty_text(output.entities.main_course_name)
-            or _non_empty_text(output.entities.service_name)
-            or _non_empty_text(output.entities.addon_name)
-        )
+        course_query = _course_query_from_entities(output)
         if course_query is not None:
             return NLUEntityKind.COURSE, course_query
     if canonical_intent == "select_therapist":
@@ -1075,6 +1084,14 @@ def _llm_entity_reference(
         if gender is not None:
             return NLUEntityKind.THERAPIST, gender
     return None, None
+
+
+def _course_query_from_entities(output: LLMNLUOutput) -> str | None:
+    return (
+        _non_empty_text(output.entities.main_course_name)
+        or _non_empty_text(output.entities.service_name)
+        or _non_empty_text(output.entities.addon_name)
+    )
 
 
 # Map entity từ LLM thành payload nghiệp vụ tương ứng với từng intent.

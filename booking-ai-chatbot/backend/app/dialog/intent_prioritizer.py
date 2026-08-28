@@ -64,7 +64,11 @@ class IntentPrioritizer:
         """Trả về candidate tốt nhất mà không làm thay đổi `BookingContext`."""
         compatible: list[IntentCandidate] = []
         for candidate in candidates:
-            canonical_intent = _canonical_intent(candidate.intent)
+            canonical_intent = _canonical_intent(
+                candidate.intent,
+                candidate,
+                state,
+            )
             is_compatible = self._policy.is_allowed(state, canonical_intent)
             if not is_compatible:
                 trace_log(
@@ -105,10 +109,12 @@ class IntentPrioritizer:
             "[3] NLU",
             "intent_selected",
             current_state=state.value,
-            selected_intent=_canonical_intent(selected.intent),
+            selected_intent=_canonical_intent(selected.intent, selected, state),
             selected_score=selected.confidence,
             secondary_intents=[
-                _canonical_intent(item.intent) for item in compatible if item is not selected
+                _canonical_intent(item.intent, item, state)
+                for item in compatible
+                if item is not selected
             ],
             reason="state_compatible_and_entity_complete",
         )
@@ -116,12 +122,39 @@ class IntentPrioritizer:
 
 
 # Chuẩn hóa alias intent từ LLM về tên intent canonical mà backend sử dụng.
-def _canonical_intent(intent: str) -> str:
-    return {
+def _canonical_intent(
+    intent: str,
+    candidate: IntentCandidate | None = None,
+    state: BookingState | None = None,
+) -> str:
+    normalized = {
         "select_service": "select_course",
         "collect_phone": "provide_phone",
         "change_booking_field": "change_info",
+        "skip_addon": "deny",
     }.get(intent.strip(), intent.strip())
+    if candidate is None:
+        return normalized
+    if candidate.entities.get("skip_addon") is True and normalized in {
+        "select_course",
+        "list_addons",
+        "list_services",
+    }:
+        return "deny"
+    if (
+        state is BookingState.SELECTING_SERVICE
+        and normalized in {"list_addons", "list_services"}
+        and _has_course_query(candidate)
+    ):
+        return "select_course"
+    return normalized
+
+
+def _has_course_query(candidate: IntentCandidate) -> bool:
+    return any(
+        isinstance(value := candidate.entities.get(key), str) and value.strip()
+        for key in ("service_name", "main_course_name", "addon_name")
+    )
 
 
 # Chấm candidate có đủ entity bắt buộc cho intent hiện tại hay chưa.

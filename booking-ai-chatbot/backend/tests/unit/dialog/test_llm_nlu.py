@@ -742,6 +742,46 @@ async def test_skip_addon_entity_under_select_course_maps_to_deny() -> None:
 
 
 @pytest.mark.asyncio
+async def test_skip_addon_entity_under_list_addons_maps_to_deny() -> None:
+    fallback, _ = fallback_for(
+        structured(
+            intent="list_addons",
+            entities={"skip_addon": True},
+        )
+    )
+
+    result = await fallback.parse(
+        text="tôi đã nói là bỏ qua",
+        state=BookingState.SELECTING_SERVICE,
+    )
+
+    assert result.intent == "deny"
+    assert result.payload == {}
+    assert result.resolution_status is NLUResolutionStatus.RESOLVED
+
+
+@pytest.mark.asyncio
+async def test_service_name_under_list_services_at_service_step_selects_course() -> None:
+    fallback, _ = fallback_for(
+        structured(
+            intent="list_services",
+            entities={"service_name": "Ngâm chân gừng ấm"},
+        )
+    )
+
+    result = await fallback.parse(
+        text="Ngâm chân gừng ấm",
+        state=BookingState.SELECTING_SERVICE,
+    )
+
+    assert result.resolution_status is NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED
+    assert result.intent is None
+    assert result.payload == {}
+    assert result.entity_kind is NLUEntityKind.COURSE
+    assert result.entity_query == "Ngâm chân gừng ấm"
+
+
+@pytest.mark.asyncio
 async def test_therapist_gender_becomes_an_entity_query() -> None:
     fallback, _ = fallback_for(
         structured(

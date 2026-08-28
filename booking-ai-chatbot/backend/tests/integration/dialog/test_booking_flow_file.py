@@ -20,7 +20,7 @@ from app.dialog.flow_loader import (
 )
 from app.dialog.state_machine import StateMachine
 from app.domain.booking_context import BookingContext
-from app.domain.booking_models import Booking, BookingGateway
+from app.domain.booking_models import Booking, BookingGateway, Customer
 from app.domain.booking_state import BookingState
 
 FLOW_PATH = Path(__file__).resolve().parents[3] / "app" / "dialog" / "booking_flow.json"
@@ -70,9 +70,15 @@ def _transition(
     state: BookingState,
     intent: str,
 ) -> FlowTransition:
+    fallback_transition: FlowTransition | None = None
     for transition in flow.states[state].transitions:
         if transition.intent == intent:
-            return transition
+            if not transition.conditions:
+                return transition
+            if fallback_transition is None:
+                fallback_transition = transition
+    if fallback_transition is not None:
+        return fallback_transition
     pytest.fail(f"Missing intent '{intent}' in state '{state.value}'.")
 
 
@@ -302,6 +308,24 @@ def test_single_booking_can_skip_therapist(flow: FlowDefinition) -> None:
 
     assert transition.target is BookingState.COLLECTING_PHONE
     assert transition.actions == ("skip_therapist",)
+
+
+@pytest.mark.parametrize("intent", ["select_therapist", "deny"])
+def test_therapist_step_returns_to_confirmation_when_phone_already_confirmed(
+    flow: FlowDefinition,
+    intent: str,
+) -> None:
+    context = BookingContext(
+        conversation_id="change-time-conversation",
+        state=BookingState.SELECTING_THERAPIST,
+        customer=Customer(phone="0773582641", name="Duy"),
+        phone="0773582641",
+        phone_confirmed=True,
+    )
+
+    transition = StateMachine(flow).resolve_transition(context, intent)
+
+    assert transition.target is BookingState.AWAITING_CONFIRMATION
 
 
 def test_service_selection_owns_addons_and_slot_loading(

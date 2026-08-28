@@ -56,6 +56,7 @@ from app.domain.booking_models import (
     ShopSearchCriteria,
     TherapistAvailabilityGateway,
     TherapistPreference,
+    TherapistPreferenceType,
 )
 from app.domain.booking_state import BookingState
 from app.domain.outcomes import HandlerOutcome, HandlerResult
@@ -145,6 +146,9 @@ _TERMINAL_CHANGE_TEXT = (
 )
 
 
+_AVAILABILITY_REVALIDATION_TARGETS = frozenset({"date", "people", "main_course", "addon"})
+
+
 class DialogControllerError(Exception):
     """
     Lỗi gốc của tầng điều phối dialog.
@@ -217,6 +221,29 @@ class DialogTurnResult:
     failure_code: str | None = None
     failed_action: str | None = None
     original_error: ActionExecutionError | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _ChangeRevalidationSnapshot:
+    """
+    Lưu dữ liệu phụ thuộc slot trước khi action change clear context.
+    """
+
+    target: str
+    previous_start_time: time | None
+    previous_therapist_preference: TherapistPreference | None
+
+
+@dataclass(frozen=True, slots=True)
+class _ChangeRevalidationResult:
+    """
+    Kết quả hậu xử lý sau change_info trước khi controller build response.
+    """
+
+    transition: FlowTransition | None = None
+    instruction_template: str | None = None
+    executed_actions: tuple[str, ...] = ()
+    response: DialogTurnResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,9 +383,23 @@ class DialogController:
             payload=turn.payload,
             idempotency_key=booking_context.booking_attempt_id,
         )
+        turn_snapshot = _ChangeRevalidationSnapshot(
+            target="",
+            previous_start_time=booking_context.start_time,
+            previous_therapist_preference=booking_context.therapist_preference,
+        )
         change_rule: ChangeRule | None = None
         has_change_value = False
+        change_snapshot: _ChangeRevalidationSnapshot | None = None
+        change_instruction_template: str | None = None
         if turn.intent == "change_info":
+            change_target = _change_rule_target(turn.payload.get("change_target"))
+            if isinstance(change_target, str):
+                change_snapshot = _ChangeRevalidationSnapshot(
+                    target=change_target,
+                    previous_start_time=booking_context.start_time,
+                    previous_therapist_preference=booking_context.therapist_preference,
+                )
             change_rule, transition, has_change_value = self._change_transition(
                 booking_context,
                 turn,
@@ -388,6 +429,43 @@ class DialogController:
             )
 
         committed_actions = transition_report.executed_action_names
+        if change_rule is not None and has_change_value and change_snapshot is not None:
+            # Sau khi đổi field ảnh hưởng slot, controller kiểm tra lại availability thật
+            # trước khi quyết định giữ giờ cũ, hỏi giờ mới hoặc báo lỗi phục hồi.
+            revalidation = await self._revalidate_after_change(
+                booking_context=booking_context,
+                action_context=action_context,
+                initial_state=initial_state,
+                intent=turn.intent,
+                committed_actions=committed_actions,
+                snapshot=change_snapshot,
+            )
+            if revalidation.response is not None:
+                return revalidation.response
+            committed_actions += revalidation.executed_actions
+            if revalidation.transition is not None:
+                transition = revalidation.transition
+            if revalidation.instruction_template is not None:
+                change_instruction_template = revalidation.instruction_template
+        if change_rule is None:
+            # Khi đang chỉnh sửa draft, user có thể nhập value ở turn kế tiếp
+            # bằng intent select_date/select_people/select_course/deny. Nếu context
+            # đã đủ combo booking thì không hỏi lại field đã có, mà validate slot ngay.
+            revalidation = await self._revalidate_after_selection_continuation(
+                booking_context=booking_context,
+                action_context=action_context,
+                initial_state=initial_state,
+                intent=turn.intent,
+                committed_actions=committed_actions,
+                snapshot=turn_snapshot,
+            )
+            if revalidation.response is not None:
+                return revalidation.response
+            committed_actions += revalidation.executed_actions
+            if revalidation.transition is not None:
+                transition = revalidation.transition
+            if revalidation.instruction_template is not None:
+                change_instruction_template = revalidation.instruction_template
         if (
             change_rule is not None
             and change_rule.reset_action == "change_time"
@@ -428,7 +506,8 @@ class DialogController:
         committed_actions += on_enter_report.executed_action_names
         if change_rule is not None:
             instruction_template = (
-                on_enter.instruction_template
+                change_instruction_template
+                or on_enter.instruction_template
                 if has_change_value
                 else change_rule.prompt_template
             )
@@ -455,6 +534,289 @@ class DialogController:
             instruction_template=on_enter.instruction_template,
         )
 
+    # Hậu xử lý change_info sau khi action mutation thành công.
+    async def _revalidate_after_change(
+        self,
+        *,
+        booking_context: BookingContext,
+        action_context: ActionExecutionContext,
+        initial_state: BookingState,
+        intent: str,
+        committed_actions: tuple[str, ...],
+        snapshot: _ChangeRevalidationSnapshot,
+    ) -> _ChangeRevalidationResult:
+        """
+        Kiểm tra lại slot/therapist sau khi người dùng sửa thông tin trước confirm.
+        """
+
+        if snapshot.target in _AVAILABILITY_REVALIDATION_TARGETS:
+            return await self._revalidate_availability_sensitive_change(
+                booking_context=booking_context,
+                action_context=action_context,
+                initial_state=initial_state,
+                intent=intent,
+                committed_actions=committed_actions,
+                snapshot=snapshot,
+            )
+        if snapshot.target == "therapist":
+            return await self._revalidate_changed_therapist(
+                booking_context=booking_context,
+                action_context=action_context,
+                initial_state=initial_state,
+                intent=intent,
+                committed_actions=committed_actions,
+            )
+        return _ChangeRevalidationResult()
+
+    async def _revalidate_after_selection_continuation(
+        self,
+        *,
+        booking_context: BookingContext,
+        action_context: ActionExecutionContext,
+        initial_state: BookingState,
+        intent: str,
+        committed_actions: tuple[str, ...],
+        snapshot: _ChangeRevalidationSnapshot,
+    ) -> _ChangeRevalidationResult:
+        """
+        Tiếp tục validate slot khi user nhập value sau một turn change_info chưa có value.
+        """
+
+        if not _is_availability_selection_continuation(
+            initial_state=initial_state,
+            intent=intent,
+            committed_actions=committed_actions,
+            context=booking_context,
+        ):
+            return _ChangeRevalidationResult()
+        if "load_time_slots" in committed_actions:
+            return await self._finish_availability_revalidation(
+                booking_context=booking_context,
+                action_context=action_context,
+                initial_state=initial_state,
+                intent=intent,
+                committed_actions=committed_actions,
+                snapshot=snapshot,
+                preloaded_actions=(),
+            )
+        return await self._load_and_finish_availability_revalidation(
+            booking_context=booking_context,
+            action_context=action_context,
+            initial_state=initial_state,
+            intent=intent,
+            committed_actions=committed_actions,
+            snapshot=snapshot,
+        )
+
+    async def _revalidate_availability_sensitive_change(
+        self,
+        *,
+        booking_context: BookingContext,
+        action_context: ActionExecutionContext,
+        initial_state: BookingState,
+        intent: str,
+        committed_actions: tuple[str, ...],
+        snapshot: _ChangeRevalidationSnapshot,
+    ) -> _ChangeRevalidationResult:
+        """
+        Reload slot thật sau khi đổi ngày/số người/course/add-on.
+        """
+
+        if not _has_availability_basis(booking_context):
+            return _ChangeRevalidationResult()
+        return await self._load_and_finish_availability_revalidation(
+            booking_context=booking_context,
+            action_context=action_context,
+            initial_state=initial_state,
+            intent=intent,
+            committed_actions=committed_actions,
+            snapshot=snapshot,
+        )
+
+    async def _load_and_finish_availability_revalidation(
+        self,
+        *,
+        booking_context: BookingContext,
+        action_context: ActionExecutionContext,
+        initial_state: BookingState,
+        intent: str,
+        committed_actions: tuple[str, ...],
+        snapshot: _ChangeRevalidationSnapshot,
+    ) -> _ChangeRevalidationResult:
+        """
+        Gọi load_time_slots rồi dùng kết quả để quyết định giữ giờ cũ hay hỏi giờ mới.
+        """
+
+        load_source = _availability_revalidation_transition(intent)
+        try:
+            load_report = await self._execute_actions(
+                ("load_time_slots",),
+                action_context,
+            )
+        except ActionExecutionError as error:
+            return _ChangeRevalidationResult(
+                response=await self._recover_failure(
+                    source=load_source,
+                    error=error,
+                    booking_context=booking_context,
+                    action_context=action_context,
+                    initial_state=initial_state,
+                    intent=intent,
+                    committed_actions=committed_actions,
+                    auto_transition_count=0,
+                )
+            )
+
+        return await self._finish_availability_revalidation(
+            booking_context=booking_context,
+            action_context=action_context,
+            initial_state=initial_state,
+            intent=intent,
+            committed_actions=committed_actions,
+            snapshot=snapshot,
+            preloaded_actions=load_report.executed_action_names,
+        )
+
+    async def _finish_availability_revalidation(
+        self,
+        *,
+        booking_context: BookingContext,
+        action_context: ActionExecutionContext,
+        initial_state: BookingState,
+        intent: str,
+        committed_actions: tuple[str, ...],
+        snapshot: _ChangeRevalidationSnapshot,
+        preloaded_actions: tuple[str, ...],
+    ) -> _ChangeRevalidationResult:
+        """
+        Dùng available_slots mới nhất để giữ giờ cũ hoặc chuyển user sang chọn giờ mới.
+        """
+
+        executed_actions = preloaded_actions
+        previous_start_time = snapshot.previous_start_time
+        available_slots = booking_context.available_slots or ()
+        if previous_start_time is None or previous_start_time not in available_slots:
+            return _ChangeRevalidationResult(
+                transition=FlowTransition(
+                    intent=intent,
+                    target=BookingState.SELECTING_TIME,
+                    actions=(),
+                ),
+                instruction_template="suggest_time_slots",
+                executed_actions=executed_actions,
+            )
+
+        _restore_previous_therapist_preference(
+            booking_context,
+            snapshot.previous_therapist_preference,
+        )
+        time_context = ActionExecutionContext(
+            booking_context=booking_context,
+            intent=intent,
+            payload={"start_time": previous_start_time},
+            idempotency_key=action_context.idempotency_key,
+        )
+        time_source = _change_time_revalidation_transition(intent, booking_context.state)
+        try:
+            time_report = await self._execute_actions(
+                ("change_time",),
+                time_context,
+            )
+        except ActionExecutionError as error:
+            return _ChangeRevalidationResult(
+                response=await self._recover_failure(
+                    source=time_source,
+                    error=error,
+                    booking_context=booking_context,
+                    action_context=time_context,
+                    initial_state=initial_state,
+                    intent=intent,
+                    committed_actions=committed_actions + executed_actions,
+                    auto_transition_count=0,
+                )
+            )
+
+        executed_actions += time_report.executed_action_names
+        if booking_context.last_failure_code == "therapist_unavailable":
+            return _ChangeRevalidationResult(
+                transition=FlowTransition(
+                    intent=intent,
+                    target=BookingState.SELECTING_THERAPIST,
+                    actions=(),
+                ),
+                instruction_template="therapist_unavailable",
+                executed_actions=executed_actions,
+            )
+        return _ChangeRevalidationResult(
+            transition=FlowTransition(
+                intent=intent,
+                target=BookingState.AWAITING_CONFIRMATION,
+                actions=(),
+            ),
+            instruction_template="final_confirmation",
+            executed_actions=executed_actions,
+        )
+
+    async def _revalidate_changed_therapist(
+        self,
+        *,
+        booking_context: BookingContext,
+        action_context: ActionExecutionContext,
+        initial_state: BookingState,
+        intent: str,
+        committed_actions: tuple[str, ...],
+    ) -> _ChangeRevalidationResult:
+        """
+        Validate lại therapist khi user đổi trực tiếp ở màn hình confirmation.
+        """
+
+        if not _has_therapist_revalidation_basis(booking_context):
+            return _ChangeRevalidationResult()
+        time_context = ActionExecutionContext(
+            booking_context=booking_context,
+            intent=intent,
+            payload={"start_time": booking_context.start_time},
+            idempotency_key=action_context.idempotency_key,
+        )
+        time_source = _change_time_revalidation_transition(intent, booking_context.state)
+        try:
+            time_report = await self._execute_actions(
+                ("change_time",),
+                time_context,
+            )
+        except ActionExecutionError as error:
+            return _ChangeRevalidationResult(
+                response=await self._recover_failure(
+                    source=time_source,
+                    error=error,
+                    booking_context=booking_context,
+                    action_context=time_context,
+                    initial_state=initial_state,
+                    intent=intent,
+                    committed_actions=committed_actions,
+                    auto_transition_count=0,
+                )
+            )
+        if booking_context.last_failure_code == "therapist_unavailable":
+            return _ChangeRevalidationResult(
+                transition=FlowTransition(
+                    intent=intent,
+                    target=BookingState.SELECTING_THERAPIST,
+                    actions=(),
+                ),
+                instruction_template="therapist_unavailable",
+                executed_actions=time_report.executed_action_names,
+            )
+        return _ChangeRevalidationResult(
+            transition=FlowTransition(
+                intent=intent,
+                target=BookingState.AWAITING_CONFIRMATION,
+                actions=(),
+            ),
+            instruction_template="final_confirmation",
+            executed_actions=time_report.executed_action_names,
+        )
+
     # Tạo transition tạm cho change_info dựa trên field cần sửa và có value hay chưa.
     def _change_transition(
         self,
@@ -475,7 +837,7 @@ class DialogController:
         transition = FlowTransition(
             intent=turn.intent,
             target=rule.applied_state if has_value else rule.next_state,
-            actions=(rule.reset_action,),
+            actions=(rule.reset_action,) if has_value else (),
             on_fail=self._change_failures(target, booking_context.state),
         )
         return rule, transition, has_value
@@ -2828,6 +3190,115 @@ def _change_rule_target(raw: object) -> object:
 
 
 # Lấy danh sách item typed từ HandlerResult cho các path discovery/retry.
+def _has_availability_basis(context: BookingContext) -> bool:
+    return (
+        context.shop is not None
+        and context.booking_date is not None
+        and context.num_customer is not None
+        and context.duration_minutes is not None
+        and context.main_course is not None
+    )
+
+
+def _has_therapist_revalidation_basis(context: BookingContext) -> bool:
+    return (
+        context.shop is not None
+        and context.booking_date is not None
+        and context.start_time is not None
+        and context.total_duration_minutes is not None
+    )
+
+
+def _restore_previous_therapist_preference(
+    context: BookingContext,
+    preference: TherapistPreference | None,
+) -> None:
+    if context.num_customer is not None and context.num_customer >= 2:
+        context.set_therapist_preference(TherapistPreference(TherapistPreferenceType.NONE))
+        return
+    context.set_therapist_preference(preference)
+
+
+def _is_availability_selection_continuation(
+    *,
+    initial_state: BookingState,
+    intent: str,
+    committed_actions: tuple[str, ...],
+    context: BookingContext,
+) -> bool:
+    if not _has_availability_basis(context):
+        return False
+    if initial_state is BookingState.SELECTING_DATE and intent == "select_date":
+        return True
+    if initial_state is BookingState.SELECTING_PEOPLE and intent == "select_people":
+        return True
+    if (
+        initial_state is BookingState.SELECTING_SERVICE
+        and intent in {"select_course", "deny"}
+        and "load_time_slots" in committed_actions
+    ):
+        return True
+    return False
+
+
+def _availability_revalidation_transition(intent: str) -> FlowTransition:
+    return FlowTransition(
+        intent=intent,
+        target=BookingState.SELECTING_TIME,
+        actions=("load_time_slots",),
+        on_fail=(
+            FlowFailure(
+                condition="no_working_shift",
+                target=BookingState.SELECTING_DATE,
+                instruction_template="no_working_shift",
+            ),
+            FlowFailure(
+                condition="no_slots_available",
+                target=BookingState.SELECTING_DATE,
+                instruction_template="no_slots_available",
+            ),
+            FlowFailure(
+                condition="slot_api_error",
+                target=BookingState.SELECTING_TIME,
+                instruction_template="slot_api_error",
+            ),
+            FlowFailure(
+                condition="*",
+                target=BookingState.SELECTING_TIME,
+                instruction_template="slot_api_error",
+            ),
+        ),
+    )
+
+
+def _change_time_revalidation_transition(
+    intent: str,
+    current_state: BookingState,
+) -> FlowTransition:
+    return FlowTransition(
+        intent=intent,
+        target=BookingState.AWAITING_CONFIRMATION,
+        actions=("change_time",),
+        on_fail=(
+            FlowFailure(
+                condition="slot_unavailable",
+                target=BookingState.SELECTING_TIME,
+                instruction_template="slot_unavailable",
+            ),
+            FlowFailure(
+                condition="therapist_unavailable",
+                target=BookingState.SELECTING_THERAPIST,
+                instruction_template="therapist_unavailable",
+            ),
+            FlowFailure(
+                condition="*",
+                target=current_state,
+                instruction_template="change_invalid",
+            ),
+        ),
+    )
+
+
 def _handler_items(
     result: HandlerResult,
     key: str,

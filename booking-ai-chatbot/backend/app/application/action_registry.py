@@ -788,14 +788,14 @@ class ActionRegistry:
         booking_date = _require_payload_value(context, "booking_date", date)
         handler = self._select_booking_info_handler
         if handler is None:
-            if _should_preserve_recovery_selection(context.booking_context):
+            if _should_preserve_existing_selection(context.booking_context):
                 context.booking_context.change_booking_date(booking_date)
             else:
                 context.booking_context.set_booking_date(booking_date)
         else:
             result = handler.select_date(context.booking_context, booking_date)
             _ensure_success(result)
-            if _should_preserve_recovery_selection(context.booking_context):
+            if _should_preserve_existing_selection(context.booking_context):
                 context.booking_context.change_booking_date(booking_date)
             else:
                 context.booking_context.set_booking_date(booking_date)
@@ -1336,9 +1336,15 @@ def _shop_search_criteria(context: BookingContext) -> ShopSearchCriteria:
     )
 
 
-def _should_preserve_recovery_selection(context: BookingContext) -> bool:
-    return context.last_failure_code in {"no_slots_available", "no_working_shift"} and (
+def _should_preserve_existing_selection(context: BookingContext) -> bool:
+    if context.last_failure_code in {"no_slots_available", "no_working_shift"} and (
         context.main_course is not None or context.duration_minutes is not None
+    ):
+        return True
+    return (
+        context.num_customer is not None
+        and context.duration_minutes is not None
+        and context.main_course is not None
     )
 
 

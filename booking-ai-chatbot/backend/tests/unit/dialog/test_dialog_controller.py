@@ -1,7 +1,9 @@
 """Tests for parsed-turn dialog workflow orchestration."""
 
 from datetime import date, time
+from decimal import Decimal
 from typing import cast
+from uuid import UUID
 
 import pytest
 
@@ -33,6 +35,10 @@ from app.dialog.state_machine import StateMachine
 from app.domain.booking_context import BookingContext
 from app.domain.booking_models import (
     Booking,
+    Course,
+    CourseSelection,
+    CourseType,
+    Shop,
     SlotConflictError,
     TherapistPreference,
     TherapistPreferenceType,
@@ -91,6 +97,27 @@ def recording_action(
         return ActionResult(name)
 
     return execute
+
+
+def sample_shop() -> Shop:
+    return Shop(
+        shop_id=UUID("00000000-0000-0000-0000-000000000001"),
+        name="Komorebi Test",
+    )
+
+
+def main_course(
+    suffix: str,
+    *,
+    duration_minutes: int = 60,
+) -> Course:
+    return Course(
+        course_id=UUID(f"00000000-0000-0000-0000-0000000000{suffix}"),
+        name=f"Course {suffix}",
+        duration_minutes=duration_minutes,
+        price=Decimal("100000"),
+        course_type=CourseType.MAIN,
+    )
 
 
 def test_turn_input_validates_intent_and_copies_payload() -> None:
@@ -820,6 +847,376 @@ async def test_change_time_asks_therapist_again_when_previous_one_is_unavailable
     assert result.final_state is BookingState.SELECTING_THERAPIST
     assert result.instruction_template == "therapist_unavailable"
     assert context.start_time == time(13, 0)
+
+
+@pytest.mark.asyncio
+async def test_change_main_course_reloads_slots_and_keeps_valid_previous_time() -> None:
+    old_course = main_course("01")
+    new_course = main_course("02")
+
+    async def change_course(action_context: ActionExecutionContext) -> ActionResult:
+        action_context.booking_context.change_course_selection(CourseSelection(new_course))
+        return ActionResult("change_course", CourseSelection(new_course))
+
+    async def load_time_slots(action_context: ActionExecutionContext) -> ActionResult:
+        slots = (time(10, 30), time(11, 0))
+        action_context.booking_context.set_available_slots(slots)
+        return ActionResult("load_time_slots", slots)
+
+    bridge = ActionRegistry()
+    bridge._actions["change_course"] = change_course
+    bridge._actions["load_time_slots"] = load_time_slots
+    flow = flow_for(
+        {
+            BookingState.AWAITING_CONFIRMATION: state(
+                transitions=(FlowTransition("change_info", BookingState.AWAITING_CONFIRMATION),),
+                on_enter=FlowOnEnter("final_confirmation"),
+            ),
+            BookingState.SELECTING_TIME: state(on_enter=FlowOnEnter("suggest_time_slots")),
+            BookingState.SELECTING_DATE: state(on_enter=FlowOnEnter("ask_date")),
+            BookingState.SELECTING_THERAPIST: state(on_enter=FlowOnEnter("ask_therapist")),
+        }
+    )
+    context = BookingContext(
+        conversation_id="c-1",
+        state=BookingState.AWAITING_CONFIRMATION,
+        shop=sample_shop(),
+        booking_date=date(2026, 8, 27),
+        num_customer=2,
+        duration_minutes=60,
+        main_course=old_course,
+        start_time=time(10, 30),
+        therapist_preference=TherapistPreference(TherapistPreferenceType.NONE),
+        therapist_verified=True,
+        available_slots=(time(10, 30),),
+    )
+
+    result = await controller(
+        flow,
+        bridge,
+        change_rules={
+            "main_course": ChangeRule(
+                reset_action="change_course",
+                next_state=BookingState.SELECTING_SERVICE,
+                applied_state=BookingState.SELECTING_TIME,
+                prompt_template="change_ask_course",
+            )
+        },
+    ).handle_turn(
+        context,
+        DialogTurnInput(
+            "change_info",
+            {"change_target": "main_course", "course_selection": CourseSelection(new_course)},
+        ),
+    )
+
+    assert result.status is DialogTurnStatus.SUCCESS
+    assert result.final_state is BookingState.AWAITING_CONFIRMATION
+    assert result.instruction_template == "final_confirmation"
+    assert result.executed_actions == ("change_course", "load_time_slots", "change_time")
+    assert context.main_course == new_course
+    assert context.start_time == time(10, 30)
+    assert context.therapist_preference == TherapistPreference(TherapistPreferenceType.NONE)
+    assert context.therapist_verified is True
+
+
+@pytest.mark.asyncio
+async def test_change_main_course_reloads_slots_and_asks_time_when_previous_time_is_gone() -> None:
+    old_course = main_course("03")
+    new_course = main_course("04")
+
+    async def change_course(action_context: ActionExecutionContext) -> ActionResult:
+        action_context.booking_context.change_course_selection(CourseSelection(new_course))
+        return ActionResult("change_course", CourseSelection(new_course))
+
+    async def load_time_slots(action_context: ActionExecutionContext) -> ActionResult:
+        slots = (time(11, 0), time(11, 30))
+        action_context.booking_context.set_available_slots(slots)
+        return ActionResult("load_time_slots", slots)
+
+    bridge = ActionRegistry()
+    bridge._actions["change_course"] = change_course
+    bridge._actions["load_time_slots"] = load_time_slots
+    flow = flow_for(
+        {
+            BookingState.AWAITING_CONFIRMATION: state(
+                transitions=(FlowTransition("change_info", BookingState.AWAITING_CONFIRMATION),),
+                on_enter=FlowOnEnter("final_confirmation"),
+            ),
+            BookingState.SELECTING_TIME: state(on_enter=FlowOnEnter("suggest_time_slots")),
+            BookingState.SELECTING_DATE: state(on_enter=FlowOnEnter("ask_date")),
+        }
+    )
+    context = BookingContext(
+        conversation_id="c-1",
+        state=BookingState.AWAITING_CONFIRMATION,
+        shop=sample_shop(),
+        booking_date=date(2026, 8, 27),
+        num_customer=1,
+        duration_minutes=60,
+        main_course=old_course,
+        start_time=time(10, 30),
+        available_slots=(time(10, 30),),
+    )
+
+    result = await controller(
+        flow,
+        bridge,
+        change_rules={
+            "main_course": ChangeRule(
+                reset_action="change_course",
+                next_state=BookingState.SELECTING_SERVICE,
+                applied_state=BookingState.SELECTING_TIME,
+                prompt_template="change_ask_course",
+            )
+        },
+    ).handle_turn(
+        context,
+        DialogTurnInput(
+            "change_info",
+            {"change_target": "main_course", "course_selection": CourseSelection(new_course)},
+        ),
+    )
+
+    assert result.status is DialogTurnStatus.SUCCESS
+    assert result.final_state is BookingState.SELECTING_TIME
+    assert result.instruction_template == "suggest_time_slots"
+    assert result.executed_actions == ("change_course", "load_time_slots")
+    assert context.available_slots == (time(11, 0), time(11, 30))
+    assert context.start_time is None
+
+
+@pytest.mark.asyncio
+async def test_change_main_course_slot_reload_failure_recovers_to_date_step() -> None:
+    old_course = main_course("06")
+    new_course = main_course("07")
+
+    async def change_course(action_context: ActionExecutionContext) -> ActionResult:
+        action_context.booking_context.change_course_selection(CourseSelection(new_course))
+        return ActionResult("change_course", CourseSelection(new_course))
+
+    async def load_time_slots(action_context: ActionExecutionContext) -> ActionResult:
+        raise SlotConflictError(reason="no_slots_available")
+
+    bridge = ActionRegistry()
+    bridge._actions["change_course"] = change_course
+    bridge._actions["load_time_slots"] = load_time_slots
+    flow = flow_for(
+        {
+            BookingState.AWAITING_CONFIRMATION: state(
+                transitions=(FlowTransition("change_info", BookingState.AWAITING_CONFIRMATION),),
+                on_enter=FlowOnEnter("final_confirmation"),
+            ),
+            BookingState.SELECTING_TIME: state(on_enter=FlowOnEnter("suggest_time_slots")),
+            BookingState.SELECTING_DATE: state(on_enter=FlowOnEnter("ask_date")),
+        }
+    )
+    context = BookingContext(
+        conversation_id="c-1",
+        state=BookingState.AWAITING_CONFIRMATION,
+        shop=sample_shop(),
+        booking_date=date(2026, 8, 27),
+        num_customer=1,
+        duration_minutes=60,
+        main_course=old_course,
+        start_time=time(10, 30),
+        available_slots=(time(10, 30),),
+    )
+
+    result = await controller(
+        flow,
+        bridge,
+        change_rules={
+            "main_course": ChangeRule(
+                reset_action="change_course",
+                next_state=BookingState.SELECTING_SERVICE,
+                applied_state=BookingState.SELECTING_TIME,
+                prompt_template="change_ask_course",
+            )
+        },
+    ).handle_turn(
+        context,
+        DialogTurnInput(
+            "change_info",
+            {"change_target": "main_course", "course_selection": CourseSelection(new_course)},
+        ),
+    )
+
+    assert result.status is DialogTurnStatus.FAILURE_HANDLED
+    assert result.final_state is BookingState.SELECTING_DATE
+    assert result.instruction_template == "no_slots_available"
+    assert result.failure_code == "no_slots_available"
+    assert result.executed_actions == ("change_course",)
+    assert context.main_course == new_course
+    assert context.start_time is None
+
+
+@pytest.mark.asyncio
+async def test_change_date_prompt_does_not_clear_existing_booking_details() -> None:
+    flow = flow_for(
+        {
+            BookingState.AWAITING_CONFIRMATION: state(
+                transitions=(FlowTransition("change_info", BookingState.AWAITING_CONFIRMATION),),
+                on_enter=FlowOnEnter("final_confirmation"),
+            ),
+            BookingState.SELECTING_DATE: state(on_enter=FlowOnEnter("change_ask_date")),
+        }
+    )
+    selected_course = main_course("08")
+    context = BookingContext(
+        conversation_id="c-1",
+        state=BookingState.AWAITING_CONFIRMATION,
+        shop=sample_shop(),
+        booking_date=date(2026, 10, 29),
+        num_customer=1,
+        duration_minutes=60,
+        main_course=selected_course,
+        start_time=time(11, 0),
+        therapist_preference=TherapistPreference(TherapistPreferenceType.NONE),
+        therapist_verified=True,
+        available_slots=(time(11, 0),),
+    )
+
+    result = await controller(
+        flow,
+        ActionRegistry(),
+        change_rules={
+            "date": ChangeRule(
+                reset_action="change_date",
+                next_state=BookingState.SELECTING_DATE,
+                applied_state=BookingState.SELECTING_PEOPLE,
+                prompt_template="change_ask_date",
+            )
+        },
+    ).handle_turn(
+        context,
+        DialogTurnInput("change_info", {"change_target": "date"}),
+    )
+
+    assert result.status is DialogTurnStatus.SUCCESS
+    assert result.final_state is BookingState.SELECTING_DATE
+    assert result.instruction_template == "change_ask_date"
+    assert result.executed_actions == ()
+    assert context.booking_date == date(2026, 10, 29)
+    assert context.num_customer == 1
+    assert context.duration_minutes == 60
+    assert context.main_course == selected_course
+    assert context.start_time == time(11, 0)
+
+
+@pytest.mark.asyncio
+async def test_select_date_after_change_prompt_revalidates_slots_without_asking_people() -> None:
+    selected_course = main_course("09")
+
+    async def load_time_slots(action_context: ActionExecutionContext) -> ActionResult:
+        slots = (time(11, 0), time(11, 30))
+        action_context.booking_context.set_available_slots(slots)
+        return ActionResult("load_time_slots", slots)
+
+    bridge = ActionRegistry()
+    bridge._actions["load_time_slots"] = load_time_slots
+    flow = flow_for(
+        {
+            BookingState.SELECTING_DATE: state(
+                transitions=(
+                    FlowTransition(
+                        "select_date",
+                        BookingState.SELECTING_PEOPLE,
+                        actions=("handle_date_selection",),
+                    ),
+                ),
+                on_enter=FlowOnEnter("ask_date"),
+            ),
+            BookingState.SELECTING_PEOPLE: state(on_enter=FlowOnEnter("ask_people")),
+            BookingState.SELECTING_TIME: state(on_enter=FlowOnEnter("suggest_time_slots")),
+            BookingState.AWAITING_CONFIRMATION: state(on_enter=FlowOnEnter("final_confirmation")),
+        }
+    )
+    context = BookingContext(
+        conversation_id="c-1",
+        state=BookingState.SELECTING_DATE,
+        shop=sample_shop(),
+        booking_date=date(2026, 10, 29),
+        num_customer=1,
+        duration_minutes=60,
+        main_course=selected_course,
+        start_time=time(11, 0),
+        therapist_preference=TherapistPreference(TherapistPreferenceType.NONE),
+        therapist_verified=True,
+        available_slots=(time(11, 0),),
+    )
+
+    result = await controller(flow, bridge).handle_turn(
+        context,
+        DialogTurnInput("select_date", {"booking_date": date(2026, 8, 27)}),
+    )
+
+    assert result.status is DialogTurnStatus.SUCCESS
+    assert result.final_state is BookingState.AWAITING_CONFIRMATION
+    assert result.instruction_template == "final_confirmation"
+    assert result.executed_actions == ("handle_date_selection", "load_time_slots", "change_time")
+    assert context.booking_date == date(2026, 8, 27)
+    assert context.num_customer == 1
+    assert context.main_course == selected_course
+    assert context.start_time == time(11, 0)
+    assert context.therapist_verified is True
+
+
+@pytest.mark.asyncio
+async def test_change_therapist_revalidates_direct_change_before_confirmation() -> None:
+    async def change_time(action_context: ActionExecutionContext) -> ActionResult:
+        action_context.booking_context.set_therapist_verified(True)
+        action_context.booking_context.last_failure_code = None
+        return ActionResult("change_time", action_context.payload["start_time"])
+
+    bridge = ActionRegistry()
+    bridge._actions["change_time"] = change_time
+    flow = flow_for(
+        {
+            BookingState.AWAITING_CONFIRMATION: state(
+                transitions=(FlowTransition("change_info", BookingState.AWAITING_CONFIRMATION),),
+                on_enter=FlowOnEnter("final_confirmation"),
+            ),
+            BookingState.SELECTING_THERAPIST: state(on_enter=FlowOnEnter("ask_therapist")),
+        }
+    )
+    context = BookingContext(
+        conversation_id="c-1",
+        state=BookingState.AWAITING_CONFIRMATION,
+        shop=sample_shop(),
+        booking_date=date(2026, 8, 27),
+        num_customer=1,
+        duration_minutes=60,
+        main_course=main_course("05"),
+        start_time=time(10, 30),
+        therapist_preference=TherapistPreference(TherapistPreferenceType.NONE),
+        therapist_verified=True,
+    )
+
+    result = await controller(
+        flow,
+        bridge,
+        change_rules={
+            "therapist": ChangeRule(
+                reset_action="change_therapist",
+                next_state=BookingState.SELECTING_THERAPIST,
+                applied_state=BookingState.SELECTING_THERAPIST,
+                prompt_template="change_ask_therapist",
+            )
+        },
+    ).handle_turn(
+        context,
+        DialogTurnInput(
+            "change_info",
+            {"change_target": "therapist", "therapist_gender": "none"},
+        ),
+    )
+
+    assert result.status is DialogTurnStatus.SUCCESS
+    assert result.final_state is BookingState.AWAITING_CONFIRMATION
+    assert result.instruction_template == "final_confirmation"
+    assert result.executed_actions == ("change_therapist", "change_time")
+    assert context.therapist_verified is True
 
 
 @pytest.mark.asyncio

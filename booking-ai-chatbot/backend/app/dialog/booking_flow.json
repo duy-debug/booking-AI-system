@@ -837,6 +837,36 @@
                                                "transitions":  [
                                                                    {
                                                                        "intent":  "select_therapist",
+                                                                       "conditions":  [
+                                                                                          {
+                                                                                              "field":  "phone_confirmed",
+                                                                                              "op":  "eq",
+                                                                                              "value":  true
+                                                                                          },
+                                                                                          {
+                                                                                              "field":  "customer",
+                                                                                              "op":  "not_null"
+                                                                                          }
+                                                                                      ],
+                                                                       "target":  "awaiting_confirmation",
+                                                                       "actions":  [
+                                                                                       "handle_therapist_selection"
+                                                                                   ],
+                                                                       "on_fail":  [
+                                                                                       {
+                                                                                           "condition":  "therapist_unavailable",
+                                                                                           "target":  "selecting_therapist",
+                                                                                           "instruction_template":  "therapist_unavailable"
+                                                                                       },
+                                                                                       {
+                                                                                           "condition":  "therapist_not_found",
+                                                                                           "target":  "selecting_therapist",
+                                                                                           "instruction_template":  "ask_therapist"
+                                                                                       }
+                                                                                   ]
+                                                                   },
+                                                                   {
+                                                                       "intent":  "select_therapist",
                                                                        "target":  "collecting_phone",
                                                                        "actions":  [
                                                                                        "handle_therapist_selection"
@@ -852,6 +882,24 @@
                                                                                            "target":  "selecting_therapist",
                                                                                            "instruction_template":  "ask_therapist"
                                                                                        }
+                                                                                   ]
+                                                                   },
+                                                                   {
+                                                                       "intent":  "deny",
+                                                                       "conditions":  [
+                                                                                          {
+                                                                                              "field":  "phone_confirmed",
+                                                                                              "op":  "eq",
+                                                                                              "value":  true
+                                                                                          },
+                                                                                          {
+                                                                                              "field":  "customer",
+                                                                                              "op":  "not_null"
+                                                                                          }
+                                                                                      ],
+                                                                       "target":  "awaiting_confirmation",
+                                                                       "actions":  [
+                                                                                       "skip_therapist"
                                                                                    ]
                                                                    },
                                                                    {
