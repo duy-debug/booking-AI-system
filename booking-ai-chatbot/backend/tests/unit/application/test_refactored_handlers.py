@@ -1,6 +1,6 @@
 """Tests for outcome-based booking handlers introduced by the migration."""
 
-from datetime import date, time
+from datetime import date, time, timedelta
 from decimal import Decimal
 from typing import cast
 from uuid import UUID
@@ -66,12 +66,13 @@ def test_select_booking_info_updates_only_valid_values() -> None:
 
 def test_select_date_rejects_last_unavailable_date_in_recovery() -> None:
     handler = SelectBookingInfoHandler()
+    unavailable_date = date.today() + timedelta(days=1)
     context = BookingContext(
         "conversation-1",
-        last_unavailable_date=date(2026, 8, 9),
+        last_unavailable_date=unavailable_date,
     )
 
-    rejected = handler.select_date(context, date(2026, 8, 9))
+    rejected = handler.select_date(context, unavailable_date)
 
     assert rejected.outcome is HandlerOutcome.INVALID_INPUT
     assert rejected.error_code == "date_still_unavailable"

@@ -201,7 +201,7 @@ def test_availability_request_rejects_invalid_customer_count(
         )
 
 
-@pytest.mark.parametrize("duration_minutes", [0, 20, 50])
+@pytest.mark.parametrize("duration_minutes", [0, -15])
 def test_availability_request_rejects_invalid_duration(
     duration_minutes: int,
 ) -> None:
@@ -213,6 +213,21 @@ def test_availability_request_rejects_invalid_duration(
             duration_minutes,
             SERVICE_ID,
         )
+
+
+@pytest.mark.parametrize("duration_minutes", [20, 50, 95])
+def test_availability_request_accepts_positive_non_slot_aligned_duration(
+    duration_minutes: int,
+) -> None:
+    request = AvailabilityRequest(
+        SHOP_ID,
+        BOOKING_DATE,
+        1,
+        duration_minutes,
+        SERVICE_ID,
+    )
+
+    assert request.duration_minutes == duration_minutes
 
 
 def test_availability_request_rejects_duplicate_course_ids() -> None:

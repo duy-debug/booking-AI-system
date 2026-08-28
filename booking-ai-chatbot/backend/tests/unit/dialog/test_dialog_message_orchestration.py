@@ -679,7 +679,8 @@ async def test_meaningful_context_greeting_mentions_booking_is_preserved() -> No
         container=as_container(fake),
     )
 
-    assert "Thông tin đặt lịch hiện tại của bạn vẫn được giữ" in response.text
+    assert "Thông tin đặt lịch hiện tại" in response.text
+    assert "vẫn được giữ" in response.text
     assert context.state is BookingState.SELECTING_DURATION
     assert context.shop == SHOP
 

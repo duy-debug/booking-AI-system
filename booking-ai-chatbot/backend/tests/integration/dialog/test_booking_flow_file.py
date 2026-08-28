@@ -381,7 +381,7 @@ def test_duration_step_accepts_course_without_loading_slots(
     )
     assert "load_time_slots" not in transition.actions
     assert {failure.condition for failure in transition.on_fail} == {
-        "duration_not_multiple_15",
+        "invalid_duration",
         "course_not_found",
         "addon_without_main_course",
     }

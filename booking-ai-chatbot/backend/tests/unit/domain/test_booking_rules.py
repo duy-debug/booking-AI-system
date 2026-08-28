@@ -83,12 +83,12 @@ def test_validate_phone_rejects_invalid_values(phone: str) -> None:
         BookingRules.validate_phone(phone)
 
 
-@pytest.mark.parametrize("duration_minutes", [30, 45, 60, 75, 90, 120])
+@pytest.mark.parametrize("duration_minutes", [20, 30, 45, 50, 60, 75, 90, 95, 120])
 def test_validate_course_duration_accepts_valid_value(duration_minutes: int) -> None:
     BookingRules.validate_course_duration(duration_minutes)
 
 
-@pytest.mark.parametrize("duration_minutes", [0, -15, 20, 50])
+@pytest.mark.parametrize("duration_minutes", [0, -15])
 def test_validate_course_duration_rejects_invalid_values(
     duration_minutes: int,
 ) -> None:

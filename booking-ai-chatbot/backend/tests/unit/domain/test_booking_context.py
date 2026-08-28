@@ -170,7 +170,7 @@ def test_change_duration_clears_course_but_preserves_shop() -> None:
 def test_set_duration_clears_stale_failure_code_after_valid_update() -> None:
     context = BookingContext(
         conversation_id="conversation-1",
-        last_failure_code="duration_not_multiple_15",
+        last_failure_code="invalid_duration",
     )
 
     context.set_duration(60)
@@ -181,7 +181,7 @@ def test_set_duration_clears_stale_failure_code_after_valid_update() -> None:
 
 def test_change_duration_clears_stale_failure_code_after_valid_update() -> None:
     context = make_change_context()
-    context.last_failure_code = "duration_not_multiple_15"
+    context.last_failure_code = "invalid_duration"
 
     context.change_duration(90)
 
@@ -367,7 +367,7 @@ def test_set_num_customer_rejects_invalid_value(value: int) -> None:
     assert context.num_customer == 1
 
 
-@pytest.mark.parametrize("value", [0, -15, 20, 50])
+@pytest.mark.parametrize("value", [0, -15])
 def test_set_duration_rejects_invalid_value(value: int) -> None:
     context = BookingContext(conversation_id="conversation-1")
 

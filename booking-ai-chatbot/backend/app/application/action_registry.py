@@ -312,7 +312,7 @@ class ActionRegistry:
             "booking_data_incomplete",
             "customer_ng_blocked",
             "combo_not_bookable",
-            "duration_not_multiple_15",
+            "invalid_duration",
             "course_duration_mismatch",
             "therapist_unavailable",
             "booking_conflict",
@@ -492,7 +492,7 @@ class ActionRegistry:
             return "booking_data_incomplete"
         if isinstance(error, InvalidDurationError):
             if action_name == "handle_duration_selection":
-                return "duration_not_multiple_15"
+                return "invalid_duration"
             return "course_duration_mismatch"
         if isinstance(error, InvalidCourseSelectionError):
             return "combo_not_bookable"
@@ -827,7 +827,7 @@ class ActionRegistry:
             context.booking_context.set_duration(duration)
         else:
             result = handler.select_duration(context.booking_context, duration)
-            if result.error_code == "duration_not_multiple_15":
+            if result.error_code == "invalid_duration":
                 raise InvalidDurationError(result.error_code)
             _ensure_success(result)
             context.booking_context.set_duration(duration)

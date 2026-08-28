@@ -100,7 +100,7 @@ def test_create_service() -> None:
     assert service.course_type is CourseType.MAIN
 
 
-@pytest.mark.parametrize("duration_minutes", [0, -15, 20, 50])
+@pytest.mark.parametrize("duration_minutes", [0, -15])
 def test_service_rejects_invalid_duration(duration_minutes: int) -> None:
     with pytest.raises(InvalidDurationError):
         Course(
@@ -207,7 +207,7 @@ def test_booking_rejects_invalid_customer_count(num_customer: int) -> None:
         )
 
 
-@pytest.mark.parametrize("duration", [0, -15, 20, 50])
+@pytest.mark.parametrize("duration", [0, -15])
 def test_booking_rejects_invalid_duration(duration: int) -> None:
     with pytest.raises(InvalidDurationError):
         Booking(

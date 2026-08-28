@@ -148,10 +148,6 @@ class Course:
     def __post_init__(self) -> None:
         if self.duration_minutes <= 0:
             raise InvalidDurationError("Course duration must be positive.")
-        if self.course_type is CourseType.MAIN and self.duration_minutes % 15 != 0:
-            raise InvalidDurationError(
-                "Main course duration must be positive and divisible by 15."
-            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,8 +197,8 @@ class Booking:
     def __post_init__(self) -> None:
         if not MIN_CUSTOMERS_PER_BOOKING <= self.num_customer <= MAX_CUSTOMERS_PER_BOOKING:
             raise InvalidCustomerCountError("Number of customers must be between one and three.")
-        if self.duration_minutes <= 0 or self.duration_minutes % 15 != 0:
-            raise InvalidDurationError("Booking duration must be positive and divisible by 15.")
+        if self.duration_minutes <= 0:
+            raise InvalidDurationError("Booking duration must be positive.")
         CourseSelection(main_course=self.main_course, addons=self.addons)
         if (
             self.num_customer >= 2
@@ -245,8 +241,8 @@ class BookingRules:
 
     @staticmethod
     def validate_course_duration(duration_minutes: int) -> None:
-        if duration_minutes <= 0 or duration_minutes % 15 != 0:
-            raise InvalidDurationError("Course duration must be positive and divisible by 15.")
+        if duration_minutes <= 0:
+            raise InvalidDurationError("Course duration must be positive.")
 
     @classmethod
     def validate_booking_datetime(
@@ -401,8 +397,8 @@ def _validate_booking_shape(
     therapist_preference: TherapistPreference | None,
 ) -> None:
     BookingRules.validate_customer_count(num_customer)
-    if duration_minutes <= 0 or duration_minutes % 15 != 0:
-        raise InvalidDurationError("Booking duration must be positive and divisible by 15.")
+    if duration_minutes <= 0:
+        raise InvalidDurationError("Booking duration must be positive.")
     course_ids = (main_course_id,) + addon_ids
     if len(course_ids) != len(set(course_ids)):
         raise InvalidCourseSelectionError("Main course and add-on IDs must be unique.")

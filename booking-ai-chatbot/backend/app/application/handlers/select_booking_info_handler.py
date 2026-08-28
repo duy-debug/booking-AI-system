@@ -42,10 +42,10 @@ class SelectBookingInfoHandler:
 
     # Validate duration theo block 15 phút để khớp contract availability/POS.
     def select_duration(self, context: BookingContext, value: int) -> HandlerResult:
-        if type(value) is not int or value <= 0 or value % 15:
+        if type(value) is not int or value <= 0:
             return HandlerResult(
                 HandlerOutcome.INVALID_INPUT,
-                error_code="duration_not_multiple_15",
+                error_code="invalid_duration",
             )
         return HandlerResult(
             HandlerOutcome.SUCCESS,

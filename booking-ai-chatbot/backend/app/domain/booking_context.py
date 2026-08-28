@@ -206,7 +206,6 @@ class BookingContext:
             or not 1 <= self.num_customer <= 3
             or self.duration_minutes is None
             or self.duration_minutes <= 0
-            or self.duration_minutes % 15 != 0
             or self.phone is None
             or not self.phone_confirmed
             or not self.ng_list_checked
@@ -292,9 +291,9 @@ class BookingContext:
 
     # Lưu thời lượng và clear course/availability phụ thuộc duration cũ.
     def set_duration(self, value: int) -> None:
-        """Set a positive duration divisible by 15 minutes."""
-        if value <= 0 or value % 15 != 0:
-            raise InvalidDurationError("Booking duration must be positive and divisible by 15.")
+        """Set a positive duration."""
+        if value <= 0:
+            raise InvalidDurationError("Booking duration must be positive.")
         if value == self.duration_minutes:
             self.last_failure_code = None
             return
@@ -442,8 +441,8 @@ class BookingContext:
     # Đổi duration và clear course/availability/time phụ thuộc duration cũ.
     def change_duration(self, value: int | None) -> None:
         """Replace duration and invalidate its course and slot dependencies."""
-        if value is not None and (value <= 0 or value % 15 != 0):
-            raise InvalidDurationError("Booking duration must be positive and divisible by 15.")
+        if value is not None and value <= 0:
+            raise InvalidDurationError("Booking duration must be positive.")
         self.duration_minutes = value
         self.last_unavailable_date = None
         self.last_failure_code = None
