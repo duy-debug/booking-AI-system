@@ -204,7 +204,10 @@ class SearchShopHandler:
         if selected_main is None:
             return False
 
+        # POS trả duration của slot theo tổng thời lượng main course + add-on.
+        # Vì vậy pre-check exact availability cũng phải dùng cùng duration tổng.
         addon_ids: tuple[UUID, ...] = ()
+        expected_duration = selected_main.duration_minutes
         if criteria.requested_addon_name is not None:
             addon_courses = capability.addon_courses or await self._load_courses(
                 shop.shop_id,
@@ -218,6 +221,7 @@ class SearchShopHandler:
             if selected_addon is None:
                 return False
             addon_ids = (selected_addon.course_id,)
+            expected_duration += selected_addon.duration_minutes
 
         therapists = capability.therapists
         if (
@@ -234,7 +238,7 @@ class SearchShopHandler:
                 shop_id=shop.shop_id,
                 booking_date=criteria.booking_date,
                 num_customer=criteria.num_customer,
-                duration_minutes=criteria.duration_minutes,
+                duration_minutes=expected_duration,
                 main_course_id=selected_main.course_id,
                 addon_ids=addon_ids,
                 therapist_preference=therapist_preference,

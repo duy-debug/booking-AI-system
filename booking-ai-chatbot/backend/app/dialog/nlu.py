@@ -766,7 +766,7 @@ class LLMNLU:
         if (
             state is BookingState.SELECTING_THERAPIST
             and intent == "change_info"
-            and output.entities.change_target is None
+            and output.entities.change_target in {None, "customer_name"}
             and _non_empty_text(output.entities.customer_name) is not None
         ):
             # Ở bước chọn kỹ thuật viên, tên người mà LLM đặt nhầm vào customer_name
@@ -905,6 +905,13 @@ def _build_llm_messages(
     business_timezone: str,
 ) -> list[LLMMessage]:
     intents = ", ".join(sorted(allowed_intents)) or "none"
+    therapist_state_rule = (
+        "Ở selecting_therapist, tên người/Nam/Nữ/Không yêu cầu/Bỏ qua là select_therapist; "
+        "tên người phải dùng entity_kind=therapist, entity_query=tên đó, không dùng customer_name "
+        "trừ khi người dùng nói rõ đổi tên khách hàng. "
+        if state is BookingState.SELECTING_THERAPIST
+        else ""
+    )
     system_prompt = (
         "Hãy phân loại một tin nhắn đặt lịch. Chỉ trả về JSON với các khóa intent, "
         "confidence, entities, entity_kind, entity_query. "
@@ -927,6 +934,7 @@ def _build_llm_messages(
         "FAQ: entity_query=query=câu hỏi. "
         "chỉ cho discovery. search_shops lưu vị trí trong query. Việc chọn "
         "shop/course/therapist phải dùng entity_kind và entity_query; tuyệt đối không tự tạo ID. "
+        f"{therapist_state_rule}"
         "Khi người dùng nói giờ bắt đầu cụ thể, dùng select_time và trích xuất start_time. "
         "Hiểu giờ tự nhiên/viết tắt theo ngữ cảnh, không bịa giờ còn thiếu. "
         "Với change_info, suy ra "

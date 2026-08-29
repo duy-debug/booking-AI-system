@@ -2162,20 +2162,23 @@ async def _with_proactive_suggestions(
         if context.state is BookingState.SELECTING_THERAPIST and context.num_customer == 1:
             therapists = await _available_therapists(container, context)
             names = tuple(
-                item.therapist_name for item in therapists[:8] if item.therapist_name is not None
+                item.therapist_name for item in therapists if item.therapist_name is not None
             )
             if names:
+                metadata = dict(response.metadata)
+                metadata["item_count"] = len(names)
+                metadata["quick_reply_limit"] = len(names) + 3
                 return DialogResponse(
                     text=(
                         "Kỹ thuật viên đang phù hợp với khung giờ đã chọn:\n"
                         + "\n".join(f"{index}. {name}" for index, name in enumerate(names, 1))
-                        + "\nBạn có thể chọn theo tên, giới tính hoặc không yêu cầu."
+                        + "\nAnh/chị có thể chọn theo tên, giới tính hoặc không yêu cầu."
                     ),
                     instruction_template=response.instruction_template,
                     state=context.state,
                     status=response.status,
                     quick_replies=names + ("Không yêu cầu", "Nam", "Nữ"),
-                    metadata=response.metadata,
+                    metadata=metadata,
                 )
     except Exception as error:
         trace_log(
@@ -2757,6 +2760,29 @@ async def _entity_response(
                     f"Không tìm thấy {noun} phù hợp. Anh/chị có thể chọn:\n"
                     + _numbered_course_names(visible),
                     tuple(service.name for service in visible),
+                )
+        if result.entity_kind is NLUEntityKind.THERAPIST:
+            therapists = await _available_therapists(container, context)
+            names = tuple(
+                item.therapist_name
+                for item in therapists
+                if item.therapist_name is not None
+            )
+            if names:
+                lines = "\n".join(
+                    f"{index}. {name}"
+                    for index, name in enumerate(names, 1)
+                )
+                return _handled_response(
+                    context,
+                    "Không tìm thấy kỹ thuật viên phù hợp với tên anh/chị vừa nhập. "
+                    "Anh/chị có thể chọn một kỹ thuật viên đang trống:\n"
+                    + lines,
+                    names + ("Không yêu cầu", "Nam", "Nữ"),
+                    metadata={
+                        "item_count": len(names),
+                        "quick_reply_limit": len(names) + 3,
+                    },
                 )
         return _handled_response(context, _NOT_FOUND_TEXT[result.entity_kind])
     if result.status is EntityResolutionStatus.UNSUPPORTED:

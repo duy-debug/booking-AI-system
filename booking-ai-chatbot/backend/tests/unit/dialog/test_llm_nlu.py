@@ -371,6 +371,37 @@ async def test_therapist_step_treats_name_misclassified_as_customer_name_as_ther
 
 
 @pytest.mark.asyncio
+async def test_therapist_step_treats_customer_name_change_target_as_therapist_query() -> None:
+    gateway = FakeLLMGateway(
+        LLMResponse(
+            content=structured(
+                intent="change_info",
+                confidence=0.95,
+                entities={
+                    "change_target": "customer_name",
+                    "customer_name": "Phạm Bảo An",
+                },
+            )
+        )
+    )
+    fallback = LLMNLU(
+        llm_gateway=gateway,
+        intent_policy=draft_change_policy(),
+    )
+
+    result = await fallback.parse(
+        text="Phạm Bảo An nhé",
+        state=BookingState.SELECTING_THERAPIST,
+    )
+
+    assert result.resolution_status is NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED
+    assert result.entity_kind is NLUEntityKind.THERAPIST
+    assert result.entity_query == "Phạm Bảo An"
+    assert result.intent is None
+    assert result.payload == {}
+
+
+@pytest.mark.asyncio
 async def test_cancel_booking_ignores_empty_entity_resolver_noise() -> None:
     fallback, _ = fallback_for(
         structured(

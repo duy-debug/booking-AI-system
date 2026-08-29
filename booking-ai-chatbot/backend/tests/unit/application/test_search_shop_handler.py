@@ -293,6 +293,36 @@ async def test_execute_uses_exact_availability_when_full_booking_constraints_are
 
 
 @pytest.mark.asyncio
+async def test_exact_availability_uses_total_duration_when_addon_is_requested() -> None:
+    fake = FakeBookingGateway(
+        [SHOP_A],
+        courses_by_shop={
+            SHOP_A.shop_id: (MASSAGE_60_A, ADDON_HEAD_A),
+        },
+        slots_by_shop={
+            SHOP_A.shop_id: (time(19, 0),),
+        },
+    )
+
+    result = await make_handler(fake).execute(
+        criteria=ShopSearchCriteria(
+            booking_date=date(2026, 8, 9),
+            requested_start_time=time(19, 0),
+            num_customer=1,
+            duration_minutes=60,
+            requested_main_course_name=MASSAGE_60_A.name,
+            requested_addon_name=ADDON_HEAD_A.name,
+        )
+    )
+
+    assert result.outcome is HandlerOutcome.SUCCESS
+    assert result.data["shops"] == (SHOP_A,)
+    assert len(fake.availability_calls) == 1
+    assert fake.availability_calls[0].duration_minutes == 75
+    assert fake.availability_calls[0].addon_ids == (ADDON_HEAD_A.course_id,)
+
+
+@pytest.mark.asyncio
 async def test_execute_filters_by_address_case_insensitively() -> None:
     fake = FakeBookingGateway([SHOP_A])
 

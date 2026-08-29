@@ -18,6 +18,7 @@ from app.dialog.dialog_controller import (
     DialogTurnStatus,
     _consume_requested_entities,
     _process_serialized_chat_message,
+    _with_proactive_suggestions,
 )
 from app.dialog.instruction_builder import DialogResponse
 from app.dialog.nlu import (
@@ -31,7 +32,15 @@ from app.dialog.nlu import (
     StateIntentPolicy,
 )
 from app.domain.booking_context import BookingContext
-from app.domain.booking_models import Booking, Course, CourseType, Customer, Shop
+from app.domain.booking_models import (
+    Booking,
+    Course,
+    CourseType,
+    Customer,
+    Shop,
+    TherapistPreference,
+    TherapistPreferenceType,
+)
 from app.domain.booking_state import BookingState
 from app.domain.outcomes import HandlerOutcome, HandlerResult
 from app.transport.chat_api import _to_chat_response
@@ -382,6 +391,16 @@ class FakeAvailabilityHandler:
         return self.result
 
 
+class FakeTherapistAvailabilityGateway:
+    def __init__(self, therapists: tuple[TherapistPreference, ...]) -> None:
+        self.therapists = therapists
+        self.calls: list[object] = []
+
+    async def search_available_therapists(self, request: object) -> list[TherapistPreference]:
+        self.calls.append(request)
+        return list(self.therapists)
+
+
 class FakeContainer:
     def __init__(
         self,
@@ -393,6 +412,7 @@ class FakeContainer:
         shop_search_result: HandlerResult | None = None,
         course_search_result: HandlerResult | None = None,
         availability_result: HandlerResult | None = None,
+        booking_gateway: object | None = None,
     ) -> None:
         self.conversation_context_store = FakeStore(context)
         self.llm_nlu = FakeLLMNLU(nlu_result)
@@ -423,6 +443,7 @@ class FakeContainer:
                 {"slots": ()},
             )
         )
+        self.booking_gateway = booking_gateway
         self.state_intent_policy = StateIntentPolicy(
             {
                 BookingState.IDLE: frozenset({"start_booking", "ask_question"}),
@@ -1047,6 +1068,96 @@ async def test_not_found_branch_is_kind_specific_without_dispatch(
     assert expected in response.text
     assert fake.dialog_controller.calls == []
     assert len(fake.conversation_context_store.saved) == 1
+
+
+@pytest.mark.asyncio
+async def test_therapist_not_found_suggests_current_available_therapists() -> None:
+    context = BookingContext("conversation-a")
+    context.state = BookingState.SELECTING_THERAPIST
+    context.shop = SHOP
+    context.booking_date = date(2026, 8, 31)
+    context.start_time = time(8, 0)
+    context.num_customer = 1
+    context.duration_minutes = 60
+    context.main_course = MAIN_COURSES[0]
+    gateway = FakeTherapistAvailabilityGateway(
+        (
+            TherapistPreference(
+                TherapistPreferenceType.PERSONAL,
+                therapist_id="77777777-7777-7777-7777-777777777777",
+                therapist_name="Trần Minh Anh",
+            ),
+            TherapistPreference(
+                TherapistPreferenceType.PERSONAL,
+                therapist_id="88888888-8888-8888-8888-888888888888",
+                therapist_name="Vũ Hoài An",
+            ),
+        )
+    )
+    resolution = EntityResolutionResult(
+        EntityResolutionStatus.NOT_FOUND,
+        NLUEntityKind.THERAPIST,
+        None,
+        {},
+        failure_code="therapist_not_found",
+    )
+    fake = FakeContainer(
+        context=context,
+        nlu_result=entity_nlu(NLUEntityKind.THERAPIST),
+        resolution=resolution,
+        booking_gateway=gateway,
+    )
+
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
+
+    assert "Không tìm thấy kỹ thuật viên phù hợp" in response.text
+    assert "Trần Minh Anh" in response.text
+    assert "Vũ Hoài An" in response.quick_replies
+    assert "Không yêu cầu" in response.quick_replies
+    assert len(gateway.calls) == 1
+    assert fake.dialog_controller.calls == []
+
+
+@pytest.mark.asyncio
+async def test_selecting_therapist_suggestion_lists_all_available_therapists() -> None:
+    context = BookingContext("conversation-a")
+    context.state = BookingState.SELECTING_THERAPIST
+    context.shop = SHOP
+    context.booking_date = date(2026, 8, 31)
+    context.start_time = time(8, 0)
+    context.num_customer = 1
+    context.duration_minutes = 60
+    context.main_course = MAIN_COURSES[0]
+    therapists = tuple(
+        TherapistPreference(
+            TherapistPreferenceType.PERSONAL,
+            therapist_id=f"77777777-7777-7777-7777-{index:012d}",
+            therapist_name=f"Therapist {index:02d}",
+        )
+        for index in range(1, 13)
+    )
+    fake = FakeContainer(
+        context=context,
+        nlu_result=resolved_nlu(),
+        booking_gateway=FakeTherapistAvailabilityGateway(therapists),
+    )
+    base_response = DialogResponse(
+        text="Safe response",
+        instruction_template="ask_therapist",
+        state=context.state,
+        status=DialogTurnStatus.SUCCESS,
+    )
+
+    response = await _with_proactive_suggestions(
+        response=base_response,
+        context=context,
+        container=as_container(fake),
+    )
+
+    assert "12. Therapist 12" in response.text
+    assert "Therapist 12" in response.quick_replies
+    assert "Không yêu cầu" in response.quick_replies
+    assert len(response.quick_replies) == 15
 
 
 @pytest.mark.asyncio
