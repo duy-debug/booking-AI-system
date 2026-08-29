@@ -447,6 +447,13 @@ class DialogController:
                 transition = revalidation.transition
             if revalidation.instruction_template is not None:
                 change_instruction_template = revalidation.instruction_template
+            booking_context.pending_change_target = None
+        elif change_rule is not None:
+            # change_target đã được _change_transition() validate bằng change_rules.
+            # Lưu marker này để turn kế tiếp phân biệt "đổi thông tin" với flow booking mới.
+            booking_context.pending_change_target = (
+                change_snapshot.target if change_snapshot is not None else None
+            )
         if change_rule is None:
             # Khi đang chỉnh sửa draft, user có thể nhập value ở turn kế tiếp
             # bằng intent select_date/select_people/select_course/deny. Nếu context
@@ -582,6 +589,18 @@ class DialogController:
         Tiếp tục validate slot khi user nhập value sau một turn change_info chưa có value.
         """
 
+        if _is_change_shop_selection_continuation(
+            initial_state=initial_state,
+            intent=intent,
+            context=booking_context,
+        ):
+            return await self._continue_changed_shop_selection(
+                booking_context=booking_context,
+                action_context=action_context,
+                initial_state=initial_state,
+                intent=intent,
+                committed_actions=committed_actions,
+            )
         if not _is_availability_selection_continuation(
             initial_state=initial_state,
             intent=intent,
@@ -606,6 +625,62 @@ class DialogController:
             intent=intent,
             committed_actions=committed_actions,
             snapshot=snapshot,
+        )
+
+    async def _continue_changed_shop_selection(
+        self,
+        *,
+        booking_context: BookingContext,
+        action_context: ActionExecutionContext,
+        initial_state: BookingState,
+        intent: str,
+        committed_actions: tuple[str, ...],
+    ) -> _ChangeRevalidationResult:
+        """
+        Sau khi đổi shop, giữ field còn hợp lệ và chỉ hỏi lại field phụ thuộc shop.
+        """
+
+        booking_context.pending_change_target = None
+        if booking_context.booking_date is None:
+            return _ChangeRevalidationResult()
+        if booking_context.num_customer is None:
+            return _ChangeRevalidationResult(
+                transition=FlowTransition(intent, BookingState.SELECTING_PEOPLE),
+                instruction_template="ask_people",
+            )
+        if booking_context.duration_minutes is None:
+            return _ChangeRevalidationResult(
+                transition=FlowTransition(intent, BookingState.SELECTING_DURATION),
+                instruction_template="ask_duration",
+            )
+        if booking_context.shop is None:
+            return _ChangeRevalidationResult()
+        if self._runtime is None:
+            raise RuntimeError("DialogController runtime is not bound.")
+
+        handler = cast(SearchCourseHandler, self._runtime.handler(SearchCourseHandler))
+        result = await handler.execute(
+            booking_context.shop.shop_id,
+            course_type=CourseType.MAIN,
+        )
+        courses = _handler_items(result, "courses", Course, allow_not_found=True)
+        matching_courses = [
+            course
+            for course in courses
+            if course.duration_minutes == booking_context.duration_minutes
+        ]
+        if not matching_courses:
+            booking_context.change_duration(None)
+            return _ChangeRevalidationResult(
+                transition=FlowTransition(intent, BookingState.SELECTING_DURATION),
+                instruction_template="ask_duration",
+            )
+
+        booking_context.course_selection_mode = CourseSelectionMode.MAIN
+        return _ChangeRevalidationResult(
+            transition=FlowTransition(intent, BookingState.SELECTING_SERVICE),
+            instruction_template="ask_course",
+            executed_actions=(),
         )
 
     async def _revalidate_availability_sensitive_change(
@@ -2168,6 +2243,7 @@ async def _with_proactive_suggestions(
                 metadata = dict(response.metadata)
                 metadata["item_count"] = len(names)
                 metadata["quick_reply_limit"] = len(names) + 3
+                metadata["preserve_structured_text"] = True
                 return DialogResponse(
                     text=(
                         "Kỹ thuật viên đang phù hợp với khung giờ đã chọn:\n"
@@ -2422,7 +2498,7 @@ def _shop_catalog_response(
     names = tuple(shop.name for shop in shops)
     lines = "\n".join(f"{index}. {name}" for index, name in enumerate(names, 1))
     # Không thêm hậu tố đếm kết quả vì response hiện hiển thị toàn bộ danh sách đã nhận.
-    text = f"Komorebi hiện có các cửa hàng:\n{lines}\nBạn muốn chọn cửa hàng nào?"
+    text = f"Komorebi hiện có các cửa hàng:\n{lines}\nAnh/chị muốn chọn cửa hàng nào ạ?"
     return _catalog_response(context, text, names, len(names))
 
 
@@ -2602,7 +2678,7 @@ def _service_step_response(
         text = (
             "Các liệu trình chính phù hợp:\n"
             + _numbered_course_names(visible)
-            + "\nBạn hãy chọn một liệu trình chính."
+            + "\nAnh/chị hãy chọn một liệu trình chính."
         )
         return _catalog_response(
             context,
@@ -2630,6 +2706,40 @@ def _service_step_response(
         context,
         text,
         tuple(service.name for service in visible) + ("Không chọn add-on",),
+        len(courses),
+    )
+
+
+def _course_not_found_response(
+    context: BookingContext,
+    courses: list[Course],
+    *,
+    course_type: CourseType,
+) -> DialogResponse:
+    requested_name = (
+        context.requested_addon_name
+        if course_type is CourseType.ADDON
+        else context.requested_main_course_name
+    )
+    noun = "add-on" if course_type is CourseType.ADDON else "liệu trình chính"
+    shop_name = context.shop.name if context.shop is not None else "cửa hàng đã chọn"
+    duration_text = (
+        f" với thời lượng {context.duration_minutes} phút"
+        if course_type is CourseType.MAIN and context.duration_minutes is not None
+        else ""
+    )
+    requested_text = f" '{requested_name}'" if requested_name else ""
+    visible = courses[:8]
+    text = (
+        f"{noun.capitalize()}{requested_text} hiện không có hoặc chưa phù hợp "
+        f"tại {shop_name}{duration_text}.\n"
+        f"Anh/chị có thể chọn một {noun} đang hỗ trợ bên dưới:\n"
+        + _numbered_course_names(visible)
+    )
+    return _catalog_response(
+        context,
+        text,
+        tuple(service.name for service in visible),
         len(courses),
     )
 
@@ -2727,6 +2837,7 @@ async def _entity_response(
                     metadata={
                         "item_count": len(names),
                         "quick_reply_limit": len(names),
+                        "preserve_structured_text": True,
                     },
                 )
         if result.entity_kind is NLUEntityKind.COURSE and context.shop is not None:
@@ -2753,13 +2864,10 @@ async def _entity_response(
                     if service.duration_minutes == context.duration_minutes
                 ]
             if courses:
-                noun = "add-on" if course_type is CourseType.ADDON else "liệu trình chính"
-                visible = courses[:8]
-                return _handled_response(
+                return _course_not_found_response(
                     context,
-                    f"Không tìm thấy {noun} phù hợp. Anh/chị có thể chọn:\n"
-                    + _numbered_course_names(visible),
-                    tuple(service.name for service in visible),
+                    courses,
+                    course_type=course_type,
                 )
         if result.entity_kind is NLUEntityKind.THERAPIST:
             therapists = await _available_therapists(container, context)
@@ -2782,6 +2890,7 @@ async def _entity_response(
                     metadata={
                         "item_count": len(names),
                         "quick_reply_limit": len(names) + 3,
+                        "preserve_structured_text": True,
                     },
                 )
         return _handled_response(context, _NOT_FOUND_TEXT[result.entity_kind])
@@ -3286,6 +3395,19 @@ def _restore_previous_therapist_preference(
         context.set_therapist_preference(TherapistPreference(TherapistPreferenceType.NONE))
         return
     context.set_therapist_preference(preference)
+
+
+def _is_change_shop_selection_continuation(
+    *,
+    initial_state: BookingState,
+    intent: str,
+    context: BookingContext,
+) -> bool:
+    return (
+        context.pending_change_target == "shop"
+        and initial_state is BookingState.SELECTING_SHOP
+        and intent == "select_store"
+    )
 
 
 def _is_availability_selection_continuation(

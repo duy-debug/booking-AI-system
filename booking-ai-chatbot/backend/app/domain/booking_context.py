@@ -37,6 +37,7 @@ class BookingContext:
     conversation_id: str
     state: BookingState = BookingState.IDLE
     turn_sequence: int = field(default=0, compare=False)
+    pending_change_target: str | None = None
     shop: Shop | None = None
     requested_shop_name: str | None = None
     suggested_shops: tuple[Shop, ...] = ()
@@ -567,6 +568,7 @@ class BookingContext:
         """Clear temporary booking data while preserving the conversation ID."""
         turn_sequence = self.turn_sequence
         self.state = BookingState.IDLE
+        self.pending_change_target = None
         self.shop = None
         self.requested_shop_name = None
         self.main_course = None

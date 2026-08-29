@@ -1071,6 +1071,39 @@ async def test_not_found_branch_is_kind_specific_without_dispatch(
 
 
 @pytest.mark.asyncio
+async def test_course_not_found_explains_shop_duration_and_suggests_valid_courses() -> None:
+    context = BookingContext("conversation-a", state=BookingState.SELECTING_SERVICE)
+    context.shop = SHOP
+    context.duration_minutes = 60
+    context.requested_main_course_name = "Massage không có"
+    resolution = EntityResolutionResult(
+        EntityResolutionStatus.NOT_FOUND,
+        NLUEntityKind.COURSE,
+        None,
+        {},
+        failure_code="course_not_found",
+    )
+    fake = FakeContainer(
+        context=context,
+        nlu_result=entity_nlu(NLUEntityKind.COURSE),
+        resolution=resolution,
+    )
+
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
+
+    assert "Liệu trình chính 'Massage không có' hiện không có hoặc chưa phù hợp" in response.text
+    assert "tại Shibuya với thời lượng 60 phút" in response.text
+    assert "Relax Massage 60" in response.text
+    assert "Deep Massage 90" not in response.text
+    assert response.quick_replies == ("Relax Massage 60",)
+    assert response.metadata["preserve_structured_text"] is True
+    assert fake.search_course_handler.calls == [
+        (SHOP.shop_id, {"course_type": CourseType.MAIN})
+    ]
+    assert fake.dialog_controller.calls == []
+
+
+@pytest.mark.asyncio
 async def test_therapist_not_found_suggests_current_available_therapists() -> None:
     context = BookingContext("conversation-a")
     context.state = BookingState.SELECTING_THERAPIST
@@ -1114,6 +1147,7 @@ async def test_therapist_not_found_suggests_current_available_therapists() -> No
     assert "Trần Minh Anh" in response.text
     assert "Vũ Hoài An" in response.quick_replies
     assert "Không yêu cầu" in response.quick_replies
+    assert response.metadata["preserve_structured_text"] is True
     assert len(gateway.calls) == 1
     assert fake.dialog_controller.calls == []
 
@@ -1158,6 +1192,7 @@ async def test_selecting_therapist_suggestion_lists_all_available_therapists() -
     assert "Therapist 12" in response.quick_replies
     assert "Không yêu cầu" in response.quick_replies
     assert len(response.quick_replies) == 15
+    assert response.metadata["preserve_structured_text"] is True
 
 
 @pytest.mark.asyncio

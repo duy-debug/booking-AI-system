@@ -2,7 +2,7 @@
 
 from datetime import date, time
 from decimal import Decimal
-from typing import cast
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -44,6 +44,7 @@ from app.domain.booking_models import (
     TherapistPreferenceType,
 )
 from app.domain.booking_state import BookingState
+from app.domain.outcomes import HandlerOutcome, HandlerResult
 
 
 def state(
@@ -118,6 +119,20 @@ def main_course(
         price=Decimal("100000"),
         course_type=CourseType.MAIN,
     )
+
+
+class RuntimeWithCourseHandler:
+    def __init__(self, result: HandlerResult) -> None:
+        self.result = result
+        self.calls: list[tuple[object, dict[str, object]]] = []
+
+    def handler(self, handler_type: type[object]) -> object:
+        assert handler_type.__name__ == "SearchCourseHandler"
+        return self
+
+    async def execute(self, shop_id: object, **kwargs: object) -> HandlerResult:
+        self.calls.append((shop_id, kwargs))
+        return self.result
 
 
 def test_turn_input_validates_intent_and_copies_payload() -> None:
@@ -1160,6 +1175,90 @@ async def test_select_date_after_change_prompt_revalidates_slots_without_asking_
     assert context.main_course == selected_course
     assert context.start_time == time(11, 0)
     assert context.therapist_verified is True
+
+
+@pytest.mark.asyncio
+async def test_select_shop_after_change_prompt_keeps_valid_context_and_asks_course() -> None:
+    new_shop = Shop(
+        shop_id=UUID("00000000-0000-0000-0000-000000000099"),
+        name="Komorebi Phú Nhuận",
+    )
+    course_at_new_shop = main_course("10", duration_minutes=90)
+    flow = flow_for(
+        {
+            BookingState.AWAITING_CONFIRMATION: state(
+                transitions=(FlowTransition("change_info", BookingState.AWAITING_CONFIRMATION),),
+                on_enter=FlowOnEnter("final_confirmation"),
+            ),
+            BookingState.SELECTING_SHOP: state(
+                transitions=(
+                    FlowTransition(
+                        "select_store",
+                        BookingState.SELECTING_DATE,
+                        actions=("handle_store_selection",),
+                    ),
+                ),
+                on_enter=FlowOnEnter("ask_shop"),
+            ),
+            BookingState.SELECTING_DATE: state(on_enter=FlowOnEnter("ask_date")),
+            BookingState.SELECTING_SERVICE: state(on_enter=FlowOnEnter("ask_course")),
+        }
+    )
+    dialog = controller(
+        flow,
+        ActionRegistry(),
+        change_rules={
+            "shop": ChangeRule(
+                reset_action="change_shop",
+                next_state=BookingState.SELECTING_SHOP,
+                applied_state=BookingState.SELECTING_DATE,
+                prompt_template="change_ask_shop",
+            )
+        },
+    )
+    runtime = RuntimeWithCourseHandler(
+        HandlerResult(HandlerOutcome.SUCCESS, {"courses": (course_at_new_shop,)})
+    )
+    dialog.bind_runtime(cast(Any, runtime))
+    context = BookingContext(
+        conversation_id="c-1",
+        state=BookingState.AWAITING_CONFIRMATION,
+        shop=sample_shop(),
+        booking_date=date(2026, 8, 31),
+        num_customer=1,
+        duration_minutes=90,
+        main_course=main_course("09", duration_minutes=90),
+        start_time=time(8, 0),
+        therapist_preference=TherapistPreference(TherapistPreferenceType.NONE),
+        therapist_verified=True,
+    )
+
+    prompt_result = await dialog.handle_turn(
+        context,
+        DialogTurnInput("change_info", {"change_target": "shop"}),
+    )
+    select_result = await dialog.handle_turn(
+        context,
+        DialogTurnInput("select_store", {"shop": new_shop}),
+    )
+
+    assert prompt_result.final_state is BookingState.SELECTING_SHOP
+    assert select_result.final_state is BookingState.SELECTING_SERVICE
+    assert select_result.instruction_template == "ask_course"
+    assert select_result.executed_actions == ("handle_store_selection",)
+    assert context.shop == new_shop
+    assert context.booking_date == date(2026, 8, 31)
+    assert context.num_customer == 1
+    assert context.duration_minutes == 90
+    assert context.main_course is None
+    assert context.start_time is None
+    assert context.pending_change_target is None
+    assert runtime.calls == [
+        (
+            new_shop.shop_id,
+            {"course_type": CourseType.MAIN},
+        )
+    ]
 
 
 @pytest.mark.asyncio
