@@ -10,11 +10,11 @@ function assistantMessage(
   return {
     id: "assistant-1",
     role: "assistant",
-    text: "Bạn muốn đặt lịch cho bao nhiêu người?",
+    text: "Anh/chị muốn đặt lịch cho bao nhiêu người?",
     createdAt: 1,
     response: {
       conversation_id: "conversation-1",
-      text: "Bạn muốn đặt lịch cho bao nhiêu người?",
+      text: "Anh/chị muốn đặt lịch cho bao nhiêu người?",
       state: "selecting_people",
       status: "success",
       instruction_template: null,
@@ -35,7 +35,7 @@ describe("MessageItem text-only rendering", () => {
       />,
     );
 
-    expect(html).toContain("Bạn muốn đặt lịch cho bao nhiêu người?");
+    expect(html).toContain("Anh/chị muốn đặt lịch cho bao nhiêu người?");
     expect(html).not.toContain("1 người</button>");
     expect(html).not.toContain("2 người</button>");
     expect(html).not.toContain("Gợi ý trả lời");

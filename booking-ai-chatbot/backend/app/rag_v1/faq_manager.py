@@ -5,7 +5,7 @@ from app.rag_v1.service import RAGService
 
 _UNAVAILABLE_TEXT = (
     "Hiện tại mình chưa thể tra cứu thông tin này. "
-    "Bạn vui lòng thử lại sau nhé."
+    "Anh/chị vui lòng thử lại sau nhé."
 )
 
 

@@ -60,6 +60,7 @@ class ResponseGenerator:
             text = generated.content.strip() if generated.content else ""
             if not text:
                 raise ValueError("Gemini returned an empty NLG response.")
+            text = _safe_generated_text(response=response, generated_text=text)
         except (LLMGatewayError, TimeoutError, ValueError) as error:
             _log_nlg_failed(error=error, started=started, event_name="nlg_failed")
             return response
@@ -97,14 +98,17 @@ class ResponseGenerator:
                 Callable[[list[LLMMessage]], AsyncIterator[str]],
                 streamer,
             )
+            preserve_structured_text = _must_preserve_structured_text(response)
             async for delta in stream_generate(_nlg_messages(prompt)):
                 if not delta:
                     continue
                 text_parts.append(delta)
-                yield ResponseGenerationEvent(delta=delta)
+                if not preserve_structured_text:
+                    yield ResponseGenerationEvent(delta=delta)
             text = "".join(text_parts).strip()
             if not text:
                 raise ValueError("Gemini returned an empty NLG stream.")
+            text = _safe_generated_text(response=response, generated_text=text)
         except (LLMGatewayError, TimeoutError, ValueError) as error:
             _log_nlg_failed(error=error, started=started, event_name="nlg_stream_failed")
             yield ResponseGenerationEvent(response=response)
@@ -123,7 +127,7 @@ def _nlg_messages(prompt: str) -> list[LLMMessage]:
         LLMMessage(
             role="system",
             content=(
-                "Bạn là Kori. Chỉ diễn đạt lại dữ liệu backend đã kiểm chứng; "
+                "Vai trò của trợ lý là Kori. Chỉ diễn đạt lại dữ liệu backend đã kiểm chứng; "
                 "không sáng tạo dữ liệu booking."
             ),
         ),
@@ -140,6 +144,49 @@ def _replace_response_text(response: DialogResponse, text: str) -> DialogRespons
         quick_replies=response.quick_replies,
         metadata=response.metadata,
     )
+
+
+def _safe_generated_text(
+    *,
+    response: DialogResponse,
+    generated_text: str,
+) -> str:
+    if not _must_preserve_structured_text(response):
+        return generated_text
+    if _contains_original_structured_lines(
+        original_text=response.text,
+        generated_text=generated_text,
+    ):
+        return generated_text
+    return response.text
+
+
+def _must_preserve_structured_text(response: DialogResponse) -> bool:
+    return response.metadata.get("preserve_structured_text") is True
+
+
+def _contains_original_structured_lines(
+    *,
+    original_text: str,
+    generated_text: str,
+) -> bool:
+    """
+    Cho phép LLM thêm lời dẫn/lời kết, nhưng không cho làm mất form nghiệp vụ.
+
+    Các dòng gốc trong form xác nhận chứa dữ liệu đã validate từ backend.
+    Nếu Gemini rewrite thiếu một dòng, response sẽ fallback về form gốc.
+    """
+    generated_lines = {
+        line.strip()
+        for line in generated_text.splitlines()
+        if line.strip()
+    }
+    required_lines = tuple(
+        line.strip()
+        for line in original_text.splitlines()
+        if line.strip()
+    )
+    return all(line in generated_lines for line in required_lines)
 
 
 def _log_nlg_started(

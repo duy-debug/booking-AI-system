@@ -93,7 +93,7 @@ class PromptBuilder:
         # ----------------------------------------------------
 
         prompt = f"""
-Bạn là trợ lý hỏi đáp dựa trên tài liệu.
+Vai trò: trợ lý hỏi đáp dựa trên tài liệu.
 
 Nhiệm vụ:
 Trả lời câu hỏi của người dùng chỉ dựa trên CONTEXT được cung cấp bên dưới.

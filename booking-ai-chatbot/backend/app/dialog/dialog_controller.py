@@ -125,7 +125,7 @@ _UNSUPPORTED_TEXT = {
     NLUEntityKind.COURSE: "Hiện tại hệ thống chưa hỗ trợ tra cứu liệu trình này.",
     NLUEntityKind.THERAPIST: (
         "Hiện tại hệ thống chưa hỗ trợ tìm kỹ thuật viên theo tên. "
-        "Bạn có thể chọn Nam, Nữ hoặc Không yêu cầu."
+        "Anh/chị có thể chọn Nam, Nữ hoặc Không yêu cầu."
     ),
 }
 _ENTITY_FAILURE_TEXT = "Hệ thống chưa thể tra cứu thông tin lúc này. Vui lòng thử lại."
@@ -1858,6 +1858,8 @@ async def _next_requested_turn(
             )
     elif context.state is BookingState.SELECTING_SERVICE:
         if context.main_course is None and context.requested_main_course_name:
+            if await _selected_duration_has_no_main_course(container, context):
+                return None, None
             main_query, context.requested_main_course_name = (
                 context.requested_main_course_name,
                 None,
@@ -1936,6 +1938,41 @@ async def _next_requested_turn(
 
 
 # Ghi lý do router chọn nhánh xử lý để trace một chat turn trong terminal.
+async def _selected_duration_has_no_main_course(
+    container: ApplicationContainer,
+    context: BookingContext,
+) -> bool:
+    """
+    Kiểm tra duration đã chọn có main course thật trong POS hay không.
+
+    Khi người dùng nhập một câu dài có cả duration và tên liệu trình,
+    flow phải validate theo thứ tự:
+
+    duration
+         ↓
+    main course
+
+    Nếu duration không có course chính tương ứng ở shop hiện tại,
+    ta dừng tại bước chọn duration để nhánh gợi ý duration hợp lệ xử lý.
+    Không consume tiếp requested_main_course_name, vì như vậy lỗi duration
+    sẽ bị biến thành lỗi "không tìm thấy liệu trình".
+    """
+
+    if context.shop is None or context.duration_minutes is None:
+        return False
+
+    handler = cast(SearchCourseHandler, container.handler(SearchCourseHandler))
+    result = await handler.execute(
+        context.shop.shop_id,
+        course_type=CourseType.MAIN,
+    )
+    courses = _handler_items(result, "courses", Course, allow_not_found=True)
+    return not any(
+        course.duration_minutes == context.duration_minutes
+        for course in courses
+    )
+
+
 def _trace_route(
     route: str,
     reason: str,
@@ -2331,7 +2368,9 @@ async def _handle_discovery(
             labels = tuple(slot.strftime("%H:%M") for slot in slots)
             return _catalog_response(
                 context,
-                "Các khung giờ đang trống: " + ", ".join(labels) + ". Bạn muốn chọn giờ nào?",
+                "Các khung giờ đang trống: "
+                + ", ".join(labels)
+                + ". Anh/chị muốn chọn giờ nào?",
                 labels,
                 len(labels),
             )
@@ -2421,7 +2460,7 @@ def _shop_not_found_response(
             (
                 "Hiện chưa tìm thấy cửa hàng nào có kỹ thuật viên "
                 f"{context.requested_therapist_name}. "
-                "Bạn có muốn đổi kỹ thuật viên hoặc xem toàn bộ cửa hàng không?"
+                "Anh/chị có muốn đổi kỹ thuật viên hoặc xem toàn bộ cửa hàng không?"
             ),
         )
     if (
@@ -2442,7 +2481,7 @@ def _shop_not_found_response(
                 f"Hiện chưa có cửa hàng nào còn đúng khung giờ "
                 f"{context.requested_start_time.strftime('%H:%M')} "
                 "với các điều kiện anh/chị đã cung cấp. "
-                "Bạn muốn đổi thời gian hoặc bớt điều kiện trước không?"
+                "Anh/chị muốn đổi thời gian hoặc bớt điều kiện trước không?"
             ),
         )
     message = (
@@ -2612,7 +2651,11 @@ def _catalog_response(
         state=context.state,
         status=DialogTurnStatus.SUCCESS,
         quick_replies=quick_replies,
-        metadata={"item_count": item_count, "quick_reply_limit": len(quick_replies)},
+        metadata={
+            "item_count": item_count,
+            "quick_reply_limit": len(quick_replies),
+            "preserve_structured_text": True,
+        },
     )
 
 

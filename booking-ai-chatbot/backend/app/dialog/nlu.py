@@ -763,6 +763,27 @@ class LLMNLU:
             # Ở bước chọn course/add-on, nếu LLM đã trích xuất tên dịch vụ cụ thể
             # thì đây là thao tác chọn course, không phải yêu cầu liệt kê discovery.
             intent = "select_course"
+        if (
+            state is BookingState.SELECTING_THERAPIST
+            and intent == "change_info"
+            and output.entities.change_target is None
+            and _non_empty_text(output.entities.customer_name) is not None
+        ):
+            # Ở bước chọn kỹ thuật viên, tên người mà LLM đặt nhầm vào customer_name
+            # vẫn là entity cần resolver theo danh sách therapist thật của POS.
+            # Không route sang change_info nếu khách chưa yêu cầu đổi thông tin.
+            return NLUResult(
+                intent=None,
+                payload={},
+                confidence=output.confidence,
+                source=NLUSource.LLM,
+                resolution_status=NLUResolutionStatus.ENTITY_RESOLUTION_REQUIRED,
+                matched_rule="llm_nlu",
+                entity_query=_non_empty_text(output.entities.customer_name),
+                entity_kind=NLUEntityKind.THERAPIST,
+                has_unconsumed_entities=bool(merged_entities),
+                merged_entities=merged_entities,
+            )
         if intent == "unknown" or output.confidence < self._min_confidence:
             # Chặn candidate dưới ngưỡng trước khi đi vào flow để log rõ lý do unresolved.
             trace_log(

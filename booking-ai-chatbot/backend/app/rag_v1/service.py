@@ -69,7 +69,7 @@ class RAGService:
     # --------------------------------------------------------
 
     _SYSTEM_PROMPT = (
-        "Bạn là trợ lý hỏi đáp dựa trên tài liệu. "
+        "Vai trò: trợ lý hỏi đáp dựa trên tài liệu. "
         "Chỉ trả lời dựa trên context được cung cấp. "
         "Nếu context không đủ, hãy nói rõ rằng "
         "không tìm thấy đủ thông tin trong tài liệu."

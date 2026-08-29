@@ -30,6 +30,7 @@ _SAFE_METADATA_KEYS = frozenset(
         "source_count",
         "item_count",
         "quick_reply_limit",
+        "preserve_structured_text",
     }
 )
 _UNHANDLED_FAILURE_TEXT = "Đã có lỗi xảy ra. Vui lòng thử lại hoặc liên hệ cửa hàng."
@@ -218,7 +219,7 @@ class InstructionBuilder:
                 "Ưu tiên 1-3 câu rõ ràng: xác nhận ngắn thông tin đã có, "
                 "rồi hỏi đúng thông tin còn thiếu.",
                 "Giữ một giọng xưng hô thống nhất: dùng anh/chị, "
-                "không đổi qua lại giữa bạn và anh/chị.",
+                "không dùng từ xưng hô thân mật để gọi khách.",
                 "Đây là spa/massage, luôn dùng đặt lịch; không dùng đặt bàn.",
                 "Không thêm shop, course, slot, therapist hoặc mã đặt chỗ chưa có ở trên.",
                 "Không tự thêm mã POS, mã đặt lịch nội bộ hoặc booking_code "
@@ -241,6 +242,16 @@ class InstructionBuilder:
                         "Không nối cứng hai ý trong cùng một câu.",
                     )
                 )
+        if response.metadata.get("preserve_structured_text") is True:
+            facts.extend(
+                (
+                    "Response này có form nghiệp vụ đã được backend render.",
+                    "Có thể thêm lời dẫn ngắn tự nhiên trước hoặc sau form.",
+                    "Bắt buộc giữ nguyên từng dòng trong nội dung nghiệp vụ đã kiểm chứng.",
+                    "Không gộp các dòng form thành một đoạn văn.",
+                    "Không bỏ, đổi tên, viết lại hoặc sắp xếp lại các dòng trong form.",
+                )
+            )
         return "\n".join(facts)
 
     # Tạo response FAQ grounded từ knowledge documents mà không mutate booking state.
@@ -573,10 +584,10 @@ class InstructionBuilder:
         if context.last_unavailable_date is not None:
             return DialogResponseDraft(
                 f"Ngày {_format_date(context.last_unavailable_date)} hiện vẫn chưa thể đặt lịch. "
-                "Bạn vui lòng chọn một ngày khác."
+                "Anh/chị vui lòng chọn một ngày khác."
             )
         return DialogResponseDraft(
-            "Ngày này hiện vẫn chưa thể đặt lịch. Bạn vui lòng chọn ngày khác."
+            "Ngày này hiện vẫn chưa thể đặt lịch. Anh/chị vui lòng chọn ngày khác."
         )
 
     @staticmethod
@@ -853,7 +864,7 @@ class InstructionBuilder:
             "Vui lòng xác nhận thông tin đặt lịch:",
             *_booking_summary_lines(context),
             "",
-            "Bạn có muốn xác nhận đặt lịch với thông tin trên không?",
+            "Anh/chị có muốn xác nhận đặt lịch với thông tin trên không?",
         )
         return DialogResponseDraft(
             "\n".join(lines),
@@ -861,6 +872,7 @@ class InstructionBuilder:
             {
                 "has_addons": bool(context.addons),
                 "can_change_info": True,
+                "preserve_structured_text": True,
             },
         )
 

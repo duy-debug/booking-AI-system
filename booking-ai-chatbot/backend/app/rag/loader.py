@@ -196,7 +196,7 @@ class DocumentLoader:
         # ====================================================
         # SỬA CHỖ 2:
         #
-        # Trước đây bạn có:
+        # Trước đây hệ thống có:
         #
         # text = path.read_text(encoding="utf-8")
         #
@@ -543,7 +543,7 @@ class DocumentLoader:
             # 4. Tái sử dụng load_file()
             # ------------------------------------------------
             #
-            # Đây là điểm kiến trúc của bạn đang làm đúng.
+            # Đây là điểm kiến trúc hiện tại đang làm đúng.
             #
             # load_directory không cần biết:
             #

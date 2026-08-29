@@ -18,7 +18,7 @@ class FakeLLM:
         response: LLMResponse | None = None,
         error: Exception | None = None,
     ) -> None:
-        self.response = response or LLMResponse(content="Bạn muốn chọn ngày nào?")
+        self.response = response or LLMResponse(content="Anh/chị muốn chọn ngày nào?")
         self.error = error
         self.messages: list[LLMMessage] = []
 
@@ -73,7 +73,7 @@ async def test_generator_replaces_only_text_and_preserves_backend_contract() -> 
         context=BookingContext("conversation-1", state=BookingState.SELECTING_DATE),
     )
 
-    assert generated.text == "Bạn muốn chọn ngày nào?"
+    assert generated.text == "Anh/chị muốn chọn ngày nào?"
     assert generated.state is BookingState.SELECTING_DATE
     assert generated.quick_replies == ("Hôm nay", "Ngày mai")
     assert "Không thêm shop" in gateway.messages[1].content
@@ -107,3 +107,80 @@ async def test_stream_generator_yields_deltas_then_final_response() -> None:
     assert events[-1].response is not None
     assert events[-1].response.text == "Xin chào"
     assert events[-1].response.state is BookingState.SELECTING_DATE
+
+
+def structured_response() -> DialogResponse:
+    return DialogResponse(
+        (
+            "Please confirm booking:\n"
+            "Customer name: Duy\n"
+            "Phone: 0773582649\n"
+            "Shop: Komorebi Binh Thanh\n"
+            "Date: 29/08/2026\n"
+            "Time: 14:00\n"
+            "People: 2\n"
+            "Duration: 75 minutes\n"
+            "Course: Massage giu am\n"
+            "Add-on: Ngam chan gung\n"
+            "Therapist: No preference\n"
+            "\n"
+            "Do you want to confirm this booking?"
+        ),
+        "final_confirmation",
+        BookingState.AWAITING_CONFIRMATION,
+        DialogTurnStatus.SUCCESS,
+        ("Xac nhan", "Chinh sua", "Huy"),
+        metadata={"preserve_structured_text": True},
+    )
+
+
+async def test_structured_response_keeps_valid_nlg_intro_and_original_form() -> None:
+    original = structured_response()
+    rewritten = f"Da, em gui lai thong tin lich hen:\n{original.text}"
+    gateway = FakeLLM(LLMResponse(content=rewritten))
+    generator = ResponseGenerator(gateway, InstructionBuilder())
+
+    generated = await generator.generate(
+        response=original,
+        context=BookingContext("conversation-1", state=BookingState.AWAITING_CONFIRMATION),
+    )
+
+    assert generated.text == rewritten
+
+
+async def test_structured_response_falls_back_when_nlg_drops_form_lines() -> None:
+    original = structured_response()
+    gateway = FakeLLM(
+        LLMResponse(
+            content=(
+                "Da, Komorebi Binh Thanh da ghi nhan lich hen "
+                "14:00 ngay 29/08/2026. Anh/chi xac nhan giup em nhe?"
+            )
+        )
+    )
+    generator = ResponseGenerator(gateway, InstructionBuilder())
+
+    generated = await generator.generate(
+        response=original,
+        context=BookingContext("conversation-1", state=BookingState.AWAITING_CONFIRMATION),
+    )
+
+    assert generated.text == original.text
+
+
+async def test_structured_stream_buffers_deltas_and_falls_back_when_form_is_dropped() -> None:
+    original = structured_response()
+    gateway = FakeStreamingLLM(("Da, ", "em da ghi nhan lich hen."))
+    generator = ResponseGenerator(gateway, InstructionBuilder())
+
+    events = [
+        event
+        async for event in generator.stream_generate(
+            response=original,
+            context=BookingContext("conversation-1", state=BookingState.AWAITING_CONFIRMATION),
+        )
+    ]
+
+    assert [event.delta for event in events] == [None]
+    assert events[-1].response is not None
+    assert events[-1].response.text == original.text

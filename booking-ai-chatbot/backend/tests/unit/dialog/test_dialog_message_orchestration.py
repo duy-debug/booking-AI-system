@@ -280,7 +280,9 @@ class DurationSelectedController(FakeController):
     ) -> DialogTurnResult:
         self.calls.append((context, turn))
         initial_state = context.state
-        context.set_duration(30)
+        duration = turn.payload.get("duration_minutes")
+        assert isinstance(duration, int)
+        context.set_duration(duration)
         context.state = BookingState.SELECTING_SERVICE
         return DialogTurnResult(
             status=DialogTurnStatus.SUCCESS,
@@ -1280,6 +1282,7 @@ async def test_selected_duration_without_matching_main_course_suggests_valid_dur
     assert context.state is BookingState.SELECTING_DURATION
     assert context.duration_minutes is None
     assert response.quick_replies == ("60 phút", "90 phút", "120 phút")
+    assert response.metadata["preserve_structured_text"] is True
     assert "30 phút" in response.text
     assert "1. 60 phút" in response.text
     assert fake.search_course_handler.calls == [
@@ -1287,6 +1290,41 @@ async def test_selected_duration_without_matching_main_course_suggests_valid_dur
             ALT_SHOP.shop_id,
             {"course_type": CourseType.MAIN},
         )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_prefilled_course_waits_when_selected_duration_has_no_main_course() -> None:
+    context = BookingContext(
+        "conversation-a",
+        state=BookingState.SELECTING_DURATION,
+        shop=ALT_SHOP,
+        num_customer=3,
+    )
+    context.booking_date = date(2026, 8, 25)
+    context.requested_main_course_name = "Massage giữ ấm hỗ trợ ngủ sâu"
+    fake = FakeContainer(context=context, nlu_result=select_duration_nlu(61))
+    fake.dialog_controller = DurationSelectedController()
+
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
+
+    assert response.state is BookingState.SELECTING_DURATION
+    assert context.state is BookingState.SELECTING_DURATION
+    assert context.duration_minutes is None
+    assert context.requested_main_course_name == "Massage giữ ấm hỗ trợ ngủ sâu"
+    assert fake.entity_resolution_coordinator.calls == []
+    assert [reply.split()[0] for reply in response.quick_replies] == ["60", "90", "120"]
+    assert "61" in response.text
+    assert "1. 60" in response.text
+    assert fake.search_course_handler.calls == [
+        (
+            ALT_SHOP.shop_id,
+            {"course_type": CourseType.MAIN},
+        ),
+        (
+            ALT_SHOP.shop_id,
+            {"course_type": CourseType.MAIN},
+        ),
     ]
 
 
