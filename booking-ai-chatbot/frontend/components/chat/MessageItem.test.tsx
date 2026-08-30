@@ -78,10 +78,44 @@ describe("MessageItem text-only rendering", () => {
       />,
     );
 
-    expect(html).toContain(
-      "Dạ, xin chào anh/chị! Em có thể giúp anh/chị đặt lịch hoặc giải đáp thông tin dịch vụ ạ. Anh/chị cần em hỗ trợ gì không ạ?",
-    );
+    expect(html).toContain("Dạ, xin chào anh/chị!");
+    expect(html).toContain("Em có thể giúp anh/chị đặt lịch hoặc giải đáp thông tin dịch vụ ạ.");
+    expect(html).toContain("Anh/chị cần em hỗ trợ gì không ạ?");
     expect(html).not.toContain("anh/chị\nđặt lịch");
+  });
+
+  it("splits normal assistant guidance into two readable paragraphs", () => {
+    const html = renderToStaticMarkup(
+      <MessageItem
+        message={assistantMessage({
+          text: "Dạ, Kori đã ghi nhận lịch đặt Massage phục hồi cơ sâu cho 1 người. Anh/chị vui lòng nhập số điện thoại để mình kiểm tra thông tin khách hàng.",
+        })}
+        latest
+        streaming={false}
+      />,
+    );
+
+    expect(html).toContain("plain-paragraphs");
+    expect(html).toContain("Dạ, Kori đã ghi nhận lịch đặt Massage phục hồi cơ sâu cho 1 người.");
+    expect(html).toContain("Anh/chị vui lòng nhập số điện thoại để mình kiểm tra thông tin khách hàng.");
+  });
+
+  it("preserves numbered business lists as separate lines", () => {
+    const html = renderToStaticMarkup(
+      <MessageItem
+        message={assistantMessage({
+          text: "Kỹ thuật viên đang phù hợp với khung giờ đã chọn:\n1. Chu Đức Anh\n2. Lý Đức Anh\n\nAnh/chị có thể chọn theo tên, giới tính hoặc không yêu cầu.",
+        })}
+        latest
+        streaming={false}
+      />,
+    );
+
+    expect(html).toContain("message-lines");
+    expect(html).toContain("Kỹ thuật viên đang phù hợp với khung giờ đã chọn:");
+    expect(html).toContain("1. Chu Đức Anh");
+    expect(html).toContain("2. Lý Đức Anh");
+    expect(html).toContain("message-line spacer");
   });
 
   it("renders user messages as one text bubble", () => {

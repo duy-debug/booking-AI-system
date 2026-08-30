@@ -1491,8 +1491,9 @@ async def test_failed_people_count_explains_domain_limit_in_text() -> None:
     assert "2026-08-25" in response.text
     assert "từ 1 đến 3 người" in response.text
     assert "thông cảm" in response.text
-    assert "Các số người hợp lệ: 1 người, 2 người, 3 người." in response.text
+    assert "Các số người hợp lệ:\n1. 1 người\n2. 2 người\n3. 3 người" in response.text
     assert response.quick_replies == ("1 người", "2 người", "3 người")
+    assert response.metadata["preserve_structured_text"] is True
 
 
 @pytest.mark.asyncio
@@ -1511,8 +1512,9 @@ async def test_failed_duration_explains_shop_course_durations_in_text() -> None:
 
     assert "Komorebi Nha Trang" in response.text
     assert "Các thời lượng hợp lệ của cửa hàng" in response.text
-    assert "60 phút, 90 phút, 120 phút" in response.text
+    assert "1. 60 phút\n2. 90 phút\n3. 120 phút" in response.text
     assert response.quick_replies == ("60 phút", "90 phút", "120 phút")
+    assert response.metadata["preserve_structured_text"] is True
 
 
 @pytest.mark.asyncio

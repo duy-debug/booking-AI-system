@@ -21,6 +21,7 @@ class FakeLLM:
         self.response = response or LLMResponse(content="Anh/chị muốn chọn ngày nào?")
         self.error = error
         self.messages: list[LLMMessage] = []
+        self.call_count = 0
 
     async def generate(
         self,
@@ -28,6 +29,7 @@ class FakeLLM:
         *,
         tools: list[dict[str, object]] | None = None,
     ) -> LLMResponse:
+        self.call_count += 1
         self.messages = messages
         if self.error is not None:
             raise self.error
@@ -45,6 +47,7 @@ class FakeStreamingLLM(FakeLLM):
         *,
         tools: list[dict[str, object]] | None = None,
     ):
+        self.call_count += 1
         self.messages = messages
         for chunk in self.chunks:
             yield chunk
@@ -146,6 +149,25 @@ async def test_structured_response_keeps_valid_nlg_intro_and_original_form() -> 
     )
 
     assert generated.text == rewritten
+    assert gateway.call_count == 1
+
+
+async def test_structured_response_falls_back_when_nlg_flattens_form_lines() -> None:
+    original = structured_response()
+    gateway = FakeLLM(
+        LLMResponse(
+            content=original.text.replace("\n", " ")
+        )
+    )
+    generator = ResponseGenerator(gateway, InstructionBuilder())
+
+    generated = await generator.generate(
+        response=original,
+        context=BookingContext("conversation-1", state=BookingState.AWAITING_CONFIRMATION),
+    )
+
+    assert generated.text == original.text
+    assert gateway.call_count == 1
 
 
 async def test_structured_response_falls_back_when_nlg_drops_form_lines() -> None:
@@ -166,6 +188,7 @@ async def test_structured_response_falls_back_when_nlg_drops_form_lines() -> Non
     )
 
     assert generated.text == original.text
+    assert gateway.call_count == 1
 
 
 async def test_structured_stream_buffers_deltas_and_falls_back_when_form_is_dropped() -> None:
@@ -184,3 +207,4 @@ async def test_structured_stream_buffers_deltas_and_falls_back_when_form_is_drop
     assert [event.delta for event in events] == [None]
     assert events[-1].response is not None
     assert events[-1].response.text == original.text
+    assert gateway.call_count == 1

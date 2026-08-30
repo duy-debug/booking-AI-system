@@ -84,10 +84,10 @@ def ready_context(
     )
 
 
-def booking(reservation_code: str | None = None) -> Booking:
+def booking(reservation_code: str | None = None, *, status: str = "confirmed") -> Booking:
     return Booking(
         booking_id=BOOKING_ID,
-        status="confirmed",
+        status=status,
         shop=SHOP,
         main_course=COURSE,
         customer=CUSTOMER,
@@ -243,7 +243,10 @@ def test_completed_response_prefers_context_display_code() -> None:
     assert "RSV-2026-001" not in response.text
     assert "Tên khách hàng: An" in response.text
     assert "Số điện thoại: 0901234567" in response.text
-    assert response.metadata == {"booking_created": True}
+    assert response.metadata == {
+        "booking_created": True,
+        "preserve_structured_text": True,
+    }
 
 
 def test_completed_response_without_context_code_falls_back_to_booking_code() -> None:
@@ -259,6 +262,40 @@ def test_completed_response_without_context_code_falls_back_to_booking_code() ->
     assert "RSV-2026-001" in response.text
     assert "Tên khách hàng: An" in response.text
     assert str(BOOKING_ID) not in response.text
+
+
+def test_cancel_confirmation_preserves_structured_booking_form() -> None:
+    context = ready_context()
+    context.booking = booking("RSV-2026-001")
+
+    response = InstructionBuilder().build_response(
+        result=turn_result(
+            "cancel_existing_booking_confirmation",
+            BookingState.AWAITING_CANCEL_CONFIRMATION,
+        ),
+        context=context,
+    )
+
+    assert "Em đã tìm thấy booking sau" in response.text
+    assert "Tên khách hàng: An" in response.text
+    assert "Anh/chị có chắc chắn muốn hủy booking này không?" in response.text
+    assert response.quick_replies == ("Xác nhận hủy", "Không hủy")
+    assert response.metadata["preserve_structured_text"] is True
+
+
+def test_cancel_complete_preserves_structured_booking_form() -> None:
+    context = ready_context(state=BookingState.CANCELLED)
+    context.booking = booking("RSV-2026-001", status="cancelled")
+
+    response = InstructionBuilder().build_response(
+        result=turn_result("booking_cancelled", BookingState.CANCELLED),
+        context=context,
+    )
+
+    assert "Hủy booking thành công" in response.text
+    assert "Tên khách hàng: An" in response.text
+    assert "Anh/chị có cần em hỗ trợ đặt lịch mới hoặc hủy booking khác không ạ?" in response.text
+    assert response.metadata == {"preserve_structured_text": True}
 
 
 def test_completed_state_without_booking_does_not_claim_success() -> None:

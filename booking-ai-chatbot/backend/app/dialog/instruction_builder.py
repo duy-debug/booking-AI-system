@@ -248,7 +248,9 @@ class InstructionBuilder:
                     "Response này có form nghiệp vụ đã được backend render.",
                     "Có thể thêm lời dẫn ngắn tự nhiên trước hoặc sau form.",
                     "Bắt buộc giữ nguyên từng dòng trong nội dung nghiệp vụ đã kiểm chứng.",
+                    "Nếu thêm lời dẫn hoặc câu hỏi lịch sự, hãy đặt thành đoạn riêng.",
                     "Không gộp các dòng form thành một đoạn văn.",
+                    "Không đặt lời dẫn, danh sách và câu hỏi cuối trên cùng một dòng.",
                     "Không bỏ, đổi tên, viết lại hoặc sắp xếp lại các dòng trong form.",
                 )
             )
@@ -922,7 +924,13 @@ class InstructionBuilder:
             lines.append("Thông tin đặt lịch đã được ghi nhận.")
         lines.append("")
         lines.extend(_booking_summary_lines(context))
-        return DialogResponseDraft("\n".join(lines), metadata={"booking_created": True})
+        return DialogResponseDraft(
+            "\n".join(lines),
+            metadata={
+                "booking_created": True,
+                "preserve_structured_text": True,
+            },
+        )
 
     @staticmethod
     def _booking_cancelled(
@@ -1002,7 +1010,10 @@ class InstructionBuilder:
         return DialogResponseDraft(
             "\n".join(lines),
             ("Xác nhận hủy", "Không hủy"),
-            metadata={"requires_cancel_confirmation": True},
+            metadata={
+                "requires_cancel_confirmation": True,
+                "preserve_structured_text": True,
+            },
         )
 
     @staticmethod
@@ -1026,7 +1037,13 @@ class InstructionBuilder:
         lines.extend(_booking_summary_lines(context))
         lines.append("")
         lines.append("Anh/chị có cần em hỗ trợ đặt lịch mới hoặc hủy booking khác không ạ?")
-        return DialogResponseDraft("\n".join(lines), metadata={"booking_cancelled": True})
+        return DialogResponseDraft(
+            "\n".join(lines),
+            metadata={
+                "booking_cancelled": True,
+                "preserve_structured_text": True,
+            },
+        )
 
 
 def _normalize_quick_replies(

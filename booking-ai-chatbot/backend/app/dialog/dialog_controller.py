@@ -3067,6 +3067,7 @@ async def _with_state_recovery_suggestions(
     metadata = dict(response.metadata)
     if quick_replies:
         metadata["quick_reply_limit"] = len(quick_replies)
+        metadata["preserve_structured_text"] = True
 
     return DialogResponse(
         text=text,
@@ -3163,12 +3164,15 @@ def _with_inline_recovery_suggestions(
     if not quick_replies or context.state is BookingState.SELECTING_SHOP:
         return text
 
-    suggestions = ", ".join(quick_replies)
     label = _inline_suggestion_label(context)
-    line = f"{label}: {suggestions}."
-    if line in text:
+    lines = "\n".join(
+        f"{index}. {suggestion}"
+        for index, suggestion in enumerate(quick_replies, 1)
+    )
+    suggestion_block = f"{label}:\n{lines}"
+    if suggestion_block in text:
         return text
-    return f"{text}\n\n{line}"
+    return f"{text}\n\n{suggestion_block}"
 
 
 def _duration_recovery_text(context: BookingContext) -> str:

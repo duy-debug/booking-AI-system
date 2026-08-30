@@ -15,11 +15,31 @@ function timeLabel(timestamp: number) {
 }
 
 function isStructuredLine(line: string) {
-  return line.startsWith("- ") || /^[^:]{1,40}:\s+\S/.test(line);
+  return (
+    line.startsWith("- ")
+    || /^\d+\.\s+\S/.test(line)
+    || /^[^:]{1,80}:\s*\S*$/.test(line)
+  );
 }
 
 function normalizeParagraphLines(lines: string[]) {
   return lines.map((line) => line.trim()).filter(Boolean).join(" ");
+}
+
+function splitPlainParagraphs(lines: string[]) {
+  const text = normalizeParagraphLines(lines);
+  const sentences = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((sentence) => sentence.trim()) ?? [];
+  if (sentences.length < 2) return [text];
+  return [
+    sentences.slice(0, -1).join(" "),
+    sentences.at(-1) ?? "",
+  ].filter(Boolean);
+}
+
+function lineClassName(line: string) {
+  if (!line.trim()) return "message-line spacer";
+  if (line.startsWith("- ")) return "message-line detail";
+  return "message-line";
 }
 
 function MessageBody({ text }: { text: string }) {
@@ -27,14 +47,24 @@ function MessageBody({ text }: { text: string }) {
     const lines = text.split("\n");
     const hasStructuredLines = lines.some((line) => isStructuredLine(line.trim()));
     if (!hasStructuredLines) {
-      return <span>{normalizeParagraphLines(lines)}</span>;
+      const paragraphs = splitPlainParagraphs(lines);
+      if (paragraphs.length === 1) return <span>{paragraphs[0]}</span>;
+      return (
+        <span className="message-lines plain-paragraphs">
+          {paragraphs.map((paragraph, index) => (
+            <span className="message-line paragraph" key={`${index}-${paragraph}`}>
+              {paragraph}
+            </span>
+          ))}
+        </span>
+      );
     }
 
     return (
       <span className="message-lines">
         {lines.map((line, index) => (
           <span
-            className={line.startsWith("- ") ? "message-line detail" : "message-line"}
+            className={lineClassName(line)}
             key={`${index}-${line}`}
           >
             {line.startsWith("- ") ? line.slice(2) : line}

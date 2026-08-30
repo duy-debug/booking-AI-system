@@ -1148,6 +1148,14 @@ summary:focus-visible {
   display: block;
 }
 
+.message-line.spacer {
+  min-height: 7px;
+}
+
+.message-line.paragraph + .message-line.paragraph {
+  margin-top: 5px;
+}
+
 .message-line.detail {
   position: relative;
   margin-top: 2px;
