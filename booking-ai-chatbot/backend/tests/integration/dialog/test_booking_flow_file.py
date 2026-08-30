@@ -262,6 +262,23 @@ def test_customer_name_step_skips_only_for_existing_customer(flow: FlowDefinitio
     assert machine.resolve_auto_transition(first_time) is None
 
 
+def test_changed_phone_with_existing_name_returns_to_confirmation(
+    flow: FlowDefinition,
+) -> None:
+    context = BookingContext(
+        "change-phone",
+        state=BookingState.COLLECTING_PHONE,
+        phone="07733582649",
+        customer=Customer("07733582649", "Lam"),
+        phone_confirmed=True,
+    )
+
+    transition = StateMachine(flow).resolve_transition(context, "provide_phone")
+
+    assert transition.target is BookingState.AWAITING_CONFIRMATION
+    assert transition.actions == ("handle_phone_collection", "validate_phone")
+
+
 def test_new_customer_name_submission_goes_straight_to_confirmation(
     flow: FlowDefinition,
 ) -> None:

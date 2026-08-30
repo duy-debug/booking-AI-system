@@ -1157,6 +1157,8 @@ class ActionRegistry:
             raise InvalidActionInputError(
                 "Action 'handle_phone_collection' requires 'name' to be str."
             )
+        if name_value is None and context.booking_context.customer is not None:
+            name_value = context.booking_context.customer.name
         result = await self._check_customer_handler.check(
             context.booking_context,
             phone,

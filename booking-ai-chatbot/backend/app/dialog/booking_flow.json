@@ -955,6 +955,42 @@
                                             "transitions":  [
                                                                 {
                                                                     "intent":  "provide_phone",
+                                                                    "target":  "awaiting_confirmation",
+                                                                    "conditions":  [
+                                                                                       {
+                                                                                           "field":  "customer_name",
+                                                                                           "op":  "not_null"
+                                                                                       }
+                                                                                   ],
+                                                                    "actions":  [
+                                                                                    "handle_phone_collection",
+                                                                                    "validate_phone"
+                                                                                ],
+                                                                    "on_fail":  [
+                                                                                    {
+                                                                                        "condition":  "invalid_phone",
+                                                                                        "target":  "collecting_phone",
+                                                                                        "instruction_template":  "phone_invalid"
+                                                                                    },
+                                                                                    {
+                                                                                        "condition":  "customer_ng_blocked",
+                                                                                        "target":  "collecting_phone",
+                                                                                        "instruction_template":  "customer_not_allowed"
+                                                                                    },
+                                                                                    {
+                                                                                        "condition":  "customer_verification_mismatch",
+                                                                                        "target":  "collecting_phone",
+                                                                                        "instruction_template":  "customer_verification_failed"
+                                                                                    },
+                                                                                    {
+                                                                                        "condition":  "booking_api_error",
+                                                                                        "target":  "collecting_phone",
+                                                                                        "instruction_template":  "customer_verification_unavailable"
+                                                                                    }
+                                                                                ]
+                                                                },
+                                                                {
+                                                                    "intent":  "provide_phone",
                                                                     "target":  "collecting_name",
                                                                     "actions":  [
                                                                                     "handle_phone_collection",

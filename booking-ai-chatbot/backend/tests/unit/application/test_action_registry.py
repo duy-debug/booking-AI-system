@@ -812,6 +812,32 @@ async def test_phone_collection_binding_passes_phone_and_optional_name() -> None
 
 
 @pytest.mark.asyncio
+async def test_phone_collection_reuses_existing_customer_name_when_changing_phone() -> None:
+    handler = FakeCustomerLookup()
+    bridge = production_bridge(customer=handler)
+    booking_context = BookingContext(
+        conversation_id="conversation-1",
+        state=BookingState.COLLECTING_PHONE,
+        phone="07733582649",
+        customer=Customer("07733582649", "Lam"),
+        phone_confirmed=True,
+    )
+
+    await bridge.execute_action(
+        "handle_phone_collection",
+        execution_context(
+            booking_context=booking_context,
+            payload={"phone": "0773582641"},
+        ),
+    )
+
+    assert handler.calls == [(booking_context, "0773582641", "Lam")]
+    assert booking_context.phone == "0773582641"
+    assert booking_context.customer == Customer("0773582641", "Lam")
+    assert booking_context.phone_confirmed is True
+
+
+@pytest.mark.asyncio
 async def test_phone_collection_rejects_missing_or_untyped_phone() -> None:
     bridge = production_bridge(customer=FakeCustomerLookup())
 
