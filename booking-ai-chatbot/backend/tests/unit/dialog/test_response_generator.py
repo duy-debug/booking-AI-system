@@ -63,7 +63,6 @@ def response() -> DialogResponse:
         "ask_date",
         BookingState.SELECTING_DATE,
         DialogTurnStatus.SUCCESS,
-        ("Hôm nay", "Ngày mai"),
     )
 
 
@@ -78,7 +77,6 @@ async def test_generator_replaces_only_text_and_preserves_backend_contract() -> 
 
     assert generated.text == "Anh/chị muốn chọn ngày nào?"
     assert generated.state is BookingState.SELECTING_DATE
-    assert generated.quick_replies == ("Hôm nay", "Ngày mai")
     assert "Không thêm shop" in gateway.messages[1].content
 
 
@@ -132,7 +130,6 @@ def structured_response() -> DialogResponse:
         "final_confirmation",
         BookingState.AWAITING_CONFIRMATION,
         DialogTurnStatus.SUCCESS,
-        ("Xac nhan", "Chinh sua", "Huy"),
         metadata={"preserve_structured_text": True},
     )
 

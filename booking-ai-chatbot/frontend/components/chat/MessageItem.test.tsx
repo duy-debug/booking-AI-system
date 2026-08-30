@@ -18,7 +18,6 @@ function assistantMessage(
       state: "selecting_people",
       status: "success",
       instruction_template: null,
-      quick_replies: ["1 người", "2 người"],
       metadata: { source_count: 1 },
     },
     ...overrides,
@@ -53,7 +52,6 @@ describe("MessageItem text-only rendering", () => {
             state: "selecting_service",
             status: "success",
             instruction_template: null,
-            quick_replies: ["Massage đá nóng 60 phút"],
             metadata: {},
           },
         })}

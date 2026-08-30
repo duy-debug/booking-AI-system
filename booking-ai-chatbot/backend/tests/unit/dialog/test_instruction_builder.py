@@ -162,23 +162,22 @@ def test_find_missing_templates_deduplicates_in_declared_order() -> None:
     assert missing == ("not_ready", "another_missing")
 
 
-def test_people_renderer_defers_quick_replies_to_controller_recovery() -> None:
+def test_people_renderer_uses_text_only_recovery() -> None:
     response = InstructionBuilder().build_response(
         result=turn_result("ask_people", BookingState.SELECTING_PEOPLE),
         context=BookingContext("conversation-1"),
     )
 
-    assert response.quick_replies == ()
+    assert "từ 1 đến 3 người" in response.text
 
 
-def test_duration_renderer_defers_quick_replies_to_controller_recovery() -> None:
+def test_duration_renderer_uses_text_only_recovery() -> None:
     response = InstructionBuilder().build_response(
         result=turn_result("duration_invalid", BookingState.SELECTING_DURATION),
         context=BookingContext("conversation-1"),
     )
 
     assert "gợi ý hợp lệ của cửa hàng" in response.text
-    assert response.quick_replies == ()
 
 
 def test_time_slots_keep_pos_order_and_are_not_limited() -> None:
@@ -190,8 +189,11 @@ def test_time_slots_keep_pos_order_and_are_not_limited() -> None:
         context=context,
     )
 
-    assert response.quick_replies == tuple(slot.strftime("%H:%M") for slot in slots)
-    assert response.metadata == {"available_slot_count": len(slots)}
+    assert "khung giờ còn trống" in response.text
+    assert response.metadata == {
+        "available_slot_count": len(slots),
+        "preserve_structured_text": True,
+    }
 
 
 def test_group_therapist_renderer_offers_gender_but_not_names() -> None:
@@ -203,7 +205,9 @@ def test_group_therapist_renderer_offers_gender_but_not_names() -> None:
     )
 
     assert "chưa hỗ trợ chọn kỹ thuật viên theo tên riêng" in response.text
-    assert response.quick_replies == ("Không yêu cầu", "Nam", "Nữ")
+    assert "Không yêu cầu" in response.text
+    assert "Nam" in response.text
+    assert "Nữ" in response.text
 
 
 def test_confirmation_summary_formats_context_without_internal_identifiers() -> None:
@@ -225,7 +229,7 @@ def test_confirmation_summary_formats_context_without_internal_identifiers() -> 
     assert "Kỹ thuật viên: Ưu tiên kỹ thuật viên nữ" in response.text
     assert "******" not in response.text
     assert str(BOOKING_ID) not in response.text
-    assert response.quick_replies == ("Xác nhận", "Chỉnh sửa", "Hủy")
+    assert response.metadata["preserve_structured_text"] is True
 
 
 def test_completed_response_prefers_context_display_code() -> None:
@@ -279,7 +283,6 @@ def test_cancel_confirmation_preserves_structured_booking_form() -> None:
     assert "Em đã tìm thấy booking sau" in response.text
     assert "Tên khách hàng: An" in response.text
     assert "Anh/chị có chắc chắn muốn hủy booking này không?" in response.text
-    assert response.quick_replies == ("Xác nhận hủy", "Không hủy")
     assert response.metadata["preserve_structured_text"] is True
 
 

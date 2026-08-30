@@ -20,7 +20,6 @@ export interface ChatResponse {
   state: BookingState;
   status: DialogStatus;
   instruction_template: string | null;
-  quick_replies: string[];
   metadata: Record<string, SafeMetadataValue>;
 }
 

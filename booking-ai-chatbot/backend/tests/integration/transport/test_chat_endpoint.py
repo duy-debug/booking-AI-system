@@ -350,7 +350,6 @@ def test_shop_discovery_enters_shop_selection_without_selecting_a_candidate(
     assert response.status_code == 200
     assert body["state"] == "selecting_shop"
     assert body["status"] == "success"
-    assert body["quick_replies"] == ["Shibuya", "Komorebi Huáº¿"]
     assert body["metadata"] == {"item_count": 2}
     assert "Komorebi Huáº¿" in body["text"]
     assert handler.calls == [None]
@@ -400,7 +399,6 @@ def test_shop_discovery_does_not_truncate_shop_list(
     assert response.status_code == 200
     assert body["state"] == "selecting_shop"
     assert body["metadata"] == {"item_count": 9}
-    assert body["quick_replies"] == [f"Komorebi Shop {index}" for index in range(1, 10)]
     assert "8/9" not in body["text"]
     assert "Komorebi Shop 9" in body["text"]
     assert outbound_requests == []
@@ -430,7 +428,7 @@ def test_service_package_synonym_lists_services_during_duration_selection(
 
     assert response.status_code == 200
     assert response.json()["state"] == "selecting_duration"
-    assert response.json()["quick_replies"] == [COURSE.name]
+    assert COURSE.name in response.json()["text"]
     assert handler.calls == [(SHOP.shop_id, CourseType.MAIN)]
     assert context.duration_minutes is None
     assert outbound_requests == []
@@ -465,7 +463,7 @@ def test_service_discovery_keeps_booking_selection_and_calls_pos_once(
     assert response.status_code == 200
     assert body["state"] == "selecting_service"
     assert body["status"] == "success"
-    assert body["quick_replies"] == [COURSE.name]
+    assert COURSE.name in body["text"]
     assert handler.calls == [(SHOP.shop_id, CourseType.MAIN)]
     assert context.main_course is None
     assert outbound_requests == []
@@ -589,7 +587,7 @@ def test_booking_request_prefills_date_and_skips_redundant_date_question(
 
     assert started.json()["state"] == "selecting_shop"
     assert selected_shop.json()["state"] == "selecting_people"
-    assert selected_shop.json()["quick_replies"] == ["1 ngÆ°á»i", "2 ngÆ°á»i", "3 ngÆ°á»i"]
+    assert "tá»« 1 Ä‘áº¿n 3 ngÆ°á»i" in selected_shop.json()["text"]
     assert context.booking_date == date.today() + timedelta(days=1)
     assert context.requested_booking_date is None
     assert context.requested_start_time == time(7, 0)
@@ -883,7 +881,7 @@ def test_booking_proactively_suggests_main_course_then_addon_then_slots(
         message="60 phÃºt",
     )
     assert main_response.json()["state"] == "selecting_service"
-    assert main_response.json()["quick_replies"] == [COURSE.name]
+    assert COURSE.name in main_response.json()["text"]
     assert "liá»‡u trÃ¬nh chÃ­nh" in main_response.json()["text"].casefold()
     assert service_handler.calls == [(SHOP.shop_id, CourseType.MAIN)]
 
@@ -905,10 +903,8 @@ def test_booking_proactively_suggests_main_course_then_addon_then_slots(
         message=COURSE.name,
     )
     assert addon_response.json()["state"] == "selecting_service"
-    assert addon_response.json()["quick_replies"] == [
-        ADDON.name,
-        "KhÃ´ng chá»n add-on",
-    ]
+    assert ADDON.name in addon_response.json()["text"]
+    assert "KhÃ´ng chá»n add-on" in addon_response.json()["text"]
     assert "add-on" in addon_response.json()["text"].casefold()
     assert service_handler.calls[-1] == (SHOP.shop_id, CourseType.ADDON)
 
@@ -918,7 +914,8 @@ def test_booking_proactively_suggests_main_course_then_addon_then_slots(
         message="KhÃ´ng chá»n add-on",
     )
     assert slot_response.json()["state"] == "selecting_time"
-    assert slot_response.json()["quick_replies"] == ["10:30", "11:00"]
+    assert "10:30" in slot_response.json()["text"]
+    assert "11:00" in slot_response.json()["text"]
     assert len(availability.calls) == 1
     assert availability.calls[0].conversation_id == context.conversation_id
     assert outbound_requests == []
@@ -976,7 +973,6 @@ def test_empty_availability_moves_ui_back_to_date_step(
     assert response.status_code == 200
     assert response.json()["state"] == "selecting_date"
     assert response.json()["status"] == "failure_handled"
-    assert response.json()["quick_replies"] == ["16/08/2099", "17/08/2099", "Chá»n ngÃ y khÃ¡c"]
     assert "chá»n ngÃ y khÃ¡c" in response.json()["text"].casefold()
     saved = container.memory_cache._contexts[context.conversation_id]
     assert saved.booking_date == date(2099, 8, 15)
@@ -1015,7 +1011,6 @@ def test_reselecting_same_failed_date_stays_on_date_step(
     assert response.json()["state"] == "selecting_date"
     assert response.json()["status"] == "failure_handled"
     assert "15/08/2099" in response.json()["text"]
-    assert response.json()["quick_replies"] == ["16/08/2099", "17/08/2099", "Chá»n ngÃ y khÃ¡c"]
     saved = container.memory_cache._contexts[context.conversation_id]
     assert saved.num_customer == 1
     assert saved.duration_minutes == 60
@@ -1095,7 +1090,8 @@ def test_new_date_reuses_context_and_returns_actual_slots_when_requested_time_mi
 
     assert response.status_code == 200
     assert response.json()["state"] == "selecting_time"
-    assert response.json()["quick_replies"] == ["09:00", "10:00"]
+    assert "09:00" in response.json()["text"]
+    assert "10:00" in response.json()["text"]
     saved = container.memory_cache._contexts[context.conversation_id]
     assert saved.booking_date == date(2099, 8, 16)
     assert saved.num_customer == 1
@@ -1128,7 +1124,8 @@ def test_invalid_people_count_returns_business_validation_message(
     assert response.json()["state"] == "selecting_people"
     assert response.json()["status"] == "failure_handled"
     assert "tá»‘i Ä‘a 3 ngÆ°á»i" in response.json()["text"].casefold()
-    assert response.json()["quick_replies"] == ["1 ngÆ°á»i", "2 ngÆ°á»i", "3 ngÆ°á»i"]
+    assert "1 ngÆ°á»i" in response.json()["text"]
+    assert "3 ngÆ°á»i" in response.json()["text"]
     assert outbound_requests == []
 
 
@@ -1245,7 +1242,6 @@ def test_faq_returns_safe_json_without_state_change_or_internal_metadata(
         "state": "idle",
         "status": "success",
         "instruction_template": None,
-        "quick_replies": [],
         "metadata": {"response_type": "faq", "source_count": 1},
     }
     assert gateway.calls == [("Cá»­a hÃ ng má»Ÿ cá»­a lÃºc máº¥y giá»?", 6)]
@@ -1421,7 +1417,8 @@ def test_ambiguous_shop_change_does_not_mutate_existing_booking(
 
     assert response.status_code == 200
     assert response.json()["state"] == "awaiting_confirmation"
-    assert response.json()["quick_replies"] == ["District 1", "District 3"]
+    assert "District 1" in response.json()["text"]
+    assert "District 3" in response.json()["text"]
     saved = container.memory_cache._contexts[context.conversation_id]
     assert saved.shop == old_shop
     assert saved.main_course == COURSE
@@ -1609,8 +1606,8 @@ def test_ambiguous_entity_returns_names_without_state_mutation(
 
     body = response.json()
     assert response.status_code == 200
-    assert body["quick_replies"] == ["Shibuya", "Shinjuku", "Ginza"]
     assert body["state"] == "selecting_shop"
+    assert "Shibuya" in body["text"]
     assert context.state is BookingState.SELECTING_SHOP
     assert "shop:" not in response.text
     assert outbound_requests == []
@@ -1666,7 +1663,6 @@ def test_response_never_exposes_sensitive_context_fields(
         "state",
         "status",
         "instruction_template",
-        "quick_replies",
         "metadata",
     }
     assert "0901234567" not in serialized

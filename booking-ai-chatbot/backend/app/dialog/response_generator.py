@@ -141,7 +141,6 @@ def _replace_response_text(response: DialogResponse, text: str) -> DialogRespons
         instruction_template=response.instruction_template,
         state=response.state,
         status=response.status,
-        quick_replies=response.quick_replies,
         metadata=response.metadata,
     )
 

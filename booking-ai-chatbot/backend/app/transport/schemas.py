@@ -52,5 +52,4 @@ class ChatResponse(BaseModel):
     state: str
     status: str
     instruction_template: str | None
-    quick_replies: list[str]
     metadata: dict[str, bool | int | float | str | None]

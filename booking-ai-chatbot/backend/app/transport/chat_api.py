@@ -222,7 +222,6 @@ def _to_chat_response(conversation_id: str, response: DialogResponse) -> ChatRes
         state=response.state.value,
         status=response.status.value,
         instruction_template=response.instruction_template,
-        quick_replies=list(response.quick_replies),
         metadata=_safe_metadata(response.metadata),
     )
 

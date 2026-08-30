@@ -13,7 +13,6 @@ describe("chat JSON proxy", () => {
         state: "idle",
         status: "success",
         instruction_template: null,
-        quick_replies: [],
         metadata: {},
       }),
     );

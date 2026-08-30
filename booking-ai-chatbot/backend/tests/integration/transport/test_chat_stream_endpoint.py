@@ -282,7 +282,6 @@ def test_stream_success_contract_and_event_order(
         "state",
         "status",
         "instruction_template",
-        "quick_replies",
         "metadata",
     }
     assert events[2][1]["stream_status"] == "completed"
@@ -552,7 +551,8 @@ def test_ambiguous_entity_is_streamed_as_a_normal_message(
     events = parse_events(response)
 
     assert [event for event, _ in events] == ["started", "message", "completed"]
-    assert events[1][1]["quick_replies"] == ["Shibuya", "Shinjuku"]
+    assert "Shibuya" in events[1][1]["text"]
+    assert "Shinjuku" in events[1][1]["text"]
     assert context.state is BookingState.SELECTING_SHOP
     assert outbound_requests == []
 
@@ -680,7 +680,6 @@ def test_stream_message_has_parity_with_json_on_independent_contexts(
         "state",
         "status",
         "instruction_template",
-        "quick_replies",
         "metadata",
     }:
         assert stream_message[key] == regular_body[key]
@@ -723,7 +722,6 @@ def test_faq_stream_has_json_parity_and_uses_one_injected_gateway(
         "state",
         "status",
         "instruction_template",
-        "quick_replies",
         "metadata",
     }:
         assert stream_message[key] == regular_body[key]

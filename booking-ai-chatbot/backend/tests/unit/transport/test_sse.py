@@ -44,7 +44,6 @@ def response() -> DialogResponse:
         instruction_template="ask_shop",
         state=BookingState.SELECTING_SHOP,
         status=DialogTurnStatus.SUCCESS,
-        quick_replies=("Shibuya",),
         metadata={"can_retry": False},
     )
 

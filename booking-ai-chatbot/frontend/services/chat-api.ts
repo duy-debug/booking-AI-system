@@ -60,14 +60,10 @@ function cancelledRequest(): ChatApiError {
 
 function parseResponse(value: unknown): ChatResponse {
   if (!isRecord(value)) throw invalidResponse();
-  const quickReplies = value.quick_replies;
   const metadata = value.metadata;
   const state = stringField(value, "state");
   const status = stringField(value, "status");
   if (!BOOKING_STATES.has(state as BookingState) || !DIALOG_STATUSES.has(status as DialogStatus)) {
-    throw invalidResponse();
-  }
-  if (!Array.isArray(quickReplies) || !quickReplies.every((item) => typeof item === "string")) {
     throw invalidResponse();
   }
   if (!isRecord(metadata)) throw invalidResponse();
@@ -87,7 +83,6 @@ function parseResponse(value: unknown): ChatResponse {
     state: state as BookingState,
     status: status as DialogStatus,
     instruction_template: instruction,
-    quick_replies: quickReplies,
     metadata: safeMetadata,
   };
 }

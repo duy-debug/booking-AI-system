@@ -15,7 +15,6 @@ function chatResponse(
     state: "selecting_shop",
     status: "success",
     instruction_template: null,
-    quick_replies: ["Shibuya", "Shinjuku"],
     metadata: {},
     ...overrides,
   };
@@ -50,7 +49,6 @@ async function mockChat(page: Page, requests: CapturedRequest[]) {
         text: "Đặt lịch đã hoàn tất.",
         state: "completed",
         status: "success",
-        quick_replies: [],
         metadata: { booking_created: true },
       });
     } else if (request.message === "Không có slot") {
@@ -58,13 +56,11 @@ async function mockChat(page: Page, requests: CapturedRequest[]) {
         text: "Không còn khung giờ phù hợp, bạn hãy chọn ngày khác.",
         state: "selecting_date",
         status: "failure_handled",
-        quick_replies: ["Ngày mai"],
       });
     } else if (request.message.startsWith("FAQ")) {
       response = chatResponse(request, {
         text: "Komorebi mở cửa từ 9 giờ.",
         state: "selecting_shop",
-        quick_replies: [],
         metadata: { knowledge_answered: true },
       });
     }

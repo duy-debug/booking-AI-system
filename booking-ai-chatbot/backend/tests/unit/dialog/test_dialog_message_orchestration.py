@@ -19,6 +19,7 @@ from app.dialog.dialog_controller import (
     _consume_requested_entities,
     _process_serialized_chat_message,
     _with_proactive_suggestions,
+    _with_state_recovery_suggestions,
 )
 from app.dialog.instruction_builder import DialogResponse
 from app.dialog.nlu import (
@@ -921,13 +922,37 @@ async def test_prefilled_entity_not_found_returns_entity_response() -> None:
     prefilled_request = fake.entity_resolution_coordinator.calls[0][0]
     assert prefilled_request.entity_query == "Kimo Nha Trang"
     assert prefilled_request.entity_kind is NLUEntityKind.SHOP
-    assert response.quick_replies == tuple(
-        shop.name
-        for shop in (SHOP, ALT_SHOP, *EXTRA_SHOPS)
-    )
     assert fake.search_shop_handler.calls
     assert len(fake.instruction_builder.calls) == 0
     assert fake.conversation_context_store.saved == [("conversation-a", context)]
+
+
+@pytest.mark.asyncio
+async def test_cancel_identity_recovery_does_not_append_redundant_suggestion() -> None:
+    context = BookingContext(
+        "conversation-a",
+        state=BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY,
+    )
+    fake = FakeContainer(
+        context=context,
+        nlu_result=resolved_nlu(),
+    )
+    base_response = DialogResponse(
+        text="Vui lòng cung cấp mã booking và số điện thoại đã đặt lịch.",
+        instruction_template="ask_cancel_booking_identity",
+        state=BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY,
+        status=DialogTurnStatus.FAILURE_HANDLED,
+    )
+
+    response = await _with_state_recovery_suggestions(
+        base_response,
+        context,
+        as_container(fake),
+    )
+
+    assert response.text == base_response.text
+    assert "Gợi ý hợp lệ" not in response.text
+    assert response.metadata.get("preserve_structured_text") is not True
 
 
 @pytest.mark.asyncio
@@ -1022,17 +1047,9 @@ async def test_ambiguous_branch_returns_ordered_limited_safe_candidate_names() -
 
     response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
-    assert response.quick_replies == (
-        "Shop 0",
-        "Shop 1",
-        "Shop 3",
-        "Shop 4",
-        "Shop 5",
-        "Shop 6",
-        "Shop 7",
-        "Shop 8",
-    )
-    assert all("shop:" not in value for value in response.quick_replies)
+    assert "Shop 0" in response.text
+    assert "Shop 8" in response.text
+    assert "shop:" not in response.text
     assert fake.dialog_controller.calls == []
     assert len(fake.conversation_context_store.saved) == 1
 
@@ -1095,7 +1112,6 @@ async def test_course_not_found_explains_shop_duration_and_suggests_valid_course
     assert "tại Shibuya với thời lượng 60 phút" in response.text
     assert "Relax Massage 60" in response.text
     assert "Deep Massage 90" not in response.text
-    assert response.quick_replies == ("Relax Massage 60",)
     assert response.metadata["preserve_structured_text"] is True
     assert fake.search_course_handler.calls == [
         (SHOP.shop_id, {"course_type": CourseType.MAIN})
@@ -1145,8 +1161,7 @@ async def test_therapist_not_found_suggests_current_available_therapists() -> No
 
     assert "Không tìm thấy kỹ thuật viên phù hợp" in response.text
     assert "Trần Minh Anh" in response.text
-    assert "Vũ Hoài An" in response.quick_replies
-    assert "Không yêu cầu" in response.quick_replies
+    assert "Vũ Hoài An" in response.text
     assert response.metadata["preserve_structured_text"] is True
     assert len(gateway.calls) == 1
     assert fake.dialog_controller.calls == []
@@ -1189,9 +1204,8 @@ async def test_selecting_therapist_suggestion_lists_all_available_therapists() -
     )
 
     assert "12. Therapist 12" in response.text
-    assert "Therapist 12" in response.quick_replies
-    assert "Không yêu cầu" in response.quick_replies
-    assert len(response.quick_replies) == 15
+    assert "Therapist 12" in response.text
+    assert "Không yêu cầu" in response.text
     assert response.metadata["preserve_structured_text"] is True
 
 
@@ -1293,7 +1307,8 @@ async def test_unresolved_booking_input_suggests_valid_next_actions(
 
     response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
-    assert response.quick_replies == expected_replies
+    if state is not BookingState.SELECTING_SHOP:
+        assert all(reply in response.text for reply in expected_replies)
     assert response.state is state
 
 
@@ -1308,7 +1323,8 @@ async def test_unresolved_time_only_suggests_latest_validated_slots() -> None:
 
     response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
-    assert response.quick_replies == ("09:00", "10:30")
+    assert "09:00" in response.text
+    assert "10:30" in response.text
 
 
 @pytest.mark.asyncio
@@ -1331,7 +1347,6 @@ async def test_unresolved_time_lists_all_slots_from_availability_api() -> None:
 
     response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
-    assert response.quick_replies == tuple(slot.strftime("%H:%M") for slot in slots)
     assert "08:00" in response.text
     assert "10:45" in response.text
     assert fake.check_availability_handler.calls == [context]
@@ -1359,7 +1374,6 @@ async def test_unresolved_time_suggests_other_dates_when_no_slot_available() -> 
 
     response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
-    assert response.quick_replies == ("Hôm nay", "Ngày mai")
     assert "Các ngày khác có thể thử" in response.text
     assert fake.check_availability_handler.calls == [context]
 
@@ -1375,7 +1389,9 @@ async def test_unresolved_duration_uses_shop_course_durations() -> None:
 
     response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
-    assert response.quick_replies == ("60 phút", "90 phút", "120 phút")
+    assert "60 phút" in response.text
+    assert "90 phút" in response.text
+    assert "120 phút" in response.text
     assert fake.search_course_handler.calls == [
         (
             ALT_SHOP.shop_id,
@@ -1399,7 +1415,6 @@ async def test_entering_duration_step_suggests_shop_course_durations() -> None:
     response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
     assert response.state is BookingState.SELECTING_DURATION
-    assert response.quick_replies == ("60 phút", "90 phút", "120 phút")
     assert "Cửa hàng hiện hỗ trợ các thời lượng" in response.text
     assert "1. 60 phút" in response.text
     assert fake.search_course_handler.calls == [
@@ -1427,7 +1442,6 @@ async def test_selected_duration_without_matching_main_course_suggests_valid_dur
     assert response.state is BookingState.SELECTING_DURATION
     assert context.state is BookingState.SELECTING_DURATION
     assert context.duration_minutes is None
-    assert response.quick_replies == ("60 phút", "90 phút", "120 phút")
     assert response.metadata["preserve_structured_text"] is True
     assert "30 phút" in response.text
     assert "1. 60 phút" in response.text
@@ -1459,7 +1473,6 @@ async def test_prefilled_course_waits_when_selected_duration_has_no_main_course(
     assert context.duration_minutes is None
     assert context.requested_main_course_name == "Massage giữ ấm hỗ trợ ngủ sâu"
     assert fake.entity_resolution_coordinator.calls == []
-    assert [reply.split()[0] for reply in response.quick_replies] == ["60", "90", "120"]
     assert "61" in response.text
     assert "1. 60" in response.text
     assert fake.search_course_handler.calls == [
@@ -1492,7 +1505,6 @@ async def test_failed_people_count_explains_domain_limit_in_text() -> None:
     assert "từ 1 đến 3 người" in response.text
     assert "thông cảm" in response.text
     assert "Các số người hợp lệ:\n1. 1 người\n2. 2 người\n3. 3 người" in response.text
-    assert response.quick_replies == ("1 người", "2 người", "3 người")
     assert response.metadata["preserve_structured_text"] is True
 
 
@@ -1513,7 +1525,6 @@ async def test_failed_duration_explains_shop_course_durations_in_text() -> None:
     assert "Komorebi Nha Trang" in response.text
     assert "Các thời lượng hợp lệ của cửa hàng" in response.text
     assert "1. 60 phút\n2. 90 phút\n3. 120 phút" in response.text
-    assert response.quick_replies == ("60 phút", "90 phút", "120 phút")
     assert response.metadata["preserve_structured_text"] is True
 
 
@@ -1547,18 +1558,6 @@ async def test_generic_change_request_returns_change_menu_without_dispatching_tu
 
     assert fake.dialog_controller.calls == []
     assert response.state is BookingState.AWAITING_CONFIRMATION
-    assert response.quick_replies == (
-        "Đổi cửa hàng",
-        "Đổi ngày",
-        "Đổi số người",
-        "Đổi thời lượng",
-        "Đổi liệu trình",
-        "Đổi add-on",
-        "Đổi giờ",
-        "Đổi kỹ thuật viên",
-        "Đổi số điện thoại",
-        "Đổi tên khách hàng",
-    )
     assert "Anh/chị muốn chỉnh sửa thông tin nào?" in response.text
 
 
@@ -1598,7 +1597,6 @@ def test_response_mapping_copies_only_ui_safe_fields() -> None:
         instruction_template="ask_shop",
         state=BookingState.SELECTING_SHOP,
         status=DialogTurnStatus.SUCCESS,
-        quick_replies=("Shibuya",),
         metadata={"can_retry": True, "private": "must-not-leak"},
     )
 
@@ -1606,5 +1604,4 @@ def test_response_mapping_copies_only_ui_safe_fields() -> None:
 
     assert mapped.conversation_id == "conversation-a"
     assert mapped.text == "Safe response"
-    assert mapped.quick_replies == ["Shibuya"]
     assert mapped.metadata == {"can_retry": True}

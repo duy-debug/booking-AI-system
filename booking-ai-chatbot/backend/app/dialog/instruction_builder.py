@@ -29,7 +29,6 @@ _SAFE_METADATA_KEYS = frozenset(
         "next_question",
         "source_count",
         "item_count",
-        "quick_reply_limit",
         "preserve_structured_text",
     }
 )
@@ -61,13 +60,11 @@ class DialogResponseDraft:
     """Contains presentation data produced by one instruction renderer."""
 
     text: str
-    quick_replies: tuple[str, ...] = ()
     metadata: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.text, str) or not self.text.strip():
             raise ValueError("Dialog response draft text must not be empty.")
-        object.__setattr__(self, "quick_replies", tuple(self.quick_replies))
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 
 
@@ -79,20 +76,11 @@ class DialogResponse:
     instruction_template: str | None
     state: BookingState
     status: DialogTurnStatus
-    quick_replies: tuple[str, ...] = ()
     metadata: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.text, str) or not self.text.strip():
             raise ValueError("Dialog response text must not be empty.")
-        limit = self.metadata.get("quick_reply_limit", 8)
-        if type(limit) is not int:
-            raise TypeError("Dialog response quick_reply_limit metadata must be an integer.")
-        object.__setattr__(
-            self,
-            "quick_replies",
-            _normalize_quick_replies(self.quick_replies, limit=limit),
-        )
         object.__setattr__(self, "metadata", _allowlisted_metadata(self.metadata))
 
 
@@ -182,7 +170,6 @@ class InstructionBuilder:
             instruction_template=result.instruction_template,
             state=result.final_state,
             status=result.status,
-            quick_replies=draft.quick_replies,
             metadata=draft.metadata,
         )
 
@@ -272,7 +259,6 @@ class InstructionBuilder:
             raise ValueError("FAQ source count must be between zero and three.")
         status = DialogTurnStatus.FAILURE_HANDLED if handled_failure else DialogTurnStatus.SUCCESS
         text = answer.strip()
-        quick_replies: tuple[str, ...] = ()
         if context.state in {
             BookingState.SELECTING_SHOP,
             BookingState.SELECTING_DATE,
@@ -296,7 +282,6 @@ class InstructionBuilder:
             )
             follow_up = self._fallback_for_state(context, result)
             text = f"{text}\n\n{follow_up.text}"
-            quick_replies = follow_up.quick_replies
             metadata = {
                 "response_type": "faq",
                 "source_count": source_count,
@@ -314,7 +299,6 @@ class InstructionBuilder:
             instruction_template=None,
             state=context.state,
             status=status,
-            quick_replies=quick_replies,
             metadata=metadata,
         )
 
@@ -656,7 +640,6 @@ class InstructionBuilder:
                 text += f" Add-on đang chọn: {addon_names}."
         return DialogResponseDraft(
             text,
-            ("Không chọn add-on",) if context.main_course is not None else (),
             metadata={"has_addons": bool(context.addons)},
         )
 
@@ -742,10 +725,9 @@ class InstructionBuilder:
         return DialogResponseDraft(
             "Mình đã kiểm tra được các khung giờ còn trống. "
             "Anh/chị muốn chọn khung giờ nào để tiếp tục đặt lịch?",
-            tuple(_format_time(slot) for slot in slots),
-            {
+            metadata={
                 "available_slot_count": len(slots),
-                "quick_reply_limit": len(slots),
+                "preserve_structured_text": True,
             },
         )
 
@@ -767,14 +749,12 @@ class InstructionBuilder:
         if context.num_customer in (2, 3):
             return DialogResponseDraft(
                 "Với booking nhóm, hệ thống chưa hỗ trợ chọn kỹ thuật viên theo tên riêng. "
-                "Anh/chị có thể chọn giới tính kỹ thuật viên hoặc chọn Không yêu cầu "
+                "Anh/chị có thể chọn giới tính kỹ thuật viên Nam/Nữ hoặc chọn Không yêu cầu "
                 "để cửa hàng sắp xếp phù hợp.",
-                ("Không yêu cầu", "Nam", "Nữ"),
             )
         return DialogResponseDraft(
             "Anh/chị muốn chọn kỹ thuật viên như thế nào? "
             "Anh/chị có thể nhập tên kỹ thuật viên cụ thể, chọn giới tính hoặc chọn Không yêu cầu.",
-            ("Không yêu cầu", "Nam", "Nữ"),
         )
 
     @staticmethod
@@ -785,7 +765,6 @@ class InstructionBuilder:
         return DialogResponseDraft(
             "Kỹ thuật viên đã chọn hiện không còn trống ở khung giờ mới. "
             "Anh/chị có thể chọn Không yêu cầu hoặc chọn kỹ thuật viên khác.",
-            ("Không yêu cầu", "Nam", "Nữ"),
         )
 
     @staticmethod
@@ -853,8 +832,7 @@ class InstructionBuilder:
     ) -> DialogResponseDraft:
         return DialogResponseDraft(
             "Hệ thống chưa thể tải danh sách cửa hàng từ POS lúc này. Vui lòng thử lại.",
-            ("Thử lại đặt lịch", "Xem danh sách cửa hàng"),
-            {"can_retry": True},
+            metadata={"can_retry": True},
         )
 
     @staticmethod
@@ -870,8 +848,7 @@ class InstructionBuilder:
         )
         return DialogResponseDraft(
             "\n".join(lines),
-            ("Xác nhận", "Chỉnh sửa", "Hủy"),
-            {
+            metadata={
                 "has_addons": bool(context.addons),
                 "can_change_info": True,
                 "preserve_structured_text": True,
@@ -1009,7 +986,6 @@ class InstructionBuilder:
         lines.append("Anh/chị có chắc chắn muốn hủy booking này không?")
         return DialogResponseDraft(
             "\n".join(lines),
-            ("Xác nhận hủy", "Không hủy"),
             metadata={
                 "requires_cancel_confirmation": True,
                 "preserve_structured_text": True,
@@ -1046,27 +1022,6 @@ class InstructionBuilder:
         )
 
 
-def _normalize_quick_replies(
-    values: Iterable[str],
-    *,
-    limit: int = 8,
-) -> tuple[str, ...]:
-    if type(limit) is not int or limit < 0:
-        raise ValueError("Quick reply limit must be a non-negative integer.")
-    if limit == 0:
-        return ()
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        if not isinstance(value, str):
-            raise TypeError("Quick replies must be strings.")
-        item = value.strip()
-        if item and item not in seen:
-            seen.add(item)
-            normalized.append(item)
-            if len(normalized) == limit:
-                break
-    return tuple(normalized)
 
 
 def _allowlisted_metadata(values: Mapping[str, object]) -> Mapping[str, object]:

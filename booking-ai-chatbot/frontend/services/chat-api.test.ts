@@ -8,7 +8,6 @@ const chatResponse: ChatResponse = {
   state: "selecting_shop",
   status: "success",
   instruction_template: null,
-  quick_replies: ["Shibuya", "Shinjuku"],
   metadata: { source: "booking" },
 };
 

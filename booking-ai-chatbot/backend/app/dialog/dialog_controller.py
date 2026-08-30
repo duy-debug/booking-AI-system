@@ -130,17 +130,6 @@ _UNSUPPORTED_TEXT = {
 }
 _ENTITY_FAILURE_TEXT = "Hệ thống chưa thể tra cứu thông tin lúc này. Vui lòng thử lại."
 _DEFAULT_UNRESOLVED_TEXT = "Tôi chưa hiểu yêu cầu. Vui lòng nhập lại rõ hơn."
-_RECOVERY_QUICK_REPLIES = {
-    BookingState.IDLE: ("Đặt lịch mới", "Sửa lịch đã đặt", "Hủy lịch đã đặt"),
-    BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY: ("Hủy booking",),
-    BookingState.AWAITING_CANCEL_CONFIRMATION: ("Xác nhận hủy", "Không hủy"),
-    BookingState.SELECTING_DATE: ("Hôm nay", "Ngày mai"),
-    BookingState.SELECTING_DURATION: ("45 phút", "60 phút", "90 phút"),
-    BookingState.SELECTING_THERAPIST: ("Không yêu cầu", "Nam", "Nữ"),
-    BookingState.VERIFYING_PHONE: ("Xác nhận", "Nhập lại"),
-    BookingState.AWAITING_CONFIRMATION: ("Xác nhận", "Chỉnh sửa", "Hủy"),
-    BookingState.BOOKING_FAILED: ("Thử lại", "Chọn giờ khác", "Hủy"),
-}
 _TERMINAL_CHANGE_TEXT = (
     "Đặt lịch này đã hoàn tất. Vui lòng tạo yêu cầu mới để thay đổi hoặc hủy lịch."
 )
@@ -1307,7 +1296,6 @@ async def _process_serialized_chat_message(
             state=response.state.value,
             status=response.status.value,
             text=response.text,
-            quick_replies=list(response.quick_replies),
             instruction_template=response.instruction_template or "none",
         )
         if _local_debug_enabled("LOG_AI_MESSAGES"):
@@ -1418,7 +1406,6 @@ async def _process_serialized_chat_message_stream(
             state=response.state.value,
             status=response.status.value,
             text=response.text,
-            quick_replies=list(response.quick_replies),
             instruction_template=response.instruction_template or "none",
         )
         if _local_debug_enabled("LOG_AI_MESSAGES"):
@@ -1450,7 +1437,6 @@ async def _process_serialized_chat_message_stream(
         reset_turn(turn_token)
         reset_correlation_id(correlation_token)
         reset_conversation(token)
-
 
 def _reset_finished_session_context(
     *,
@@ -2185,7 +2171,7 @@ async def _with_proactive_suggestions(
         if context.state is BookingState.SELECTING_DURATION and context.shop is not None:
             # Khi đã biết shop, chủ động lấy duration thật từ course chính của POS.
             # Như vậy khách không phải nhập sai trước rồi hệ thống mới gợi ý lại.
-            durations = await _duration_recovery_quick_replies(container, context)
+            durations = await _duration_recovery_suggestion_options(container, context)
             if durations:
                 return _duration_step_response(context, durations)
 
@@ -2214,7 +2200,7 @@ async def _with_proactive_suggestions(
                 if not matching_courses:
                     # Duration đúng format nhưng không có liệu trình chính tương ứng ở shop.
                     # Quay lại bước chọn duration và gợi ý duration thật từ course POS vừa tải.
-                    durations = _duration_quick_replies_from_courses(courses)
+                    durations = _duration_options_from_courses(courses)
                     context.change_duration(None)
                     context.state = BookingState.SELECTING_DURATION
                     if durations:
@@ -2242,18 +2228,16 @@ async def _with_proactive_suggestions(
             if names:
                 metadata = dict(response.metadata)
                 metadata["item_count"] = len(names)
-                metadata["quick_reply_limit"] = len(names) + 3
                 metadata["preserve_structured_text"] = True
                 return DialogResponse(
                     text=(
                         "Kỹ thuật viên đang phù hợp với khung giờ đã chọn:\n"
                         + "\n".join(f"{index}. {name}" for index, name in enumerate(names, 1))
-                        + "\nAnh/chị có thể chọn theo tên, giới tính hoặc không yêu cầu."
+                        + "\nAnh/chị có thể chọn theo tên, giới tính, hoặc chọn Không yêu cầu."
                     ),
                     instruction_template=response.instruction_template,
                     state=context.state,
                     status=response.status,
-                    quick_replies=names + ("Không yêu cầu", "Nam", "Nữ"),
                     metadata=metadata,
                 )
     except Exception as error:
@@ -2450,7 +2434,6 @@ async def _handle_discovery(
                 "Các khung giờ đang trống: "
                 + ", ".join(labels)
                 + ". Anh/chị muốn chọn giờ nào?",
-                labels,
                 len(labels),
             )
 
@@ -2499,7 +2482,7 @@ def _shop_catalog_response(
     lines = "\n".join(f"{index}. {name}" for index, name in enumerate(names, 1))
     # Không thêm hậu tố đếm kết quả vì response hiện hiển thị toàn bộ danh sách đã nhận.
     text = f"Komorebi hiện có các cửa hàng:\n{lines}\nAnh/chị muốn chọn cửa hàng nào ạ?"
-    return _catalog_response(context, text, names, len(names))
+    return _catalog_response(context, text, len(names))
 
 
 # Gom requested/confirmed field an toàn để filter shop mà không tự commit booking data.
@@ -2593,7 +2576,6 @@ def _service_catalog_response(
         return _catalog_response(
             context,
             text,
-            tuple(service.name for service in visible),
             len(courses),
         )
 
@@ -2615,12 +2597,11 @@ def _service_catalog_response(
     return _catalog_response(
         context,
         text,
-        tuple(service.name for service in visible) + ("Không chọn add-on",),
         len(courses),
     )
 
 
-def _duration_quick_replies_from_courses(courses: list[Course]) -> tuple[str, ...]:
+def _duration_options_from_courses(courses: list[Course]) -> tuple[str, ...]:
     durations = sorted(
         {
             course.duration_minutes
@@ -2641,7 +2622,7 @@ def _duration_step_response(
         + "\n".join(f"{index}. {duration}" for index, duration in enumerate(durations, 1))
         + "\nAnh/chị muốn chọn thời lượng nào ạ?"
     )
-    return _catalog_response(context, text, durations, len(durations))
+    return _catalog_response(context, text, len(durations))
 
 
 # Render lỗi duration không khớp course thật và gợi ý lại duration hợp lệ.
@@ -2658,7 +2639,7 @@ def _duration_mismatch_response(
         + "\n".join(f"{index}. {duration}" for index, duration in enumerate(durations, 1))
         + "\nAnh/chị vui lòng chọn lại một thời lượng trong danh sách trên."
     )
-    return _catalog_response(context, text, durations, len(durations))
+    return _catalog_response(context, text, len(durations))
 
 
 # Render gợi ý theo bước chọn liệu trình chính hoặc add-on trong booking flow.
@@ -2683,7 +2664,6 @@ def _service_step_response(
         return _catalog_response(
             context,
             text,
-            tuple(service.name for service in visible),
             len(courses),
         )
 
@@ -2705,7 +2685,6 @@ def _service_step_response(
     return _catalog_response(
         context,
         text,
-        tuple(service.name for service in visible) + ("Không chọn add-on",),
         len(courses),
     )
 
@@ -2739,7 +2718,6 @@ def _course_not_found_response(
     return _catalog_response(
         context,
         text,
-        tuple(service.name for service in visible),
         len(courses),
     )
 
@@ -2749,11 +2727,10 @@ def _numbered_course_names(courses: list[Course]) -> str:
     return "\n".join(f"{index}. {service.name}" for index, service in enumerate(courses[:8], 1))
 
 
-# Tạo DialogResponse cho catalog/listing với quick replies an toàn.
+# Tạo DialogResponse cho catalog/listing; danh sách lựa chọn nằm trong text.
 def _catalog_response(
     context: BookingContext,
     text: str,
-    quick_replies: tuple[str, ...],
     item_count: int,
 ) -> DialogResponse:
     from app.dialog.instruction_builder import DialogResponse
@@ -2763,10 +2740,8 @@ def _catalog_response(
         instruction_template=None,
         state=context.state,
         status=DialogTurnStatus.SUCCESS,
-        quick_replies=quick_replies,
         metadata={
             "item_count": item_count,
-            "quick_reply_limit": len(quick_replies),
             "preserve_structured_text": True,
         },
     )
@@ -2791,10 +2766,14 @@ async def _entity_response(
     container: ApplicationContainer,
 ) -> DialogResponse:
     if result.status is EntityResolutionStatus.AMBIGUOUS:
+        candidates = _candidate_names(result)
         return _handled_response(
             context,
-            _AMBIGUOUS_TEXT[result.entity_kind],
-            _candidate_names(result),
+            _with_numbered_options(_AMBIGUOUS_TEXT[result.entity_kind], candidates),
+            metadata={
+                "item_count": len(candidates),
+                "preserve_structured_text": True,
+            },
         )
     if result.status is EntityResolutionStatus.NOT_FOUND:
         if result.entity_kind is NLUEntityKind.SHOP:
@@ -2833,10 +2812,8 @@ async def _entity_response(
                     "Không tìm thấy cửa hàng phù hợp với thông tin anh/chị vừa nhập. "
                     "Anh/chị có thể chọn một cửa hàng hiện có:\n"
                     + lines,
-                    names,
                     metadata={
                         "item_count": len(names),
-                        "quick_reply_limit": len(names),
                         "preserve_structured_text": True,
                     },
                 )
@@ -2886,10 +2863,8 @@ async def _entity_response(
                     "Không tìm thấy kỹ thuật viên phù hợp với tên anh/chị vừa nhập. "
                     "Anh/chị có thể chọn một kỹ thuật viên đang trống:\n"
                     + lines,
-                    names + ("Không yêu cầu", "Nam", "Nữ"),
                     metadata={
                         "item_count": len(names),
-                        "quick_reply_limit": len(names) + 3,
                         "preserve_structured_text": True,
                     },
                 )
@@ -2947,7 +2922,6 @@ async def _retry_availability(
         return _catalog_response(
             context,
             "Đã tải lại các khung giờ trống: " + ", ".join(labels) + ".",
-            labels,
             len(labels),
         )
     except Exception as error:
@@ -2956,7 +2930,7 @@ async def _retry_availability(
             context,
             "Tôi vẫn chưa tải được khung giờ từ POS. Các thông tin đã chọn "
             "vẫn được giữ; anh/chị có thể thử lại hoặc bỏ add-on.",
-            ("Thử lại", "Không chọn add-on"),
+            metadata={"preserve_structured_text": True},
         )
 
 
@@ -3011,40 +2985,43 @@ def _candidate_names(result: EntityResolutionResult) -> tuple[str, ...]:
     return tuple(names)
 
 
+def _with_numbered_options(text: str, options: tuple[str, ...]) -> str:
+    if not options:
+        return text
+    lines = "\n".join(
+        f"{index}. {option}"
+        for index, option in enumerate(options, 1)
+    )
+    return f"{text}\n{lines}"
+
+
 # Tạo response recovery an toàn khi turn không dispatch được hoặc business failure đã xử lý.
 def _handled_response(
     context: BookingContext,
     text: str,
-    quick_replies: tuple[str, ...] = (),
     metadata: Mapping[str, object] | None = None,
 ) -> DialogResponse:
     from app.dialog.instruction_builder import DialogResponse
-
-    replies = quick_replies or _state_recovery_quick_replies(context)
-    response_metadata = dict(metadata or {})
-    if replies:
-        response_metadata["quick_reply_limit"] = len(replies)
 
     return DialogResponse(
         text=text,
         instruction_template=None,
         state=context.state,
         status=DialogTurnStatus.FAILURE_HANDLED,
-        quick_replies=replies,
-        metadata=response_metadata,
+        metadata=dict(metadata or {}),
     )
 
 
-# Gắn quick replies theo state hiện tại vào response recovery.
+# Gắn gợi ý theo state hiện tại vào nội dung response recovery.
 async def _with_state_recovery_suggestions(
     response: DialogResponse,
     context: BookingContext,
     container: ApplicationContainer,
 ) -> DialogResponse:
-    # Bổ sung quick replies an toàn mà không ghi đè phần giải thích lỗi.
+    # Bổ sung gợi ý an toàn vào text mà không ghi đè phần giải thích lỗi.
     from app.dialog.instruction_builder import DialogResponse
 
-    quick_replies = await _state_recovery_quick_replies_from_context(
+    suggestion_options = await _state_recovery_suggestion_options_from_context(
         container,
         context,
     )
@@ -3062,11 +3039,10 @@ async def _with_state_recovery_suggestions(
     text = _with_inline_recovery_suggestions(
         text,
         context,
-        quick_replies,
+        suggestion_options,
     )
     metadata = dict(response.metadata)
-    if quick_replies:
-        metadata["quick_reply_limit"] = len(quick_replies)
+    if suggestion_options:
         metadata["preserve_structured_text"] = True
 
     return DialogResponse(
@@ -3074,12 +3050,11 @@ async def _with_state_recovery_suggestions(
         instruction_template=response.instruction_template,
         state=response.state,
         status=response.status,
-        quick_replies=quick_replies,
         metadata=metadata,
     )
 
 
-async def _state_recovery_quick_replies_from_context(
+async def _state_recovery_suggestion_options_from_context(
     container: ApplicationContainer,
     context: BookingContext,
 ) -> tuple[str, ...]:
@@ -3089,15 +3064,15 @@ async def _state_recovery_quick_replies_from_context(
 
     try:
         if context.state is BookingState.SELECTING_SHOP:
-            return await _shop_recovery_quick_replies(container, context)
+            return await _shop_recovery_suggestion_options(container, context)
         if context.state is BookingState.SELECTING_PEOPLE:
-            return _people_recovery_quick_replies()
+            return _people_recovery_suggestion_options()
         if context.state is BookingState.SELECTING_SERVICE:
-            return await _course_recovery_quick_replies(container, context)
+            return await _course_recovery_suggestion_options(container, context)
         if context.state is BookingState.SELECTING_DURATION:
-            return await _duration_recovery_quick_replies(container, context)
+            return await _duration_recovery_suggestion_options(container, context)
         if context.state is BookingState.SELECTING_TIME:
-            return await _time_recovery_quick_replies(container, context)
+            return await _time_recovery_suggestion_options(container, context)
     except Exception as error:
         trace_log(
             logger,
@@ -3107,10 +3082,10 @@ async def _state_recovery_quick_replies_from_context(
             state=context.state.value,
             error_code=type(error).__name__,
         )
-    return _state_recovery_quick_replies(context)
+    return _state_recovery_suggestion_options(context)
 
 
-async def _shop_recovery_quick_replies(
+async def _shop_recovery_suggestion_options(
     container: ApplicationContainer,
     context: BookingContext,
 ) -> tuple[str, ...]:
@@ -3122,10 +3097,10 @@ async def _shop_recovery_quick_replies(
         context.suggested_shops = tuple(shops)
         context.suggested_shops_loaded = True
     names = tuple(shop.name for shop in shops)
-    return names or _state_recovery_quick_replies(context)
+    return names or _state_recovery_suggestion_options(context)
 
 
-def _people_recovery_quick_replies() -> tuple[str, ...]:
+def _people_recovery_suggestion_options() -> tuple[str, ...]:
     """
     Gợi ý số người từ BookingRules để không hard-code rule nghiệp vụ trong UI text.
     """
@@ -3155,19 +3130,19 @@ def _people_recovery_text(context: BookingContext) -> str:
 def _with_inline_recovery_suggestions(
     text: str,
     context: BookingContext,
-    quick_replies: tuple[str, ...],
+    suggestion_options: tuple[str, ...],
 ) -> str:
     """
     Gắn gợi ý vào text vì giao diện chat hiện chỉ hiển thị nội dung message.
     """
 
-    if not quick_replies or context.state is BookingState.SELECTING_SHOP:
+    if not suggestion_options or context.state is BookingState.SELECTING_SHOP:
         return text
 
     label = _inline_suggestion_label(context)
     lines = "\n".join(
         f"{index}. {suggestion}"
-        for index, suggestion in enumerate(quick_replies, 1)
+        for index, suggestion in enumerate(suggestion_options, 1)
     )
     suggestion_block = f"{label}:\n{lines}"
     if suggestion_block in text:
@@ -3217,12 +3192,12 @@ def _inline_suggestion_label(context: BookingContext) -> str:
     return "Gợi ý hợp lệ"
 
 
-async def _course_recovery_quick_replies(
+async def _course_recovery_suggestion_options(
     container: ApplicationContainer,
     context: BookingContext,
 ) -> tuple[str, ...]:
     if context.shop is None:
-        return _state_recovery_quick_replies(context)
+        return _state_recovery_suggestion_options(context)
     course_type = (
         CourseType.ADDON
         if context.course_selection_mode is CourseSelectionMode.ADDON
@@ -3244,10 +3219,10 @@ async def _course_recovery_quick_replies(
     names = tuple(course.name for course in courses[:8])
     if course_type is CourseType.ADDON:
         return ("Không chọn add-on", *names)[:8]
-    return names or _state_recovery_quick_replies(context)
+    return names or _state_recovery_suggestion_options(context)
 
 
-async def _duration_recovery_quick_replies(
+async def _duration_recovery_suggestion_options(
     container: ApplicationContainer,
     context: BookingContext,
 ) -> tuple[str, ...]:
@@ -3256,7 +3231,7 @@ async def _duration_recovery_quick_replies(
     """
 
     if context.shop is None:
-        return _state_recovery_quick_replies(context)
+        return ("45 phút", "60 phút", "90 phút")
 
     handler = cast(SearchCourseHandler, container.handler(SearchCourseHandler))
     result = await handler.execute(
@@ -3264,31 +3239,31 @@ async def _duration_recovery_quick_replies(
         course_type=CourseType.MAIN,
     )
     courses = _handler_items(result, "courses", Course, allow_not_found=True)
-    replies = _duration_quick_replies_from_courses(courses)
-    return replies or _state_recovery_quick_replies(context)
+    options = _duration_options_from_courses(courses)
+    return options or _state_recovery_suggestion_options(context)
 
 
-async def _time_recovery_quick_replies(
+async def _time_recovery_suggestion_options(
     container: ApplicationContainer,
     context: BookingContext,
 ) -> tuple[str, ...]:
     if context.available_slots:
         return tuple(slot.strftime("%H:%M") for slot in context.available_slots)
     if _missing_availability_field(context) is not None:
-        return _state_recovery_quick_replies(context)
+        return _state_recovery_suggestion_options(context)
     handler = cast(CheckAvailabilityHandler, container.handler(CheckAvailabilityHandler))
     result = await handler.execute(context)
     if result.outcome is not HandlerOutcome.SUCCESS:
-        return _date_recovery_quick_replies(context)
+        return _date_recovery_suggestion_options(context)
     slots = _handler_items(result, "slots", clock_time, allow_not_found=True)
     context.set_available_slots(tuple(slots))
-    return tuple(slot.strftime("%H:%M") for slot in slots) or _date_recovery_quick_replies(
+    return tuple(slot.strftime("%H:%M") for slot in slots) or _date_recovery_suggestion_options(
         context
     )
 
 
-# Sinh quick replies dựa trên state và dữ liệu context đã validate.
-def _state_recovery_quick_replies(context: BookingContext) -> tuple[str, ...]:
+# Sinh gợi ý dựa trên state và dữ liệu context đã validate.
+def _state_recovery_suggestion_options(context: BookingContext) -> tuple[str, ...]:
     """
     Sinh các lựa chọn an toàn dựa trên state hiện tại và context đã validate.
     """
@@ -3296,22 +3271,34 @@ def _state_recovery_quick_replies(context: BookingContext) -> tuple[str, ...]:
         names = tuple(shop.name for shop in context.suggested_shops)
         return names or ("Xem danh sách cửa hàng",)
     if context.state is BookingState.SELECTING_DATE:
-        return _date_recovery_quick_replies(context)
+        return _date_recovery_suggestion_options(context)
     if context.state is BookingState.SELECTING_PEOPLE:
-        return _people_recovery_quick_replies()
+        return _people_recovery_suggestion_options()
     if context.state is BookingState.SELECTING_SERVICE:
         if context.main_course is not None:
             return ("Không chọn add-on", "Xem danh sách add-on")
         return ("Xem danh sách liệu trình",)
     if context.state is BookingState.SELECTING_TIME:
         return tuple(slot.strftime("%H:%M") for slot in (context.available_slots or ()))
-    return _RECOVERY_QUICK_REPLIES.get(context.state, ())
+    if context.state is BookingState.IDLE:
+        return ("Đặt lịch mới", "Sửa lịch đã đặt", "Hủy lịch đã đặt")
+    if context.state is BookingState.AWAITING_CANCEL_CONFIRMATION:
+        return ("Xác nhận hủy", "Không hủy")
+    if context.state is BookingState.SELECTING_THERAPIST:
+        return ("Không yêu cầu", "Nam", "Nữ")
+    if context.state is BookingState.VERIFYING_PHONE:
+        return ("Xác nhận", "Nhập lại")
+    if context.state is BookingState.AWAITING_CONFIRMATION:
+        return ("Xác nhận", "Chỉnh sửa", "Hủy")
+    if context.state is BookingState.BOOKING_FAILED:
+        return ("Thử lại", "Chọn giờ khác", "Hủy")
+    return ()
 
 
-def _date_recovery_quick_replies(context: BookingContext) -> tuple[str, ...]:
+def _date_recovery_suggestion_options(context: BookingContext) -> tuple[str, ...]:
     failed_date = context.last_unavailable_date
     if failed_date is None:
-        return _RECOVERY_QUICK_REPLIES[BookingState.SELECTING_DATE]
+        return ("Hôm nay", "Ngày mai")
     anchor = max(date.today(), failed_date)
     suggestions: list[str] = []
     offset = 1
@@ -3340,27 +3327,29 @@ def _should_resume_recovery(context: BookingContext) -> bool:
 def _change_menu_response(context: BookingContext) -> DialogResponse:
     from app.dialog.instruction_builder import DialogResponse
 
+    options = (
+        "Đổi cửa hàng",
+        "Đổi ngày",
+        "Đổi số người",
+        "Đổi thời lượng",
+        "Đổi liệu trình",
+        "Đổi add-on",
+        "Đổi giờ",
+        "Đổi kỹ thuật viên",
+        "Đổi số điện thoại",
+        "Đổi tên khách hàng",
+    )
+    lines = "\n".join(f"{index}. {option}" for index, option in enumerate(options, 1))
     return DialogResponse(
         text=(
             "Anh/chị muốn chỉnh sửa thông tin nào? Việc chỉnh sửa sẽ không tạo booking "
-            "cho đến khi anh/chị xác nhận lại."
+            "cho đến khi anh/chị xác nhận lại.\n"
+            f"{lines}"
         ),
         instruction_template=None,
         state=context.state,
         status=DialogTurnStatus.SUCCESS,
-        quick_replies=(
-            "Đổi cửa hàng",
-            "Đổi ngày",
-            "Đổi số người",
-            "Đổi thời lượng",
-            "Đổi liệu trình",
-            "Đổi add-on",
-            "Đổi giờ",
-            "Đổi kỹ thuật viên",
-            "Đổi số điện thoại",
-            "Đổi tên khách hàng",
-        ),
-        metadata={"can_change_info": True, "quick_reply_limit": 10},
+        metadata={"can_change_info": True, "preserve_structured_text": True},
     )
 
 
