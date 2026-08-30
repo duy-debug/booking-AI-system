@@ -83,11 +83,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
+SUPPORT_PHONE = "1900 8095"
 
 _UNRESOLVED_TEXT = {
     BookingState.IDLE: (
         "Mình chưa nắm rõ yêu cầu của anh/chị. "
-        "Hiện tại mình hỗ trợ đặt lịch mới, sửa lịch đã đặt hoặc hủy lịch đã đặt."
+        "Hiện tại mình hỗ trợ đặt lịch mới hoặc hủy lịch đã đặt. "
+        f"Nếu anh/chị muốn sửa một lịch đã đặt, anh/chị vui lòng liên hệ trực tiếp "
+        f"cửa hàng qua số {SUPPORT_PHONE} để được hỗ trợ."
     ),
     BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY: (
         "Vui lòng cung cấp mã booking và số điện thoại đã đặt lịch để mình kiểm tra trước khi hủy."
@@ -2954,11 +2957,21 @@ def _global_intent_response(intent: str, context: BookingContext) -> DialogRespo
     if intent == "greeting":
         if context.has_meaningful_booking_progress():
             text = (
-                "Xin chào! Thông tin đặt lịch hiện tại của anh/chị vẫn được giữ. "
-                "Anh/chị vui lòng cung cấp thêm thông tin còn thiếu để tiếp tục nhé."
+                "Xin chào anh/chị! Kori vẫn đang giữ thông tin đặt lịch hiện tại của anh/chị. "
+                "Anh/chị có thể tiếp tục cung cấp phần thông tin còn thiếu, "
+                "hoặc nói rõ muốn đổi thông tin nào "
+                "để Kori hỗ trợ mình kiểm tra lại trước khi xác nhận."
             )
         else:
-            text = "Xin chào! Mình có thể giúp anh/chị đặt lịch hoặc giải đáp thông tin dịch vụ."
+            text = (
+                "Xin chào anh/chị! Mình là Kori, trợ lý wellness của Komorebi. "
+                "Anh/chị có thể nhắn tự nhiên nhu cầu của mình, ví dụ muốn đặt lịch theo ngày, "
+                "giờ, cửa hàng, số người và liệu trình mong muốn; Kori sẽ kiểm tra từng bước "
+                "để hỗ trợ anh/chị hoàn tất lịch hẹn. "
+                "Nếu anh/chị cần hủy một booking đã đặt, hãy gửi mã booking kèm số điện thoại "
+                "đặt lịch để Kori kiểm tra giúp mình. "
+                f"Nếu cần hỗ trợ trực tiếp, anh/chị có thể liên hệ cửa hàng qua số {SUPPORT_PHONE}."
+            )
     elif intent == "thanks":
         text = "Rất vui được hỗ trợ anh/chị."
     elif intent == "restart_booking":
@@ -3292,7 +3305,7 @@ def _state_recovery_suggestion_options(context: BookingContext) -> tuple[str, ..
     if context.state is BookingState.SELECTING_TIME:
         return ()
     if context.state is BookingState.IDLE:
-        return ("Đặt lịch mới", "Sửa lịch đã đặt", "Hủy lịch đã đặt")
+        return ()
     if context.state is BookingState.AWAITING_CANCEL_CONFIRMATION:
         return ("Xác nhận hủy", "Không hủy")
     if context.state is BookingState.SELECTING_THERAPIST:

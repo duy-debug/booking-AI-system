@@ -686,6 +686,7 @@ async def test_fresh_context_greeting_does_not_claim_booking_is_preserved() -> N
 
     assert "Thông tin đặt lịch hiện tại" not in response.text
     assert "đặt lịch" in response.text
+    assert "1900 8095" in response.text
     assert context.state is BookingState.IDLE
 
 
@@ -703,8 +704,8 @@ async def test_meaningful_context_greeting_mentions_booking_is_preserved() -> No
         container=as_container(fake),
     )
 
-    assert "Thông tin đặt lịch hiện tại" in response.text
-    assert "vẫn được giữ" in response.text
+    assert "thông tin đặt lịch hiện tại" in response.text
+    assert "vẫn đang giữ" in response.text
     assert context.state is BookingState.SELECTING_DURATION
     assert context.shop == SHOP
 
@@ -1250,7 +1251,7 @@ async def test_failed_resolution_returns_generic_text_without_retry_or_raw_error
 @pytest.mark.parametrize(
     ("state", "expected"),
     [
-        (BookingState.IDLE, "đặt lịch mới, sửa lịch đã đặt hoặc hủy lịch đã đặt"),
+        (BookingState.IDLE, "đặt lịch mới hoặc hủy lịch đã đặt"),
         (BookingState.SELECTING_PEOPLE, "từ 1 đến 3 người"),
         (BookingState.COMPLETED, "nhập lại rõ hơn"),
     ],
@@ -1275,10 +1276,24 @@ async def test_unresolved_branch_is_state_aware_and_does_not_dispatch(
     assert len(fake.conversation_context_store.saved) == 1
 
 
+@pytest.mark.asyncio
+async def test_idle_unresolved_does_not_append_action_suggestions_or_claim_edit_support() -> None:
+    fake = FakeContainer(
+        context=BookingContext("conversation-a", state=BookingState.IDLE),
+        nlu_result=unresolved_nlu(),
+    )
+
+    response = await _process_controller_pipeline(request=request(), container=as_container(fake))
+
+    assert "Gợi ý hợp lệ" not in response.text
+    assert "Sửa lịch đã đặt" not in response.text
+    assert "đặt lịch mới hoặc hủy lịch đã đặt" in response.text
+    assert "1900 8095" in response.text
+
+
 @pytest.mark.parametrize(
     ("state", "expected_replies"),
     [
-        (BookingState.IDLE, ("Đặt lịch mới", "Sửa lịch đã đặt", "Hủy lịch đã đặt")),
         (BookingState.SELECTING_DATE, ("Hôm nay", "Ngày mai")),
         (BookingState.SELECTING_PEOPLE, ("1 người", "2 người", "3 người")),
         (
