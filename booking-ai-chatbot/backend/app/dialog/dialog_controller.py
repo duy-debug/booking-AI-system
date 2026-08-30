@@ -3036,6 +3036,12 @@ async def _with_state_recovery_suggestions(
         and response.status is DialogTurnStatus.FAILURE_HANDLED
     ):
         text = _duration_recovery_text(context)
+    if (
+        context.state is BookingState.SELECTING_SERVICE
+        and context.course_selection_mode is CourseSelectionMode.ADDON
+        and response.status is DialogTurnStatus.FAILURE_HANDLED
+    ):
+        text = _addon_recovery_text(context)
     text = _with_inline_recovery_suggestions(
         text,
         context,
@@ -3072,7 +3078,7 @@ async def _state_recovery_suggestion_options_from_context(
         if context.state is BookingState.SELECTING_DURATION:
             return await _duration_recovery_suggestion_options(container, context)
         if context.state is BookingState.SELECTING_TIME:
-            return await _time_recovery_suggestion_options(container, context)
+            return ()
     except Exception as error:
         trace_log(
             logger,
@@ -3172,6 +3178,19 @@ def _duration_recovery_text(context: BookingContext) -> str:
     )
 
 
+def _addon_recovery_text(context: BookingContext) -> str:
+    main_course = (
+        f" cho liệu trình chính {context.main_course.name}"
+        if context.main_course is not None
+        else ""
+    )
+    return (
+        f"Dạ, Kori chưa xác định được add-on anh/chị muốn chọn{main_course}. "
+        "Anh/chị có thể nhập đúng tên add-on trong danh sách bên dưới, "
+        "hoặc nói \"bỏ qua add-on\" / \"không chọn add-on\" để tiếp tục đặt lịch nhé."
+    )
+
+
 def _inline_suggestion_label(context: BookingContext) -> str:
     if context.state is BookingState.SELECTING_DATE:
         return "Các ngày gợi ý"
@@ -3184,9 +3203,7 @@ def _inline_suggestion_label(context: BookingContext) -> str:
             return "Các lựa chọn add-on hợp lệ"
         return "Các liệu trình có thể chọn"
     if context.state is BookingState.SELECTING_TIME:
-        if not context.available_slots:
-            return "Các ngày khác có thể thử"
-        return "Các khung giờ còn trống"
+        return "Gợi ý khung giờ"
     if context.state is BookingState.SELECTING_THERAPIST:
         return "Các lựa chọn kỹ thuật viên"
     return "Gợi ý hợp lệ"
@@ -3243,25 +3260,6 @@ async def _duration_recovery_suggestion_options(
     return options or _state_recovery_suggestion_options(context)
 
 
-async def _time_recovery_suggestion_options(
-    container: ApplicationContainer,
-    context: BookingContext,
-) -> tuple[str, ...]:
-    if context.available_slots:
-        return tuple(slot.strftime("%H:%M") for slot in context.available_slots)
-    if _missing_availability_field(context) is not None:
-        return _state_recovery_suggestion_options(context)
-    handler = cast(CheckAvailabilityHandler, container.handler(CheckAvailabilityHandler))
-    result = await handler.execute(context)
-    if result.outcome is not HandlerOutcome.SUCCESS:
-        return _date_recovery_suggestion_options(context)
-    slots = _handler_items(result, "slots", clock_time, allow_not_found=True)
-    context.set_available_slots(tuple(slots))
-    return tuple(slot.strftime("%H:%M") for slot in slots) or _date_recovery_suggestion_options(
-        context
-    )
-
-
 # Sinh gợi ý dựa trên state và dữ liệu context đã validate.
 def _state_recovery_suggestion_options(context: BookingContext) -> tuple[str, ...]:
     """
@@ -3279,7 +3277,7 @@ def _state_recovery_suggestion_options(context: BookingContext) -> tuple[str, ..
             return ("Không chọn add-on", "Xem danh sách add-on")
         return ("Xem danh sách liệu trình",)
     if context.state is BookingState.SELECTING_TIME:
-        return tuple(slot.strftime("%H:%M") for slot in (context.available_slots or ()))
+        return ()
     if context.state is BookingState.IDLE:
         return ("Đặt lịch mới", "Sửa lịch đã đặt", "Hủy lịch đã đặt")
     if context.state is BookingState.AWAITING_CANCEL_CONFIRMATION:

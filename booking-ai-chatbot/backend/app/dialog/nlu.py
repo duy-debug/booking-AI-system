@@ -551,6 +551,7 @@ _LLM_ISO_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
 _LLM_CLOCK_PATTERN = re.compile(r"(?:\d|[01]\d|2[0-3]):[0-5]\d")
 _LLM_INTENT_ALIASES = {
     "select_service": "select_course",
+    "select_addon": "select_course",
     "collect_phone": "provide_phone",
     "change_booking_field": "change_info",
     "skip_addon": "deny",
@@ -930,6 +931,8 @@ def _build_llm_messages(
         "service_name, main_course_name, addon_name, skip_addon. main_course_name là "
         "liệu trình chính; addon_name là tùy chọn; service_name nghĩa là chưa rõ loại. Chỉ đặt "
         "skip_addon=true khi người dùng từ chối add-on rõ ràng. Dùng change_info cho "
+        "Ở selecting_service khi đã có main course, câu bỏ qua/không chọn add-on "
+        "=> intent=skip_addon, skip_addon=true. "
         "yêu cầu chỉnh sửa booking draft hiện tại, ask_question cho FAQ, và các intent list/search "
         "FAQ: entity_query=query=câu hỏi. "
         "chỉ cho discovery. search_shops lưu vị trí trong query. Việc chọn "

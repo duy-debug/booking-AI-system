@@ -1313,7 +1313,7 @@ async def test_unresolved_booking_input_suggests_valid_next_actions(
 
 
 @pytest.mark.asyncio
-async def test_unresolved_time_only_suggests_latest_validated_slots() -> None:
+async def test_unresolved_time_does_not_append_long_slot_list() -> None:
     context = BookingContext(
         "conversation-a",
         state=BookingState.SELECTING_TIME,
@@ -1323,12 +1323,13 @@ async def test_unresolved_time_only_suggests_latest_validated_slots() -> None:
 
     response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
-    assert "09:00" in response.text
-    assert "10:30" in response.text
+    assert "09:00" not in response.text
+    assert "10:30" not in response.text
+    assert "Gợi ý khung giờ" not in response.text
 
 
 @pytest.mark.asyncio
-async def test_unresolved_time_lists_all_slots_from_availability_api() -> None:
+async def test_unresolved_time_does_not_call_availability_for_long_slot_list() -> None:
     slots = tuple(time(8 + index // 4, index % 4 * 15) for index in range(12))
     context = BookingContext(
         "conversation-a",
@@ -1347,13 +1348,13 @@ async def test_unresolved_time_lists_all_slots_from_availability_api() -> None:
 
     response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
-    assert "08:00" in response.text
-    assert "10:45" in response.text
-    assert fake.check_availability_handler.calls == [context]
+    assert "08:00" not in response.text
+    assert "10:45" not in response.text
+    assert fake.check_availability_handler.calls == []
 
 
 @pytest.mark.asyncio
-async def test_unresolved_time_suggests_other_dates_when_no_slot_available() -> None:
+async def test_unresolved_time_does_not_append_date_or_slot_suggestions() -> None:
     context = BookingContext(
         "conversation-a",
         state=BookingState.SELECTING_TIME,
@@ -1374,8 +1375,8 @@ async def test_unresolved_time_suggests_other_dates_when_no_slot_available() -> 
 
     response = await _process_controller_pipeline(request=request(), container=as_container(fake))
 
-    assert "Các ngày khác có thể thử" in response.text
-    assert fake.check_availability_handler.calls == [context]
+    assert "Các ngày khác có thể thử" not in response.text
+    assert fake.check_availability_handler.calls == []
 
 
 @pytest.mark.asyncio

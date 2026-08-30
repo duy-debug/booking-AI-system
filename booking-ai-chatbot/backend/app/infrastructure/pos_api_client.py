@@ -550,6 +550,10 @@ def _availability_params(
     if request.addon_ids:
         params["addon_course_ids"] = ",".join(str(item) for item in request.addon_ids)
 
+    requested_start_time = getattr(request, "requested_start_time", None)
+    if requested_start_time is not None:
+        params["start_time"] = requested_start_time.isoformat(timespec="minutes")
+
     preference = request.therapist_preference
     if preference is not None:
         _apply_therapist_preference(params, preference)

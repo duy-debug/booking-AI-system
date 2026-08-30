@@ -121,6 +121,7 @@ def make_context(
     *,
     num_customer: int = 1,
     therapist: TherapistPreference | None = None,
+    requested_start_time: time | None = None,
 ) -> BookingContext:
     return BookingContext(
         conversation_id="conversation-1",
@@ -132,6 +133,7 @@ def make_context(
         num_customer=num_customer,
         duration_minutes=60,
         therapist_preference=therapist,
+        requested_start_time=requested_start_time,
     )
 
 
@@ -166,6 +168,18 @@ async def test_execute_maps_complete_request_and_updates_slots_only() -> None:
     assert context.available_slots is None
     assert context.start_time is None
     assert context.state is original_state
+
+
+@pytest.mark.asyncio
+async def test_execute_preserves_requested_start_time_for_exact_slot_check() -> None:
+    requested_time = time(8, 21)
+    context = make_context(requested_start_time=requested_time)
+    fake = FakeBookingGateway(slots=(requested_time,))
+
+    result = await make_handler(fake).execute(context)
+
+    assert result.outcome is HandlerOutcome.SUCCESS
+    assert fake.availability_requests[0].requested_start_time == requested_time
 
 
 @pytest.mark.asyncio

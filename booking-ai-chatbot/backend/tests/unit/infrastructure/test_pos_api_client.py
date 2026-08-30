@@ -82,6 +82,7 @@ def _availability_payload(data: list[dict[str, object]]) -> dict[str, object]:
 
 def _availability_request(
     preference: TherapistPreference | None = None,
+    requested_start_time: time | None = None,
 ) -> AvailabilityRequest:
     return AvailabilityRequest(
         shop_id=SHOP_ID,
@@ -91,6 +92,7 @@ def _availability_request(
         main_course_id=MAIN_COURSE_ID,
         addon_ids=(ADDON_COURSE_ID,),
         therapist_preference=preference,
+        requested_start_time=requested_start_time,
     )
 
 
@@ -373,6 +375,25 @@ async def test_availability_sends_complete_none_preference_query_and_preserves_o
     timeout = request.extensions["timeout"]
     assert isinstance(timeout, dict)
     assert timeout["read"] == 2.5
+
+
+@pytest.mark.asyncio
+async def test_availability_sends_requested_start_time_when_present() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=_availability_payload([_slot("08:21")]))
+
+    client, gateway = _gateway(handler)
+    try:
+        await gateway.get_available_slots(
+            _availability_request(requested_start_time=time(8, 21))
+        )
+    finally:
+        await client.aclose()
+
+    assert dict(requests[0].url.params)["start_time"] == "08:21"
 
 
 @pytest.mark.asyncio

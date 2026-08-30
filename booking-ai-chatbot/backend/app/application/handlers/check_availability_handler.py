@@ -41,6 +41,7 @@ class CheckAvailabilityHandler:
             main_course_id=course_selection.main_course.course_id,
             addon_ids=tuple(addon.course_id for addon in course_selection.addons),
             therapist_preference=context.therapist_preference,
+            requested_start_time=context.requested_start_time,
         )
         availability = await self._booking_gateway.get_available_slots(request)
         slots = availability.slots

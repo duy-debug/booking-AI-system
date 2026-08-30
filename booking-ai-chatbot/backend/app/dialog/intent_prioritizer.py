@@ -129,6 +129,7 @@ def _canonical_intent(
 ) -> str:
     normalized = {
         "select_service": "select_course",
+        "select_addon": "select_course",
         "collect_phone": "provide_phone",
         "change_booking_field": "change_info",
         "skip_addon": "deny",

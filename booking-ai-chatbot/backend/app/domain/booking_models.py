@@ -423,6 +423,7 @@ class AvailabilityRequest:
     main_course_id: UUID
     addon_ids: tuple[UUID, ...] = ()
     therapist_preference: TherapistPreference | None = None
+    requested_start_time: time | None = None
 
     def __post_init__(self) -> None:
         _validate_booking_shape(
