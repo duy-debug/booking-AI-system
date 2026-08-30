@@ -1008,7 +1008,7 @@ async def test_select_time_prompt_uses_semantic_guidance_instead_of_exact_uttera
     assert result.payload == {"start_time": time(10, 0)}
     assert gateway.calls == 1
     prompt = gateway.messages[0].content
-    assert "Hãy xem trạng thái hiện tại chỉ như ngữ cảnh hội thoại" in prompt
+    assert "State là ngữ cảnh" in prompt
     assert "Khi người dùng nói giờ bắt đầu cụ thể" in prompt
     assert "Hiểu giờ tự nhiên/viết tắt theo ngữ cảnh" in prompt
     assert "In selecting_time" not in prompt
@@ -1163,6 +1163,40 @@ async def test_llm_nlu_always_calls_gateway() -> None:
     result = await fallback.parse(text="message", state=BookingState.IDLE)
 
     assert result.resolution_status is NLUResolutionStatus.RESOLVED
+    assert gateway.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_invalid_llm_output_keeps_explicit_start_booking_task_switch() -> None:
+    gateway = FakeLLMGateway(LLMResponse(content="không phải json"))
+    fallback = LLMNLU(llm_gateway=gateway, intent_policy=policy())
+
+    result = await fallback.parse(
+        text="tôi muốn đặt booking",
+        state=BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY,
+    )
+
+    assert result.intent == "start_booking"
+    assert result.resolution_status is NLUResolutionStatus.RESOLVED
+    assert result.matched_rule == "explicit_task_switch"
+    assert gateway.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_state_incompatible_output_keeps_explicit_cancel_booking_task_switch() -> None:
+    gateway = FakeLLMGateway(
+        LLMResponse(content=structured(intent="cancel_existing_booking"))
+    )
+    fallback = LLMNLU(llm_gateway=gateway, intent_policy=policy())
+
+    result = await fallback.parse(
+        text="tôi muốn hủy booking",
+        state=BookingState.SELECTING_DURATION,
+    )
+
+    assert result.intent == "cancel_existing_booking"
+    assert result.resolution_status is NLUResolutionStatus.RESOLVED
+    assert result.matched_rule == "explicit_task_switch"
     assert gateway.calls == 1
 
 

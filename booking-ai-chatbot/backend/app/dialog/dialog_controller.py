@@ -84,6 +84,28 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 SUPPORT_PHONE = "1900 8095"
+_CANCEL_EXISTING_BOOKING_STATES = frozenset(
+    {
+        BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY,
+        BookingState.AWAITING_CANCEL_CONFIRMATION,
+    }
+)
+_ACTIVE_BOOKING_DRAFT_STATES = frozenset(
+    {
+        BookingState.SELECTING_SHOP,
+        BookingState.SELECTING_DATE,
+        BookingState.SELECTING_PEOPLE,
+        BookingState.SELECTING_DURATION,
+        BookingState.SELECTING_SERVICE,
+        BookingState.SELECTING_TIME,
+        BookingState.SELECTING_THERAPIST,
+        BookingState.COLLECTING_PHONE,
+        BookingState.VERIFYING_PHONE,
+        BookingState.COLLECTING_NAME,
+        BookingState.AWAITING_CONFIRMATION,
+        BookingState.BOOKING_FAILED,
+    }
+)
 
 _UNRESOLVED_TEXT = {
     BookingState.IDLE: (
@@ -1472,6 +1494,30 @@ def _reset_finished_session_context(
         context.finish_current_task()
 
 
+def _reset_context_for_explicit_task_switch(
+    nlu_result: NLUResult,
+    context: BookingContext,
+) -> None:
+    initial_state = context.state
+    if (
+        nlu_result.intent == "start_booking"
+        and initial_state in _CANCEL_EXISTING_BOOKING_STATES
+    ) or (
+        nlu_result.intent == "cancel_existing_booking"
+        and initial_state in _ACTIVE_BOOKING_DRAFT_STATES
+    ):
+        context.reset()
+        trace_log(
+            logger,
+            logging.INFO,
+            "DialogCtrl",
+            "task_switch_context_reset",
+            from_state=initial_state.value,
+            to_state=context.state.value,
+            intent=nlu_result.intent,
+        )
+
+
 async def _process_bound_chat_message(
     *,
     conversation_id: str,
@@ -1488,6 +1534,7 @@ async def _process_bound_chat_message(
         state=context.state,
         context=context,
     )
+    _reset_context_for_explicit_task_switch(nlu_result, context)
     # Stage entity đã nói sớm vào context để chỉ hỏi field còn thiếu.
     _stage_requested_entities(nlu_result, context)
 

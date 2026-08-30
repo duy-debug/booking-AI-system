@@ -447,7 +447,9 @@ class FakeContainer:
         self.booking_gateway = booking_gateway
         self.state_intent_policy = StateIntentPolicy(
             {
-                BookingState.IDLE: frozenset({"start_booking", "ask_question"}),
+                BookingState.IDLE: frozenset(
+                    {"start_booking", "cancel_existing_booking", "ask_question"}
+                ),
                 BookingState.SELECTING_SHOP: frozenset({"select_store", "ask_question"}),
                 BookingState.SELECTING_PEOPLE: frozenset({"select_people", "ask_question"}),
                 BookingState.SELECTING_DURATION: frozenset({"select_duration", "ask_question"}),
@@ -467,6 +469,16 @@ class FakeContainer:
 def resolved_nlu() -> NLUResult:
     return NLUResult(
         intent="start_booking",
+        payload={},
+        confidence=1.0,
+        source=NLUSource.LLM,
+        resolution_status=NLUResolutionStatus.RESOLVED,
+    )
+
+
+def cancel_existing_booking_nlu() -> NLUResult:
+    return NLUResult(
+        intent="cancel_existing_booking",
         payload={},
         confidence=1.0,
         source=NLUSource.LLM,
@@ -672,6 +684,65 @@ async def test_finished_booking_turn_saves_next_session_as_idle(
     assert context.last_booking_id == booking.booking_id
     assert context.last_reservation_code == "BK-TEST-001"
     assert context.last_booking_phone == "0901234567"
+
+
+@pytest.mark.asyncio
+async def test_start_booking_interrupts_cancel_identity_flow() -> None:
+    booking = Booking(
+        booking_id=UUID("77777777-7777-7777-7777-777777777777"),
+        status="confirmed",
+        shop=SHOP,
+        main_course=MAIN_COURSES[0],
+        customer=Customer("0901234567", "Nguyen An"),
+        booking_date=date(2099, 8, 1),
+        start_time=time(10, 30),
+        reservation_code="BK-TEST-001",
+    )
+    context = BookingContext(
+        "conversation-a",
+        state=BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY,
+        booking=booking,
+        booking_id=booking.booking_id,
+    )
+    fake = FakeContainer(context=context, nlu_result=resolved_nlu())
+
+    await _process_controller_pipeline(
+        request=request(idempotency_key="stable-key"),
+        container=as_container(fake),
+    )
+
+    assert len(fake.dialog_controller.calls) == 1
+    assert fake.dialog_controller.calls[0][1].intent == "start_booking"
+    assert fake.dialog_controller.calls[0][0].state is BookingState.IDLE
+    assert context.booking is None
+    assert context.booking_id is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_existing_booking_interrupts_active_booking_draft() -> None:
+    context = BookingContext(
+        "conversation-a",
+        state=BookingState.SELECTING_DURATION,
+        shop=SHOP,
+        booking_date=date(2099, 8, 1),
+        num_customer=1,
+    )
+    fake = FakeContainer(context=context, nlu_result=cancel_existing_booking_nlu())
+
+    await _process_controller_pipeline(
+        request=ChatRequest(
+            conversation_id="conversation-a",
+            message="Tôi muốn hủy booking",
+            idempotency_key="stable-key",
+        ),
+        container=as_container(fake),
+    )
+
+    assert len(fake.dialog_controller.calls) == 1
+    assert fake.dialog_controller.calls[0][1].intent == "cancel_existing_booking"
+    assert fake.dialog_controller.calls[0][0].state is BookingState.IDLE
+    assert context.shop is None
+    assert context.booking_date is None
 
 
 @pytest.mark.asyncio

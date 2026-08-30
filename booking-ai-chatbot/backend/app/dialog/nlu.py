@@ -45,6 +45,12 @@ from app.infrastructure.gemini_client import (
 _WHITESPACE = re.compile(r"\s+")
 _PUNCTUATION = re.compile(r'[.,!?;()\[\]{}"]')
 _ADDON = re.compile(r"\badd[ -]?on\b")
+_START_BOOKING_TASK_PATTERN = re.compile(
+    r"\b(?:dat|tao|book)\s+(?:lich|booking)\b|\b(?:booking|lich)\s+moi\b"
+)
+_CANCEL_EXISTING_BOOKING_TASK_PATTERN = re.compile(
+    r"\b(?:huy|xoa|cancel)\s+(?:lich|booking)\b"
+)
 
 
 # Chuẩn hóa tiếng Việt dùng chung cho tìm kiếm entity mà không fuzzy match quá rộng.
@@ -637,6 +643,7 @@ class LLMNLU:
         if current_datetime.tzinfo is None:
             current_datetime = current_datetime.replace(tzinfo=timezone.utc)
         local_datetime = current_datetime.astimezone(self._timezone_info)
+        explicit_task_switch = _explicit_task_switch_result(text, state)
         messages = _build_llm_messages(
             text=text,
             state=state,
@@ -687,6 +694,8 @@ class LLMNLU:
                 invalid_fields=invalid_fields,
                 error_code="invalid_nlu_output",
             )
+            if explicit_task_switch is not None:
+                return explicit_task_switch
             return _llm_unresolved("invalid_nlu_output")
         record_turn_metrics(nlu_duration_ms=elapsed_ms(started_at))
         # Chỉ chọn candidate tương thích với state hiện tại và đủ entity bắt buộc.
@@ -696,6 +705,8 @@ class LLMNLU:
             context=context,
         )
         if selected is None:
+            if explicit_task_switch is not None:
+                return explicit_task_switch
             if state in {BookingState.COMPLETED, BookingState.CANCELLED} and any(
                 _LLM_INTENT_ALIASES.get(item.intent.strip(), item.intent.strip()) == "change_info"
                 for item in candidates
@@ -736,7 +747,10 @@ class LLMNLU:
             duration_ms=elapsed_ms(started_at),
         )
         # Candidate đã chọn được map thành NLUResult để DialogController xử lý tiếp.
-        return self._to_nlu_result(output, state, merged_entities)
+        result = self._to_nlu_result(output, state, merged_entities)
+        if explicit_task_switch is not None and result.intent != explicit_task_switch.intent:
+            return explicit_task_switch
+        return result
 
     # Chuyển IntentCandidate đã được chọn thành NLUResult canonical cho pipeline phía sau.
     def _to_nlu_result(
@@ -917,7 +931,8 @@ def _build_llm_messages(
         "Hãy phân loại một tin nhắn đặt lịch. Chỉ trả về JSON với các khóa intent, "
         "confidence, entities, entity_kind, entity_query. "
         f"Trạng thái hiện tại: {state.value}. Các intent được phép: {intents}. "
-        "Hãy xem trạng thái hiện tại chỉ như ngữ cảnh hội thoại; không lấn át ý định người dùng. "
+        "State là ngữ cảnh, không lấn át ý định user. "
+        "Task: hủy->đặt=start_booking; đặt->hủy=cancel_existing_booking. "
         f"Ngày nghiệp vụ hiện tại: {current_datetime.date().isoformat()}. "
         f"Giờ địa phương hiện tại: {current_datetime.time().isoformat(timespec='minutes')}. "
         f"Múi giờ: {business_timezone}. Ngôn ngữ: vi-VN. "
@@ -1320,6 +1335,62 @@ def _normalize_llm_candidates_payload(
     ]
 
     return normalized
+
+
+def _fold_vietnamese(text: str) -> str:
+    normalized = unicodedata.normalize("NFD", text).casefold()
+    without_marks = "".join(
+        char for char in normalized if unicodedata.category(char) != "Mn"
+    )
+    without_marks = without_marks.replace("đ", "d")
+    return _WHITESPACE.sub(" ", without_marks).strip()
+
+
+def _explicit_task_switch_result(text: str, state: BookingState) -> NLUResult | None:
+    normalized = _fold_vietnamese(text)
+    if (
+        state
+        in {
+            BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY,
+            BookingState.AWAITING_CANCEL_CONFIRMATION,
+        }
+        and _START_BOOKING_TASK_PATTERN.search(normalized) is not None
+    ):
+        return NLUResult(
+            intent="start_booking",
+            payload={},
+            confidence=1.0,
+            source=NLUSource.LLM,
+            resolution_status=NLUResolutionStatus.RESOLVED,
+            matched_rule="explicit_task_switch",
+        )
+    if (
+        state
+        in {
+            BookingState.SELECTING_SHOP,
+            BookingState.SELECTING_DATE,
+            BookingState.SELECTING_PEOPLE,
+            BookingState.SELECTING_DURATION,
+            BookingState.SELECTING_SERVICE,
+            BookingState.SELECTING_TIME,
+            BookingState.SELECTING_THERAPIST,
+            BookingState.COLLECTING_PHONE,
+            BookingState.VERIFYING_PHONE,
+            BookingState.COLLECTING_NAME,
+            BookingState.AWAITING_CONFIRMATION,
+            BookingState.BOOKING_FAILED,
+        }
+        and _CANCEL_EXISTING_BOOKING_TASK_PATTERN.search(normalized) is not None
+    ):
+        return NLUResult(
+            intent="cancel_existing_booking",
+            payload={},
+            confidence=1.0,
+            source=NLUSource.LLM,
+            resolution_status=NLUResolutionStatus.RESOLVED,
+            matched_rule="explicit_task_switch",
+        )
+    return None
 
 
 # Chuẩn hóa các giá trị therapist đặc thù trước khi ép vào schema nghiêm ngặt của LLM output.
