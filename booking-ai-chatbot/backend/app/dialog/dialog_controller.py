@@ -712,12 +712,22 @@ class DialogController:
         """
 
         load_source = _availability_revalidation_transition(intent)
+        staged_requested_start_time = False
+        previous_requested_start_time = booking_context.requested_start_time
+        if (
+            previous_requested_start_time is None
+            and snapshot.previous_start_time is not None
+        ):
+            booking_context.requested_start_time = snapshot.previous_start_time
+            staged_requested_start_time = True
         try:
             load_report = await self._execute_actions(
                 ("load_time_slots",),
                 action_context,
             )
         except ActionExecutionError as error:
+            if staged_requested_start_time:
+                booking_context.requested_start_time = previous_requested_start_time
             return _ChangeRevalidationResult(
                 response=await self._recover_failure(
                     source=load_source,
@@ -730,6 +740,9 @@ class DialogController:
                     auto_transition_count=0,
                 )
             )
+        finally:
+            if staged_requested_start_time:
+                booking_context.requested_start_time = previous_requested_start_time
 
         return await self._finish_availability_revalidation(
             booking_context=booking_context,
