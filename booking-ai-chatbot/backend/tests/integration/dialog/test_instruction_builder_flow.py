@@ -137,9 +137,13 @@ def test_real_group_completed_template_without_code_hides_internal_ids() -> None
     )
 
     assert response.status is DialogTurnStatus.SUCCESS
-    assert response.metadata == {"booking_created": True}
+    assert response.metadata == {
+        "booking_created": True,
+        "preserve_structured_text": True,
+    }
     assert "Đặt lịch thành công" in response.text
     assert "đã được ghi nhận" in response.text
+    assert "Cảm ơn anh/chị đã tin tưởng và lựa chọn Komorebi." in response.text
     assert "Mã đặt lịch" not in response.text
     assert "Tên khách hàng: An" in response.text
     assert "Số điện thoại: 0901234567" in response.text

@@ -901,6 +901,8 @@ class InstructionBuilder:
             lines.append("Thông tin đặt lịch đã được ghi nhận.")
         lines.append("")
         lines.extend(_booking_summary_lines(context))
+        lines.append("")
+        lines.append("Cảm ơn anh/chị đã tin tưởng và lựa chọn Komorebi.")
         return DialogResponseDraft(
             "\n".join(lines),
             metadata={
@@ -1011,6 +1013,8 @@ class InstructionBuilder:
         lines.extend(_booking_reference_lines(context))
         lines.append("")
         lines.extend(_booking_summary_lines(context))
+        lines.append("")
+        lines.append("Cảm ơn anh/chị đã tin tưởng và lựa chọn Komorebi.")
         lines.append("")
         lines.append("Anh/chị có cần em hỗ trợ đặt lịch mới hoặc hủy booking khác không ạ?")
         return DialogResponseDraft(

@@ -247,6 +247,7 @@ def test_completed_response_prefers_context_display_code() -> None:
     assert "RSV-2026-001" not in response.text
     assert "Tên khách hàng: An" in response.text
     assert "Số điện thoại: 0901234567" in response.text
+    assert "Cảm ơn anh/chị đã tin tưởng và lựa chọn Komorebi." in response.text
     assert response.metadata == {
         "booking_created": True,
         "preserve_structured_text": True,
@@ -297,6 +298,7 @@ def test_cancel_complete_preserves_structured_booking_form() -> None:
 
     assert "Hủy booking thành công" in response.text
     assert "Tên khách hàng: An" in response.text
+    assert "Cảm ơn anh/chị đã tin tưởng và lựa chọn Komorebi." in response.text
     assert "Anh/chị có cần em hỗ trợ đặt lịch mới hoặc hủy booking khác không ạ?" in response.text
     assert response.metadata == {"preserve_structured_text": True}
 

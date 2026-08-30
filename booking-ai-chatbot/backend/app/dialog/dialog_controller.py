@@ -2973,7 +2973,11 @@ def _global_intent_response(intent: str, context: BookingContext) -> DialogRespo
                 f"Nếu cần hỗ trợ trực tiếp, anh/chị có thể liên hệ cửa hàng qua số {SUPPORT_PHONE}."
             )
     elif intent == "thanks":
-        text = "Rất vui được hỗ trợ anh/chị."
+        text = (
+            "Dạ, Kori rất vui khi được hỗ trợ anh/chị. "
+            "Khi nào anh/chị cần thêm thông tin hoặc muốn tiếp tục đặt lịch, "
+            "Kori luôn sẵn sàng hỗ trợ mình nhé."
+        )
     elif intent == "restart_booking":
         text = "Mình đã bắt đầu lại. Anh/chị hãy chọn cửa hàng."
     else:
