@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
+# Nhóm lỗi LLM được tách riêng để NLU/NLG fallback mà không nuốt lỗi nghiệp vụ.
 class LLMGatewayError(Exception):
     """Base exception for expected language-model provider failures."""
 
@@ -22,6 +23,7 @@ class InvalidLLMResponseError(LLMGatewayError):
     """Raised when a provider response violates the gateway contract."""
 
 
+# Message gửi sang provider giữ role/content tối thiểu để không phụ thuộc SDK cụ thể.
 @dataclass(frozen=True, slots=True)
 class LLMMessage:
     """Represents a message sent to a language model."""
@@ -30,6 +32,7 @@ class LLMMessage:
     content: str
 
 
+# Tool call được normalize để NLU có thể dùng structured output từ provider khác nhau.
 @dataclass(frozen=True, slots=True)
 class LLMToolCall:
     """Represents a parsed tool call returned by a language model."""
@@ -38,6 +41,7 @@ class LLMToolCall:
     arguments: dict[str, object]
 
 
+# LLMResponse là contract chung cho cả text NLG và tool-call NLU.
 @dataclass(frozen=True, slots=True)
 class LLMResponse:
     """Represents text and tool calls returned by a language model."""
@@ -46,6 +50,7 @@ class LLMResponse:
     tool_calls: tuple[LLMToolCall, ...] = ()
 
 
+# Port LLM giúp dialog không phụ thuộc trực tiếp Gemini/OpenAI-compatible HTTP payload.
 class LLMGateway(Protocol):
     """Defines language model generation required by the application."""
 
@@ -81,6 +86,7 @@ from app.infrastructure.context_store import elapsed_ms, record_turn_metrics, tr
 _LOGGER = logging.getLogger(__name__)
 
 
+# Adapter Gemini triển khai LLMGateway qua endpoint OpenAI-compatible.
 class GeminiClient:
     """Generate text through Gemini's OpenAI-compatible chat endpoint."""
 

@@ -61,6 +61,7 @@ _MAX_CONVERSATION_ID_LENGTH = 128
 _RAW_PHONE_PATTERN = re.compile(r"\+?\d{9,15}")
 
 
+# Nhóm lỗi context store giúp transport trả lỗi rõ khi conversation_id/cache không an toàn.
 class ConversationContextError(Exception):
     """Lỗi cơ sở cho các vấn đề ở vòng đời lưu và tải conversation context."""
 
@@ -77,16 +78,19 @@ class InvalidConversationContextError(ConversationContextError):
     """Phát sinh khi context không thể được lưu dưới conversation identifier đã cho."""
 
 
+# RuntimeFlowValidationError chặn app startup nếu flow JSON không khớp dependency đã compose.
 class RuntimeFlowValidationError(ValueError):
     """Phát sinh khi dependency đã compose không thể phục vụ runtime flow đang được nạp."""
 
 
+# Entry lock giữ số request đang dùng để cleanup lock khi conversation hết hoạt động.
 @dataclass(slots=True)
 class _ConversationLockEntry:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     users: int = 0
 
 
+# ConversationContextStore bọc ContextStore bằng validate key và lock theo conversation.
 class ConversationContextStore:
     """Điều phối việc lưu, tải và khóa BookingContext trong in-process cache."""
 
@@ -162,6 +166,7 @@ class ConversationContextStore:
         return context
 
 
+# ApplicationContainer là object graph sống theo FastAPI lifespan, không phải service nghiệp vụ.
 @dataclass(slots=True)
 class ApplicationContainer:
     """Chứa toàn bộ dependency đã được wire và quản lý tài nguyên sống theo app lifespan."""
@@ -313,6 +318,9 @@ async def create_application_container(
         rag_config = RAGConfig(
             embedding_model_name=settings.embedding_model_name,
         )
+        # Nếu caller inject knowledge gateway thì giữ adapter đó làm nguồn dữ liệu kiểm thử
+        # hoặc nguồn ngoài hệ thống.
+        # Chỉ tự dựng stack Qdrant khi không có gateway inject và cấu hình retrieval được bật.
         if configured_knowledge_gateway is None and settings.knowledge_qdrant_enabled:
             rag_config = RAGConfig(
                 embedding_model_name=settings.embedding_model_name,
@@ -436,6 +444,7 @@ def validate_runtime_flow(
             reachable_edges[current_state].add(target)
 
     for current_state, definition in flow.states.items():
+        # Validate cả on_enter, transition thường và auto transition để lỗi flow lộ ngay lúc boot.
         declared_actions.extend(definition.on_enter.actions)
         if definition.on_enter.instruction_template is not None:
             declared_templates.append(definition.on_enter.instruction_template)
@@ -491,6 +500,7 @@ def validate_runtime_flow(
 
     reachable = {flow.initial_state}
     pending = [flow.initial_state]
+    # Reachability check giúp phát hiện state khai báo nhưng không bao giờ đi tới được.
     while pending:
         source = pending.pop()
         for target in reachable_edges[source] - reachable:

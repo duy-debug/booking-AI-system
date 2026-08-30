@@ -163,6 +163,7 @@ _TERMINAL_CHANGE_TEXT = (
 _AVAILABILITY_REVALIDATION_TARGETS = frozenset({"date", "people", "main_course", "addon"})
 
 
+# Nhóm lỗi controller dùng để phân biệt lỗi điều phối dialog với lỗi action/domain.
 class DialogControllerError(Exception):
     """
     Lỗi gốc của tầng điều phối dialog.
@@ -191,6 +192,7 @@ class AutoTransitionCycleError(DialogControllerError):
     pass
 
 
+# Input đã qua NLU/tool mapping trước khi được StateMachine dispatch.
 @dataclass(frozen=True, slots=True)
 class DialogTurnInput:
     """
@@ -201,6 +203,7 @@ class DialogTurnInput:
     payload: Mapping[str, object]
     idempotency_key: str | None = None
 
+    # Khóa payload thành immutable mapping để action không mutate input gốc của turn.
     def __post_init__(self) -> None:
         if not isinstance(self.intent, str) or not self.intent.strip():
             raise InvalidDialogTurnError("Dialog intent must be a non-empty string.")
@@ -209,6 +212,7 @@ class DialogTurnInput:
         object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))
 
 
+# Status này quyết định response có được lưu context hay cần recovery tiếp.
 class DialogTurnStatus(StrEnum):
     """
     Mô tả turn đã thành công, recovery được hay thất bại chưa xử lý.
@@ -219,6 +223,8 @@ class DialogTurnStatus(StrEnum):
     FAILURE_UNHANDLED = "failure_unhandled"
 
 
+# Result nội bộ giữ dấu vết transition/action để InstructionBuilder
+# dựng response đúng state.
 @dataclass(frozen=True, slots=True)
 class DialogTurnResult:
     """
@@ -237,6 +243,7 @@ class DialogTurnResult:
     original_error: ActionExecutionError | None = None
 
 
+# Snapshot dữ liệu nhạy với availability trước khi change action có thể clear field liên quan.
 @dataclass(frozen=True, slots=True)
 class _ChangeRevalidationSnapshot:
     """
@@ -248,6 +255,7 @@ class _ChangeRevalidationSnapshot:
     previous_therapist_preference: TherapistPreference | None
 
 
+# Kết quả revalidation cho phép override transition gốc mà không sửa trực tiếp state machine.
 @dataclass(frozen=True, slots=True)
 class _ChangeRevalidationResult:
     """
@@ -260,6 +268,7 @@ class _ChangeRevalidationResult:
     response: DialogTurnResult | None = None
 
 
+# Theo dõi việc tiêu thụ entity user đã nói sớm để không hỏi lại field đã có trong cùng turn.
 @dataclass(frozen=True, slots=True)
 class RequestedEntityConsumption:
     """
@@ -270,6 +279,7 @@ class RequestedEntityConsumption:
     blocked_resolution: EntityResolutionResult | None = None
 
 
+# SSE event tách delta stream và response cuối để frontend render token nhưng vẫn nhận state chuẩn.
 @dataclass(frozen=True, slots=True)
 class DialogStreamEvent:
     """
@@ -283,6 +293,7 @@ class DialogStreamEvent:
     response: "DialogResponse" | None = None
 
 
+# DialogController là orchestration layer: không tự chứa business rule nếu handler/domain đã xử lý.
 class DialogController:
     """
     Điều phối một lượt hội thoại hoàn chỉnh của chatbot.
@@ -589,6 +600,7 @@ class DialogController:
             )
         return _ChangeRevalidationResult()
 
+    # Nhận giá trị user nhập ở turn sau change_info và tiếp tục validate theo flow chỉnh sửa.
     async def _revalidate_after_selection_continuation(
         self,
         *,
@@ -641,6 +653,8 @@ class DialogController:
             snapshot=snapshot,
         )
 
+    # Đổi shop phải kiểm catalog shop mới trước,
+    # chỉ hỏi lại field phụ thuộc nếu field cũ không còn hợp lệ.
     async def _continue_changed_shop_selection(
         self,
         *,
@@ -697,6 +711,7 @@ class DialogController:
             executed_actions=(),
         )
 
+    # Các field ảnh hưởng slot phải reload availability thật trước khi quay lại confirmation.
     async def _revalidate_availability_sensitive_change(
         self,
         *,
@@ -722,6 +737,7 @@ class DialogController:
             snapshot=snapshot,
         )
 
+    # Tạm dùng giờ cũ làm requested_start_time để kiểm slot sau khi field khác vừa thay đổi.
     async def _load_and_finish_availability_revalidation(
         self,
         *,
@@ -779,6 +795,7 @@ class DialogController:
             preloaded_actions=load_report.executed_action_names,
         )
 
+    # Nếu giờ cũ còn trong available_slots thì giữ giờ, ngược lại bắt user chọn lại từ slot mới.
     async def _finish_availability_revalidation(
         self,
         *,
@@ -859,6 +876,7 @@ class DialogController:
             executed_actions=executed_actions,
         )
 
+    # Đổi therapist trực tiếp cần validate lại trên đúng shop/date/time hiện tại trước khi confirm.
     async def _revalidate_changed_therapist(
         self,
         *,
@@ -1494,6 +1512,7 @@ def _reset_finished_session_context(
         context.finish_current_task()
 
 
+# Cho phép user đổi ý giữa đặt lịch và hủy lịch giữa chừng mà không bị kẹt state cũ.
 def _reset_context_for_explicit_task_switch(
     nlu_result: NLUResult,
     context: BookingContext,
@@ -1518,6 +1537,8 @@ def _reset_context_for_explicit_task_switch(
         )
 
 
+# Pipeline chính của một turn: NLU -> route -> entity/action -> NLG response
+# rồi context save ở caller.
 async def _process_bound_chat_message(
     *,
     conversation_id: str,
@@ -1797,6 +1818,8 @@ def _stage_requested_entities(result: NLUResult, context: BookingContext) -> Non
     primary = _primary_entity_keys(result, context)
 
     def requested_text(key: str) -> str | None:
+        # Entity chính của turn hiện tại sẽ được xử lý ngay bằng transition hiện tại.
+        # Entity phụ chỉ được stage nếu thuộc bước hiện tại hoặc bước sau trong flow.
         value = entities.get(key)
         if (
             key in primary
@@ -1876,6 +1899,8 @@ def _stage_requested_entities(result: NLUResult, context: BookingContext) -> Non
 
 
 def _can_stage_requested_slot(key: str, state: BookingState) -> bool:
+    # Khi user nói một câu dài, chỉ lưu trước các field chưa đi qua trong workflow.
+    # Điều này giữ thứ tự validate shop -> date -> people -> duration -> service -> slot.
     state_order = {
         BookingState.IDLE: 0,
         BookingState.COLLECTING_CANCEL_BOOKING_IDENTITY: 1,
@@ -1915,6 +1940,8 @@ def _can_stage_requested_slot(key: str, state: BookingState) -> bool:
 
 
 def _primary_entity_keys(result: NLUResult, context: BookingContext) -> frozenset[str]:
+    # Primary entity là field mà intent hiện tại chịu trách nhiệm xử lý ngay,
+    # nên không được stage lại để tránh replay trùng ở turn sau.
     if result.intent == "start_booking":
         return frozenset()
     keys = {
@@ -1948,6 +1975,8 @@ async def _next_requested_turn(
 ) -> tuple[DialogTurnInput | None, EntityResolutionResult | None]:
     direct: tuple[str, str, Mapping[str, object]] | None = None
     entity: tuple[str, NLUEntityKind] | None = None
+    # Consume requested entity theo đúng state hiện tại để câu dài vẫn đi qua
+    # cùng business validation như khi người dùng nhập từng bước.
     if context.state is BookingState.SELECTING_SHOP and context.requested_shop_name:
         shop_query, context.requested_shop_name = context.requested_shop_name, None
         entity = (shop_query, NLUEntityKind.SHOP)
@@ -2033,6 +2062,7 @@ async def _next_requested_turn(
         entity_query=query,
         entity_kind=kind,
     )
+    # Entity đã stage vẫn phải đi qua resolver authoritative để lấy object POS thật.
     resolution = await container.entity_resolution_coordinator.resolve(
         nlu_result=request,
         state=context.state,
@@ -2239,6 +2269,8 @@ async def _with_proactive_suggestions(
                 return _duration_step_response(context, durations)
 
         if context.state is BookingState.SELECTING_SERVICE and context.shop is not None:
+            # Course/add-on suggestion dùng catalog POS của shop hiện tại,
+            # không để LLM tự bịa danh sách hoặc reuse course từ shop khác.
             course_type = (
                 CourseType.ADDON
                 if context.course_selection_mode is CourseSelectionMode.ADDON
@@ -2418,6 +2450,7 @@ async def _handle_discovery(
             return _shop_catalog_response(context, shops, filtered=query is not None)
 
         if nlu_result.intent in {"list_services", "list_addons"}:
+            # Catalog course phụ thuộc shop; nếu chưa có shop thì không query toàn hệ thống.
             if context.shop is None:
                 return _handled_response(
                     context,
@@ -2454,6 +2487,7 @@ async def _handle_discovery(
             )
 
         if nlu_result.intent == "list_available_times":
+            # Liệt kê slot chỉ hợp lệ khi context đã đủ combo ảnh hưởng availability.
             missing = _missing_availability_field(context)
             if missing is not None:
                 return _handled_response(context, missing)

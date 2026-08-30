@@ -13,6 +13,7 @@ _ACTION_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _FORBIDDEN_FAILURE_ACTIONS = frozenset({"create_booking"})
 
 
+# FlowCondition giữ biểu thức điều kiện dạng declarative để StateMachine đánh giá sau.
 @dataclass(frozen=True, slots=True)
 class FlowCondition:
     """Biểu diễn một điều kiện đã parse nhưng chưa được đánh giá ở tầng loader."""
@@ -24,6 +25,7 @@ class FlowCondition:
     conditions: tuple["FlowCondition", ...] = ()
 
 
+# FlowFailure mô tả đường recovery khi action thất bại, không chứa logic xử lý trực tiếp.
 @dataclass(frozen=True, slots=True)
 class FlowFailure:
     """Khai báo một nhánh recovery khi action hoặc transition thất bại."""
@@ -34,6 +36,7 @@ class FlowFailure:
     instruction_template: str | None = None
 
 
+# FlowTransition là contract intent -> state/action được đọc từ booking_flow.json.
 @dataclass(frozen=True, slots=True)
 class FlowTransition:
     """Khai báo một transition sang state khác được kích hoạt bởi intent."""
@@ -45,6 +48,7 @@ class FlowTransition:
     on_fail: tuple[FlowFailure, ...] = ()
 
 
+# Auto transition cho phép flow tự đi tiếp khi context đã đủ dữ liệu mà không cần user nhập thêm.
 @dataclass(frozen=True, slots=True)
 class FlowAutoTransition:
     """Khai báo một auto transition sẽ được state machine đánh giá sau này."""
@@ -55,6 +59,7 @@ class FlowAutoTransition:
     on_fail: tuple[FlowFailure, ...] = ()
 
 
+# On-enter chạy action/template ngay khi vào state để load data hoặc hỏi bước tiếp theo.
 @dataclass(frozen=True, slots=True)
 class FlowOnEnter:
     """Khai báo hành vi sẽ chạy ngay khi context vừa đi vào một state."""
@@ -64,6 +69,7 @@ class FlowOnEnter:
     on_fail: tuple[FlowFailure, ...] = ()
 
 
+# Cấu hình tách phone bảo vệ UX nhập số điện thoại nhiều đoạn nhưng vẫn giới hạn retry.
 @dataclass(frozen=True, slots=True)
 class PhoneSplitConfig:
     """Chứa cấu hình cho nhánh tách luồng nhập số điện thoại nếu flow có khai báo."""
@@ -73,6 +79,7 @@ class PhoneSplitConfig:
     silence_timeout_ms: int | None = None
 
 
+# FlowState gom toàn bộ behavior của một BookingState từ JSON sau khi đã validate.
 @dataclass(frozen=True, slots=True)
 class FlowState:
     """Chứa toàn bộ hành vi flow được cấu hình cho một booking state cụ thể."""
@@ -85,6 +92,7 @@ class FlowState:
     terminal: bool = False
 
 
+# FlowDefinition là snapshot immutable của booking flow đã sẵn sàng cho runtime.
 @dataclass(frozen=True, slots=True)
 class FlowDefinition:
     """Chứa định nghĩa flow booking đã được parse và kiểm tra hợp lệ."""
@@ -96,6 +104,7 @@ class FlowDefinition:
     states: dict[BookingState, FlowState]
 
 
+# ChangeRule định nghĩa cách reset field và state quay lại khi user chỉnh draft booking.
 @dataclass(frozen=True, slots=True)
 class ChangeRule:
     """Khai báo một quy tắc chỉnh sửa draft booking đang diễn ra."""
@@ -114,6 +123,7 @@ class InvalidFlowConditionError(ValueError):
     """Phát sinh khi một flow condition có cấu hình runtime không hợp lệ."""
 
 
+# FlowLoader fail fast ở startup để lỗi cấu hình flow không xuất hiện giữa cuộc hội thoại.
 class FlowLoader:
     """Đọc file flow và kiểm tra toàn bộ contract khai báo trước khi chạy runtime."""
 
@@ -229,6 +239,7 @@ def _required_string(raw: dict[str, object], field: str, location: str) -> str:
     return value
 
 
+# Parse string optional nhưng vẫn reject kiểu dữ liệu sai để file flow không silently bỏ qua lỗi.
 def _optional_string(raw: object, location: str) -> str | None:
     if raw is None:
         return None
@@ -256,6 +267,7 @@ def _states_object(raw: object) -> dict[str, object]:
 
 
 def _declared_states(raw: dict[str, object]) -> dict[BookingState, object]:
+    # Convert key string sang enum sớm để phát hiện state sai tên trước runtime.
     result: dict[BookingState, object] = {}
     for name, definition in raw.items():
         result[_state_value(name, "state")] = definition
@@ -341,6 +353,7 @@ def _parse_transition(
     return FlowTransition(intent, target, actions, conditions, failures)
 
 
+# Validate target state nằm trong danh sách declared để transition không trỏ vào state ma.
 def _target(
     raw: object,
     label: str,
@@ -380,6 +393,7 @@ def _conditions(raw: object, location: str) -> tuple[FlowCondition, ...]:
 
 
 def _condition(raw: object, location: str) -> FlowCondition:
+    # Loader chỉ parse shape điều kiện; việc đọc field context và so sánh nằm ở StateMachine.
     value = _object(raw, f"Condition for {location} must be an object.")
     op = _required_string(value, "op", f"Condition operator for {location}")
     if op not in SUPPORTED_OPERATORS:
@@ -417,6 +431,7 @@ def _failures(
                 f"Duplicate failure condition '{condition}' in state '{state}'."
             )
         if condition in {"*", "default"}:
+            # Chỉ cho một fallback để failure route không phụ thuộc thứ tự khai báo mơ hồ.
             if fallback_condition is not None:
                 raise InvalidFlowDefinitionError(
                     "Failure routes may define only one fallback condition."

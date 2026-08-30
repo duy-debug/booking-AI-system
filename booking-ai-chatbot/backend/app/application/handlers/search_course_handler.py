@@ -7,6 +7,7 @@ from app.domain.booking_models import BookingGateway, CourseSearchRequest, Cours
 from app.domain.outcomes import HandlerOutcome, HandlerResult
 
 
+# Use case đọc catalog course theo shop để dialog gợi ý duration/main course/add-on từ POS.
 class SearchCourseHandler:
     """Loads and resolves courses without inventing catalog data."""
 

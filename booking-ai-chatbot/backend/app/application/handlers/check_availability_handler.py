@@ -9,6 +9,7 @@ from app.domain.booking_models import (
 from app.domain.outcomes import HandlerOutcome, HandlerResult
 
 
+# Use case kiểm slot thật từ POS sau khi context đã đủ shop/date/people/duration/course.
 class CheckAvailabilityHandler:
     """Loads slots for the complete booking shape without choosing one."""
 
@@ -37,6 +38,8 @@ class CheckAvailabilityHandler:
             shop_id=context.shop.shop_id,
             booking_date=context.booking_date,
             num_customer=context.num_customer,
+            # Availability phải dùng tổng thời lượng main course + add-on,
+            # vì POS kiểm tra therapist/room trên toàn bộ khoảng phục vụ.
             duration_minutes=context.total_duration_minutes or context.duration_minutes,
             main_course_id=course_selection.main_course.course_id,
             addon_ids=tuple(addon.course_id for addon in course_selection.addons),

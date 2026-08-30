@@ -66,6 +66,8 @@ _EXTERNAL_SIDE_EFFECT_ACTIONS = frozenset({"create_booking"})
 T = TypeVar("T")
 
 
+# Context action chứa working BookingContext mutable để action cập nhật draft
+# trong transaction local.
 @dataclass(slots=True)
 class ActionExecutionContext:
     """Gói dữ liệu đầu vào và `BookingContext` mutable cho một action cụ thể."""
@@ -76,6 +78,7 @@ class ActionExecutionContext:
     idempotency_key: str | None = None
 
 
+# ActionResult ghi nhận output từng action để controller biết action nào đã commit thành công.
 @dataclass(frozen=True, slots=True)
 class ActionResult:
     """Kết quả đầu ra của một action đã chạy thành công."""
@@ -84,6 +87,7 @@ class ActionResult:
     output: object | None = None
 
 
+# Report gom kết quả chuỗi action theo thứ tự để recovery biết đã chạy tới đâu.
 @dataclass(frozen=True, slots=True)
 class ActionExecutionReport:
     """Tập kết quả của cả chuỗi action sau khi chạy xong không có lỗi."""
@@ -101,6 +105,7 @@ class ActionExecutionReport:
         return tuple(result.action_name for result in self.results)
 
 
+# FailureCodeProvider tách mapping exception -> code để flow JSON recover theo contract ổn định.
 class FailureCodeProvider(Protocol):
     """Ánh xạ exception gốc thành failure code ổn định cho tầng dialog."""
 
@@ -115,6 +120,7 @@ ActionCallable: TypeAlias = Callable[
 ]
 
 
+# Nhóm lỗi registry dùng cho lỗi cấu hình action và lỗi runtime khi action fail.
 class ActionRegistryError(Exception):
     """Base exception for action registry and execution failures."""
 
@@ -147,6 +153,7 @@ class ExistingBookingAlreadyCancelledError(ActionRegistryError):
     """Raised when the requested existing booking is already cancelled."""
 
 
+# Wrapper giữ action lỗi, các action đã chạy và cause gốc để controller rollback/recover đúng.
 class ActionExecutionError(ActionRegistryError):
     """Wrap an exception raised while executing a registered action."""
 
@@ -162,6 +169,7 @@ class ActionExecutionError(ActionRegistryError):
         super().__init__(f"Action '{action_name}' failed: {cause}")
 
 
+# FailureDescriptor là dạng đọc được của lỗi action sau khi đã map sang failure code.
 @dataclass(frozen=True, slots=True)
 class FailureDescriptor:
     """Describes a mapped action failure without changing dialog state."""
@@ -189,6 +197,8 @@ def _require_payload_value(
     return value
 
 
+# Kiểm tra therapist cũ còn trong danh sách availability khi user đổi giờ
+# hoặc đổi field ảnh hưởng slot.
 def _contains_personal_therapist(
     available: Sequence[TherapistPreference],
     expected: TherapistPreference,
@@ -210,6 +220,8 @@ def _contains_personal_therapist(
     return False
 
 
+# ActionRegistry là boundary chạy side effect/mutation do flow JSON khai báo,
+# có rollback local khi lỗi.
 class ActionRegistry:
     """
     Dispatcher thực tế của action name trong `booking_flow.json`.
@@ -434,6 +446,8 @@ class ActionRegistry:
         action_name: str,
         error: Exception,
     ) -> str:
+        # Failure code là contract giữa application action và dialog flow.
+        # Mapping ở đây giữ exception nội bộ không rò ra response người dùng.
         if isinstance(error, UnknownActionError):
             return "unknown_action_error"
         if isinstance(error, ExistingBookingIdentityMissingError):
@@ -524,6 +538,8 @@ class ActionRegistry:
 
     @staticmethod
     def _validate_action_sequence(action_names: tuple[str, ...]) -> None:
+        # Action tạo booking là external side effect nên phải đứng cuối chuỗi.
+        # Nếu action sau đó fail, hệ thống không thể rollback booking đã tạo trên POS.
         side_effects = tuple(name for name in action_names if name in _EXTERNAL_SIDE_EFFECT_ACTIONS)
         if len(side_effects) > 1:
             raise InvalidActionSequenceError(
@@ -539,6 +555,8 @@ class ActionRegistry:
         action_name: str,
         context: ActionExecutionContext,
     ) -> None:
+        # Chỉ những action gọi side effect ra ngoài mới bắt buộc idempotency key.
+        # Các action thu thập context có thể chạy lại an toàn trong cùng turn.
         if action_name not in _EXTERNAL_SIDE_EFFECT_ACTIONS:
             return
         key = context.idempotency_key
@@ -559,6 +577,7 @@ class ActionRegistry:
             field.name: deepcopy(getattr(context.booking_context, field.name))
             for field in fields(BookingContext)
         }
+        # Snapshot field trước/sau giúp log được mutation thực tế mà không cần log raw context.
         trace_log(
             logging.getLogger(__name__),
             logging.DEBUG,
@@ -1158,6 +1177,8 @@ class ActionRegistry:
                 "Action 'handle_phone_collection' requires 'name' to be str."
             )
         if name_value is None and context.booking_context.customer is not None:
+            # Khi đổi số điện thoại ở bước confirmation, giữ tên cũ nếu POS không trả tên mới
+            # để không bắt khách nhập lại thông tin đã cung cấp.
             name_value = context.booking_context.customer.name
         result = await self._check_customer_handler.check(
             context.booking_context,
@@ -1294,6 +1315,8 @@ def _optional_payload_text(
     context: ActionExecutionContext,
     key: str,
 ) -> str | None:
+    # Dùng cho các flow nhận mã booking/phone: rỗng nghĩa là chưa đủ identity,
+    # không phải một giá trị hợp lệ để gửi sang POS.
     value = context.payload.get(key)
     if value is None:
         return None
@@ -1308,6 +1331,8 @@ def _store_existing_booking(
     booking: Booking,
     phone: str,
 ) -> None:
+    # Khi lookup/cancel booking cũ thành công, hydrate lại context bằng dữ liệu POS
+    # để màn xác nhận/hủy hiển thị đúng booking authoritative.
     context.booking = booking
     context.booking_id = booking.booking_id
     context.reservation_code = booking.reservation_code
@@ -1339,6 +1364,8 @@ def _shop_search_criteria(context: BookingContext) -> ShopSearchCriteria:
 
 
 def _should_preserve_existing_selection(context: BookingContext) -> bool:
+    # Trong recovery/change-info, giữ các lựa chọn đã validate để chỉ hỏi lại field bị invalid.
+    # Flow booking mới vẫn đi theo thứ tự state trong booking_flow.json.
     if context.last_failure_code in {"no_slots_available", "no_working_shift"} and (
         context.main_course is not None or context.duration_minutes is not None
     ):
@@ -1354,6 +1381,7 @@ def _apply_context_updates(
     context: BookingContext,
     result: HandlerResult,
 ) -> None:
+    # Handler chỉ được update field thật của BookingContext để tránh typo âm thầm tạo state ảo.
     allowed_fields = {item.name for item in fields(BookingContext)}
     unknown = set(result.context_updates) - allowed_fields
     if unknown:

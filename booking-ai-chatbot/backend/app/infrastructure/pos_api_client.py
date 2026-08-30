@@ -56,6 +56,7 @@ from app.infrastructure.context_store import (
 )
 
 
+# Slot POS được parse kèm reason để dialog phân biệt hết slot và slot không hợp lệ.
 @dataclass(frozen=True, slots=True)
 class _ParsedSlot:
     start_time: time
@@ -65,6 +66,8 @@ class _ParsedSlot:
 
 
 def _availability_status(root: Mapping[str, object], slots: list["_ParsedSlot"]) -> str:
+    # POS có thể trả semantic rỗng khác nhau; chatbot cần phân biệt nghỉ phục vụ
+    # với hết slot để chọn lời recovery đúng.
     raw = root.get("availability_status")
     if raw is None:
         return "available" if any(slot.available for slot in slots) else "no_slots_available"
@@ -73,12 +76,14 @@ def _availability_status(root: Mapping[str, object], slots: list["_ParsedSlot"])
     return cast(str, raw)
 
 
+# Reservation con giữ course snapshot để render booking/cancel summary không phải gọi POS lại.
 @dataclass(frozen=True, slots=True)
 class _ParsedReservation:
     reference: ChildReservationReference
     courses: tuple[Course, ...]
 
 
+# PosApiClient là adapter duy nhất chuyển HTTP POS thành contract domain/application.
 class PosApiClient:
     """
     Cầu nối từ chatbot sang POS backend.
@@ -404,6 +409,7 @@ class PosApiClient:
         outbound_headers.update(headers or {})
         started_at = perf_counter()
         record_turn_metrics(pos_calls=1)
+        # Chỉ log params/body keys để debug contract POS mà không ghi dữ liệu khách hàng đầy đủ.
         trace_log(
             logging.getLogger(__name__),
             logging.DEBUG,
@@ -692,6 +698,8 @@ def _parse_create_booking_result(
     reservations = tuple(
         _parse_reservation(item, index) for index, item in enumerate(_list(data, "reservations"))
     )
+    # POS tạo một booking cha kèm nhiều reservation con; tất cả reservation
+    # phải có cùng course snapshot để chatbot hiển thị một form xác nhận nhất quán.
     if len(reservations) != num_customer:
         raise POSResponseMappingError("POS child reservation count differs from number_of_people.")
     first_courses = reservations[0].courses
@@ -740,6 +748,8 @@ def _parse_public_booking(
     shop_id = _uuid(data, "shop_id")
     shop_name = _string(data, "shop_name")
     customer_phone = (
+        # Một số endpoint public không trả phone; fallback về phone đã dùng để lookup
+        # để domain Booking vẫn giữ được chủ booking đã xác thực.
         _optional_string(data, "customer_phone")
         if "customer_phone" in data
         else phone
@@ -783,7 +793,10 @@ def _parse_public_booking(
     )
 
 
+# Parse therapist preference từ booking public response để chatbot hiển thị đúng lịch đã đặt.
 def _public_therapist_preference(data: Mapping[str, object]) -> TherapistPreference | None:
+    # Lookup/cancel booking chỉ dùng preference để hiển thị lại lịch cũ,
+    # không dùng nó để quyết định availability mới.
     request_type = _string(data, "therapist_request_type")
     if request_type == "none":
         return TherapistPreference(TherapistPreferenceType.NONE)
@@ -986,6 +999,7 @@ def _parse_shop_therapist(
     )
 
 
+# Parse course/service POS và validate shop_id để không lẫn catalog giữa các cửa hàng.
 def _parse_service(
     value: object,
     index: int,
@@ -1091,13 +1105,16 @@ def _optional_string(value: Mapping[str, object], field: str) -> str | None:
     return result
 
 
+# Parse integer từ POS, reject bool vì bool là subclass của int trong Python.
 def _integer(value: Mapping[str, object], field: str) -> int:
+    # bool là subclass của int trong Python, nên phải reject để không nhận nhầm JSON true/false.
     result = _required(value, field)
     if isinstance(result, bool) or not isinstance(result, int):
         raise POSResponseMappingError(f"POS field {field!r} must be an integer.")
     return result
 
 
+# Parse boolean bắt buộc để các flag POS không bị nhận nhầm string/int.
 def _boolean(value: Mapping[str, object], field: str) -> bool:
     result = _required(value, field)
     if not isinstance(result, bool):
@@ -1105,6 +1122,7 @@ def _boolean(value: Mapping[str, object], field: str) -> bool:
     return result
 
 
+# Parse UUID bắt buộc từ POS để domain object không giữ raw string sai format.
 def _uuid(value: Mapping[str, object], field: str) -> UUID:
     raw = _string(value, field)
     try:
@@ -1113,6 +1131,7 @@ def _uuid(value: Mapping[str, object], field: str) -> UUID:
         raise POSResponseMappingError(f"POS field {field!r} must be a UUID.") from exc
 
 
+# Parse UUID optional cho các field POS có thể null như requested therapist.
 def _optional_uuid(value: Mapping[str, object], field: str) -> UUID | None:
     raw = _required(value, field)
     if raw is None:
@@ -1125,6 +1144,7 @@ def _optional_uuid(value: Mapping[str, object], field: str) -> UUID | None:
         raise POSResponseMappingError(f"POS field {field!r} must be a UUID or null.") from exc
 
 
+# Parse ISO date từ POS để mọi handler dùng kiểu date thật thay vì string.
 def _date(value: Mapping[str, object], field: str) -> date:
     raw = _string(value, field)
     try:
@@ -1133,6 +1153,7 @@ def _date(value: Mapping[str, object], field: str) -> date:
         raise POSResponseMappingError(f"POS field {field!r} must be an ISO date.") from exc
 
 
+# Parse ISO time từ POS để availability và reservation summary dùng cùng kiểu dữ liệu.
 def _time(value: Mapping[str, object], field: str) -> time:
     raw = _string(value, field)
     try:
@@ -1141,7 +1162,9 @@ def _time(value: Mapping[str, object], field: str) -> time:
         raise POSResponseMappingError(f"POS field {field!r} must be an ISO time.") from exc
 
 
+# Parse Decimal exact cho giá tiền, tránh sai số float khi render hoặc kiểm contract.
 def _decimal(value: Mapping[str, object], field: str) -> Decimal:
+    # Dùng Decimal từ string/int để giữ giá tiền exact, không đi qua float.
     raw = _required(value, field)
     if isinstance(raw, bool) or not isinstance(raw, (str, int)):
         raise POSResponseMappingError(
@@ -1153,6 +1176,7 @@ def _decimal(value: Mapping[str, object], field: str) -> Decimal:
         raise POSResponseMappingError(f"POS field {field!r} must be decimal.") from exc
 
 
+# Map course type POS về enum domain để main/add-on giữ đúng invariant.
 def _course_type(value: Mapping[str, object], field: str) -> CourseType:
     raw = _string(value, field)
     try:

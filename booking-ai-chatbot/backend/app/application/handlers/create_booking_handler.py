@@ -12,6 +12,7 @@ from app.domain.booking_models import (
 from app.domain.outcomes import HandlerOutcome, HandlerResult
 
 
+# Use case tạo booking thật: final availability check trước rồi mới gọi POS create booking.
 class CreateBookingHandler:
     """Performs final availability and one idempotent POS create call."""
 
@@ -47,6 +48,8 @@ class CreateBookingHandler:
             booking_date=context.booking_date,
             start_time=context.start_time,
             num_customer=context.num_customer,
+            # Final check và create phải dùng cùng tổng duration để tránh confirm một slot
+            # khác với khoảng thời gian thực tế POS sẽ giữ chỗ.
             duration_minutes=total_duration,
             main_course_id=context.main_course.course_id,
             addon_ids=addon_ids,
@@ -64,6 +67,7 @@ class CreateBookingHandler:
             booking_date=context.booking_date,
             start_time=context.start_time,
             num_customer=context.num_customer,
+            # Payload create gửi tổng duration đã gồm add-on; course IDs vẫn tách role main/add-on.
             duration_minutes=total_duration,
             main_course_id=context.main_course.course_id,
             addon_ids=addon_ids,

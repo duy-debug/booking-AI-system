@@ -21,6 +21,7 @@ from app.domain.booking_models import (
 from app.domain.outcomes import HandlerOutcome, HandlerResult
 
 
+# Use case search shop có thể lọc theo capability và exact availability nếu user nói đủ combo.
 class SearchShopHandler:
     """Coordinates the shop search use case."""
 
@@ -246,18 +247,23 @@ class SearchShopHandler:
         )
         return criteria.requested_start_time in availability.slots
 
+    # Tải course theo từng shop để không reuse course_id sai cửa hàng khi exact match.
     async def _load_courses(
         self,
         shop_id: UUID,
         course_type: CourseType,
     ) -> tuple[Course, ...]:
+        # Course luôn được tải theo shop vì cùng tên liệu trình ở hai cửa hàng
+        # có thể là hai bản ghi POS khác nhau.
         return tuple(
             await self._booking_gateway.search_courses(
                 CourseSearchRequest(shop_id=shop_id, course_type=course_type, is_active=True)
             )
         )
 
+    # Tải therapist catalog theo shop khi cần kiểm tên/giới tính trước availability.
     async def _load_therapists(self, shop_id: UUID) -> tuple[ShopTherapist, ...]:
+        # Therapist catalog là capability optional; nếu POS chưa hỗ trợ thì không tự suy đoán.
         if self._therapist_catalog_gateway is None:
             return ()
         return tuple(
@@ -268,6 +274,7 @@ class SearchShopHandler:
         )
 
 
+# Capability là snapshot dữ liệu shop đã load trong một lần filter để tránh gọi POS lặp lại.
 @dataclass(frozen=True, slots=True)
 class _ShopCapability:
     matches: bool
@@ -300,6 +307,7 @@ def _unique_named_shops(shops: list[Shop]) -> list[Shop]:
     return unique
 
 
+# Chuẩn hóa optional query và biến chuỗi rỗng thành None để các filter bỏ qua đúng nghĩa.
 def _normalized_optional(value: str | None) -> str | None:
     if value is None:
         return None
@@ -307,6 +315,7 @@ def _normalized_optional(value: str | None) -> str | None:
     return normalized or None
 
 
+# Match course ưu tiên exact name rồi mới contains để giảm chọn nhầm liệu trình gần giống.
 def _matching_courses(courses: tuple[Course, ...], query: str) -> tuple[Course, ...]:
     exact = tuple(course for course in courses if _normalize_search_text(course.name) == query)
     if exact:
@@ -314,6 +323,7 @@ def _matching_courses(courses: tuple[Course, ...], query: str) -> tuple[Course, 
     return tuple(course for course in courses if query in _normalize_search_text(course.name))
 
 
+# Match therapist theo tên exact trước; fallback contains chỉ dùng để gợi ý khi chưa duy nhất.
 def _matching_therapists_by_name(
     therapists: tuple[ShopTherapist, ...],
     query: str,
@@ -324,6 +334,7 @@ def _matching_therapists_by_name(
     return tuple(item for item in therapists if query in _normalize_search_text(item.name))
 
 
+# Lọc therapist theo giới tính POS trả về, không tự suy đoán từ tên.
 def _matching_therapists_by_gender(
     therapists: tuple[ShopTherapist, ...],
     gender: str,
@@ -331,6 +342,7 @@ def _matching_therapists_by_gender(
     return tuple(item for item in therapists if item.gender.casefold().strip() == gender)
 
 
+# Exact availability chỉ an toàn khi course match duy nhất theo tên và duration nếu có.
 def _select_course_for_exact_availability(
     courses: tuple[Course, ...],
     query: str,
@@ -345,10 +357,13 @@ def _select_course_for_exact_availability(
     return None
 
 
+# Chuyển therapist criteria thành preference POS hiểu được cho availability request.
 def _availability_therapist_preference(
     therapists: tuple[ShopTherapist, ...],
     criteria: ShopSearchCriteria,
 ) -> TherapistPreference | None:
+    # Gender có thể gửi trực tiếp sang availability; tên therapist cần match duy nhất
+    # để tránh kiểm slot bằng một người không xác định.
     gender = _normalized_optional(criteria.requested_therapist_gender)
     if gender == "male":
         return TherapistPreference(TherapistPreferenceType.MALE)
@@ -368,7 +383,10 @@ def _availability_therapist_preference(
     )
 
 
+# Kiểm tra đã đủ combo ảnh hưởng slot trước khi gọi POS availability tốn chi phí.
 def _has_exact_availability_shape(criteria: ShopSearchCriteria) -> bool:
+    # Chỉ gọi availability exact khi đã đủ combo ảnh hưởng slot.
+    # Nếu thiếu một field, search shop chỉ nên kiểm capability để không loại nhầm cửa hàng.
     return (
         criteria.booking_date is not None
         and criteria.requested_start_time is not None
@@ -378,7 +396,10 @@ def _has_exact_availability_shape(criteria: ShopSearchCriteria) -> bool:
     )
 
 
+# Chọn failure code theo constraint cụ thể để dialog trả recovery đúng trọng tâm.
 def _shop_match_failure_code(criteria: ShopSearchCriteria) -> str:
+    # Failure code phản ánh constraint đầu tiên làm search shop thất bại,
+    # giúp dialog chọn đúng câu recovery thay vì trả lỗi chung chung.
     if criteria.requested_therapist_name is not None:
         return "therapist_not_supported_in_any_shop"
     if criteria.requested_therapist_gender is not None:

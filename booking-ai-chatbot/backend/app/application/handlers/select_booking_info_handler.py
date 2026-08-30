@@ -6,6 +6,7 @@ from app.domain.booking_context import BookingContext
 from app.domain.outcomes import HandlerOutcome, HandlerResult
 
 
+# Use case mutate các field booking cơ bản trong context nhưng không tự điều phối state.
 class SelectBookingInfoHandler:
     """Owns non-I/O booking information updates."""
 

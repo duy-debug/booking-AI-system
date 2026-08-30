@@ -175,6 +175,8 @@ def _stream_chat_events(
         callback = cast(Callable[..., Awaitable[DialogResponse]], _process_chat_message)
         return await callback(**kwargs)
 
+    # Ưu tiên stream event thật từ DialogController;
+    # nếu controller cũ không hỗ trợ thì fallback JSON.
     async def process_stream_message(
         *,
         request: ChatRequest,

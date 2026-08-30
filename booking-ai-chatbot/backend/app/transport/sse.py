@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 _EVENT_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
 
 
+# Event type public mà frontend parser dựa vào để phân biệt delta/message/error.
 class SSEEventType(StrEnum):
     """
     Các event tầng nghiệp vụ mà endpoint SSE của chatbot phát ra.
@@ -48,6 +49,7 @@ class SSEEventType(StrEnum):
     ERROR = "error"
 
 
+# Lỗi contract khi backend chuẩn bị event không đúng tên hoặc payload không phải mapping.
 class InvalidSSEEventError(ValueError):
     """
     Phát sinh khi tên event hoặc payload SSE không hợp lệ.
@@ -55,6 +57,7 @@ class InvalidSSEEventError(ValueError):
     pass
 
 
+# Lỗi serialize giúp phân biệt payload sai kiểu với lỗi business turn.
 class SSESerializationError(TypeError):
     """
     Phát sinh khi payload SSE không thể serialize thành JSON.
@@ -163,6 +166,8 @@ async def _stream_bound_chat_events(
                 entrypoint=entrypoint,
             ):
                 if turn_event.delta is not None:
+                    # Delta chỉ phục vụ UI streaming.
+                    # Message cuối vẫn là source of truth cho state/status.
                     delta_event = encode_sse_event(
                         event=SSEEventType.DELTA,
                         data={

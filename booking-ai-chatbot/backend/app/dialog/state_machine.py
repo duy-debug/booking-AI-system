@@ -24,6 +24,7 @@ from app.domain.booking_state import BookingState
 from app.infrastructure.context_store import trace_log
 
 
+# FailureSource cho phép transition và auto-transition dùng chung logic chọn on_fail.
 class FailureSource(Protocol):
     """
     Lộ ra các nhánh `on_fail` để state machine có thể chọn nhánh recovery.
@@ -37,6 +38,8 @@ class FailureSource(Protocol):
         ...
 
 
+# StateMachine chỉ quyết định transition hợp lệ,
+# không gọi handler hay mutate business ngoài context.
 class StateMachine:
     """
     Tính toán transition hợp lệ từ flow JSON mà không tự chạy business action.

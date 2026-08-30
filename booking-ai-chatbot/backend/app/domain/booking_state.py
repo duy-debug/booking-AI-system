@@ -3,6 +3,7 @@
 from enum import StrEnum
 
 
+# BookingState là contract chung giữa flow JSON, controller, frontend validator và context store.
 class BookingState(StrEnum):
     """Biểu diễn các trạng thái chính của draft booking trong chatbot."""
 

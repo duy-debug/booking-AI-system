@@ -15,6 +15,7 @@ from app.infrastructure.gemini_client import LLMGateway, LLMGatewayError, LLMMes
 logger = logging.getLogger(__name__)
 
 
+# Event stream nội bộ cho phép vừa gửi delta token vừa gửi response cuối có state/status.
 @dataclass(frozen=True, slots=True)
 class ResponseGenerationEvent:
     """
@@ -28,6 +29,7 @@ class ResponseGenerationEvent:
     response: DialogResponse | None = None
 
 
+# ResponseGenerator là tầng NLG: chỉ diễn đạt lại text, không được đổi dữ liệu nghiệp vụ.
 class ResponseGenerator:
     """
     Lớp NLG của chatbot.
@@ -122,6 +124,7 @@ class ResponseGenerator:
         yield ResponseGenerationEvent(response=_replace_response_text(response, text))
 
 
+# Dựng message cho LLM với system guardrail không cho tự sáng tạo dữ liệu booking.
 def _nlg_messages(prompt: str) -> list[LLMMessage]:
     return [
         LLMMessage(
@@ -135,6 +138,7 @@ def _nlg_messages(prompt: str) -> list[LLMMessage]:
     ]
 
 
+# Thay text nhưng giữ nguyên state/status/metadata đã được backend validate.
 def _replace_response_text(response: DialogResponse, text: str) -> DialogResponse:
     return DialogResponse(
         text=text,
@@ -150,6 +154,8 @@ def _safe_generated_text(
     response: DialogResponse,
     generated_text: str,
 ) -> str:
+    # Với form/list nghiệp vụ, LLM được phép thêm lời dẫn nhưng không được làm mất dòng dữ liệu.
+    # Nếu vi phạm, backend giữ text deterministic để bảo vệ contract với người dùng.
     if not _must_preserve_structured_text(response):
         return generated_text
     if _contains_original_structured_lines(
@@ -161,9 +167,11 @@ def _safe_generated_text(
 
 
 def _must_preserve_structured_text(response: DialogResponse) -> bool:
+    # Metadata này được set ở instruction layer cho các response có dữ liệu đã validate.
     return response.metadata.get("preserve_structured_text") is True
 
 
+# Kiểm tra từng dòng structured gốc để LLM không làm mất field xác nhận/hủy/booking complete.
 def _contains_original_structured_lines(
     *,
     original_text: str,
@@ -188,6 +196,7 @@ def _contains_original_structured_lines(
     return all(line in generated_lines for line in required_lines)
 
 
+# Log NLG start mà không dump full prompt trừ khi bật debug an toàn.
 def _log_nlg_started(
     *,
     prompt: str,
@@ -214,6 +223,7 @@ def _log_nlg_started(
     )
 
 
+# Khi NLG lỗi, metrics vẫn được ghi để thấy provider chậm/lỗi nhưng response có thể fallback.
 def _log_nlg_failed(
     *,
     error: Exception,

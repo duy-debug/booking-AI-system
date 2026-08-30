@@ -7,10 +7,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
+# Xác định `.env` mặc định theo root backend để app chạy giống nhau ở local và test.
 def _default_env_path() -> Path:
     return Path(__file__).resolve().parents[2] / ".env"
 
 
+# Nạp biến môi trường một lần ở bootstrap, không ghi đè cấu hình đã được hệ thống inject.
 def load_runtime_environment(env_file: Path | None = None) -> Path:
     """
     Nạp file `.env` cục bộ của backend mà không ghi đè biến môi trường hệ thống.
@@ -20,6 +22,7 @@ def load_runtime_environment(env_file: Path | None = None) -> Path:
     return resolved_path
 
 
+# Flow JSON mặc định nằm trong dialog layer để composition root không hard-code ở nhiều nơi.
 def _default_booking_flow_path() -> Path:
     return Path(__file__).resolve().parents[1] / "dialog" / "booking_flow.json"
 
@@ -28,6 +31,7 @@ def _default_change_handlers_path() -> Path:
     return _default_booking_flow_path()
 
 
+# Settings là contract cấu hình duy nhất để wire toàn bộ dependency của chatbot.
 @dataclass(frozen=True, slots=True)
 class Settings:
     """
@@ -71,6 +75,7 @@ from uuid import uuid4
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
+# TraceContext đi theo async context để log/SSE/API cùng chia sẻ một trace id.
 @dataclass(frozen=True, slots=True)
 class TraceContext:
     trace_id: str = "-"
@@ -79,6 +84,7 @@ class TraceContext:
     turn_id: int | None = None
 
 
+# TurnMetrics gom số lần gọi LLM/POS/Qdrant và timing để log cuối turn đọc được toàn cảnh.
 @dataclass(slots=True)
 class TurnMetrics:
     intent: str | None = None
@@ -94,6 +100,7 @@ class TurnMetrics:
     handler_duration_ms: int = 0
     nlg_duration_ms: int = 0
 
+    # Tạo bản chụp immutable về mặt ý nghĩa để log cuối turn không bị mutate tiếp.
     def snapshot(self) -> "TurnMetrics":
         return TurnMetrics(
             intent=self.intent,
@@ -181,6 +188,7 @@ def current_turn_metrics() -> TurnMetrics:
     return _turn_metrics.get() or TurnMetrics()
 
 
+# Cộng dồn metrics theo từng bước xử lý để cuối turn biết chi phí và điểm nghẽn nằm ở đâu.
 def record_turn_metrics(
     *,
     intent: str | None = None,
@@ -222,6 +230,7 @@ def record_turn_metrics(
         metrics.nlg_duration_ms += nlg_duration_ms
 
 
+# Lưu snapshot metrics sau khi response sẵn sàng để transport có thể log sau khi stream kết thúc.
 def store_completed_turn_metrics() -> None:
     metrics = _turn_metrics.get()
     _completed_turn_metrics.set(metrics.snapshot() if metrics is not None else None)
@@ -233,6 +242,7 @@ def consume_completed_turn_metrics() -> TurnMetrics | None:
     return metrics
 
 
+# Chuẩn hóa metrics thành payload log ổn định cho cả JSON log và console log.
 def turn_metrics_payload(
     metrics: TurnMetrics,
     *,
@@ -260,6 +270,7 @@ def turn_metrics_payload(
     }
 
 
+# Middleware bind trace cho toàn bộ request, kể cả response streaming cần header trước body.
 class TraceMiddleware:
     """
     Gắn trace headers cho toàn bộ vòng đời response ASGI, kể cả streaming.
@@ -270,6 +281,7 @@ class TraceMiddleware:
         self.service = service
         self.pos_events = pos_events
 
+    # Bao request HTTP bằng trace context và gắn header trace vào response start.
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
@@ -338,6 +350,7 @@ class TraceMiddleware:
             reset_trace_context(token)
 
 
+# Log lifecycle middleware bằng cùng trace_log để format không lệch với business log.
 def _event(event: str, service: str, scope: dict[str, Any], **fields: object) -> None:
 
     exc_info = bool(fields.pop("exc_info", False))
@@ -358,6 +371,7 @@ def _event(event: str, service: str, scope: dict[str, Any], **fields: object) ->
     )
 
 
+# Chỉ cho phép trace/header id an toàn để tránh log injection từ client.
 def _validated_or_default(value: str | None, default: str) -> str:
     if value is None:
         return default
@@ -399,6 +413,7 @@ _turn_marker: ContextVar[int | None] = ContextVar("turn_marker", default=None)
 _service_name = "booking-chatbot"
 
 
+# Formatter console giữ log người đọc dễ theo dõi trong terminal local.
 class SafeConsoleFormatter(std_logging.Formatter):
     """
     Render console log trực tiếp để terminal hiển thị đúng dữ liệu runtime hiện tại.
@@ -460,6 +475,7 @@ def reset_correlation_id(token: Token[str]) -> None:
     _correlation_marker.reset(token)
 
 
+# Trace log trung tâm hóa masking, caller location và structured field cho toàn ứng dụng.
 def trace_log(
     logger: std_logging.Logger,
     level: int,
@@ -525,6 +541,7 @@ def elapsed_ms(started_at: float) -> int:
     return max(0, round((perf_counter() - started_at) * 1000))
 
 
+# Formatter JSON giữ đủ structured field để ingest log mà không parse text console.
 class JsonFormatter(std_logging.Formatter):
     """
     Format một LogRecord thành JSON giữ nguyên dữ liệu runtime và UTF-8.
@@ -557,6 +574,7 @@ class JsonFormatter(std_logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
+# Cấu hình logging process-wide tại bootstrap để mọi logger con propagate cùng chuẩn.
 def configure_logging(
     *,
     level: str = "INFO",
@@ -614,6 +632,7 @@ def configure_logging(
         logger.propagate = True
 
 
+# Thay handler theo kiểu đóng handler cũ để tránh duplicate log và leak file descriptor.
 def _replace_handlers(
     logger: std_logging.Logger,
     handlers: list[std_logging.Handler],
@@ -657,6 +676,7 @@ def _project_relative_path(pathname: str) -> str:
         return path.name
 
 
+# Chuẩn hóa giá trị log đệ quy để console và JSON cùng hiển thị dữ liệu thật.
 def _log_value(value: object) -> object:
     # Chuẩn hóa giá trị log đệ quy để console và JSON cùng hiển thị dữ liệu thật.
     if value is None or isinstance(value, bool | int | float | str):
@@ -683,6 +703,7 @@ def _log_value(value: object) -> object:
 from app.domain.booking_context import BookingContext
 
 
+# Store in-memory giữ snapshot conversation; phù hợp local/dev và test không cần database session.
 class ContextStore:
     """
     Lưu `BookingContext` ngay trong process hiện tại.

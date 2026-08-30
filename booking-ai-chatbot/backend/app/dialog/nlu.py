@@ -146,6 +146,7 @@ DISCOVERY_ALLOWED_STATES: Mapping[str, frozenset[BookingState]] = MappingProxyTy
 
 _RULE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _WHITESPACE_PATTERN = re.compile(r"\s+")
+# Nguồn NLU giúp log/debug biết result đến từ LLM hay được dựng lại từ context.
 class NLUSource(StrEnum):
     """Identifies the structured source of a parsed NLU result."""
 
@@ -153,6 +154,7 @@ class NLUSource(StrEnum):
     CONTEXT = "context"
 
 
+# Resolution status quyết định result có dispatch ngay hay phải qua entity resolver.
 class NLUResolutionStatus(StrEnum):
     """Describes whether an NLU result is safe to dispatch."""
 
@@ -161,6 +163,7 @@ class NLUResolutionStatus(StrEnum):
     ENTITY_RESOLUTION_REQUIRED = "entity_resolution_required"
 
 
+# Entity kind là contract giữa LLM NLU và resolver authoritative theo dữ liệu POS.
 class NLUEntityKind(StrEnum):
     """Đánh dấu loại entity cần được resolver authoritative xử lý tiếp."""
 
@@ -173,6 +176,7 @@ class NLUResultNotDispatchableError(Exception):
     """Phát sinh khi kết quả NLU chưa đủ an toàn để dispatch vào dialog flow."""
 
 
+# Policy intent theo state được dựng từ flow JSON để LLM không phá thứ tự hội thoại.
 @dataclass(frozen=True, slots=True)
 class StateIntentPolicy:
     """Giữ policy bất biến về intent hợp lệ theo từng state của flow."""
@@ -181,7 +185,7 @@ class StateIntentPolicy:
     wildcard_states: frozenset[BookingState]
 
     # Đóng băng policy để runtime không thể vô tình sửa allowed intents giữa các lượt chat.
-    # Validate candidate hiển thị để không lộ metadata nhạy cảm hoặc key không an toàn.
+    # Validate mapping state/intent ngay tại bootstrap thay vì để lỗi xuất hiện giữa hội thoại.
     def __post_init__(self) -> None:
         copied: dict[BookingState, frozenset[str]] = {}
         for state, intents in self.allowed_intents.items():
@@ -240,6 +244,7 @@ def build_state_intent_policy(
     return StateIntentPolicy(allowed, frozenset(wildcard_states))
 
 
+# NLUResult là output canonical sau khi đã normalize LLM payload theo contract backend.
 @dataclass(frozen=True, slots=True)
 class NLUResult:
     """Kết quả NLU canonical dùng cho các bước điều phối phía sau."""
@@ -509,6 +514,7 @@ def _freeze_value(value: object) -> object:
     return value
 
 
+# Schema entity LLM được giới hạn primitive để tránh provider trả object ngoài contract.
 class LLMNLUEntities(BaseModel):
     """Contains only primitive entity values accepted from an LLM."""
 
@@ -533,6 +539,7 @@ class LLMNLUEntities(BaseModel):
     customer_name: StrictStr | None = None
 
 
+# Schema một candidate NLU trực tiếp khi provider không dùng tool-call nhiều candidate.
 class LLMNLUOutput(BaseModel):
     """Defines the complete JSON object accepted from the LLM provider."""
 
@@ -545,6 +552,7 @@ class LLMNLUOutput(BaseModel):
     entity_query: StrictStr | None = None
 
 
+# Envelope nhiều candidate cho phép backend tự chọn intent phù hợp state thay vì tin candidate đầu.
 class LLMNLUCandidatesOutput(BaseModel):
     """Function-call envelope containing alternative intent hypotheses."""
 
@@ -591,6 +599,7 @@ _LLM_NO_PAYLOAD_INTENTS = frozenset(
 )
 
 
+# LLMNLU là boundary duy nhất đọc raw text và chuyển thành intent/entity đã kiểm soát.
 class LLMNLU:
     """
     Phân tích câu người dùng bằng LLM NLU và trả về structured semantics.
@@ -1598,6 +1607,7 @@ _SELECTION_KEY_PATTERN = re.compile(r"^(?:shop|course|therapist):\d+$")
 _SAFE_METADATA_KEYS = frozenset({"address", "duration_minutes", "price", "course_type"})
 
 
+# Status resolver phân biệt rõ resolved/ambiguous/not_found để dialog chọn recovery đúng.
 class EntityResolutionStatus(StrEnum):
     """Describes the outcome of one authoritative entity lookup."""
 
@@ -1608,6 +1618,7 @@ class EntityResolutionStatus(StrEnum):
     FAILED = "failed"
 
 
+# Nhóm lỗi resolver biểu diễn misuse contract, không phải lỗi user nhập sai.
 class EntityResolutionError(Exception):
     """Base exception for entity-resolution contract misuse."""
 
@@ -1624,6 +1635,7 @@ class EntityResolutionNotDispatchableError(EntityResolutionError):
     """Raised when a resolution result cannot become a dialog turn."""
 
 
+# Candidate resolver dùng selection_key nội bộ để user chọn lại mà không expose raw model.
 @dataclass(frozen=True, slots=True)
 class EntityCandidate:
     """Contains UI-safe candidate data and an opaque local selection key."""
@@ -1645,11 +1657,13 @@ class EntityCandidate:
         object.__setattr__(self, "metadata", _safe_candidate_metadata(self.metadata))
 
 
+# Dispatch payload được cache theo candidate để ambiguity selection không phải gọi POS lại.
 @dataclass(frozen=True, slots=True)
 class _CandidateDispatch:
     dispatch_intent: str
     dispatch_payload: Mapping[str, object]
 
+    # Đóng băng payload dispatch để candidate cache không bị mutate giữa các turn.
     def __post_init__(self) -> None:
         object.__setattr__(
             self,
@@ -1658,6 +1672,7 @@ class _CandidateDispatch:
         )
 
 
+# Kết quả resolver là contract an toàn để controller quyết định dispatch hay hỏi lại user.
 @dataclass(frozen=True, slots=True)
 class EntityResolutionResult:
     """Contains a safe entity-resolution outcome without raw adapter data."""
@@ -1675,6 +1690,8 @@ class EntityResolutionResult:
         compare=False,
     )
 
+    # Validate shape theo status để không có result mơ hồ
+    # vừa chứa failure vừa chứa dispatch payload.
     def __post_init__(self) -> None:
         if not isinstance(self.status, EntityResolutionStatus):
             raise TypeError("Entity resolution status is invalid.")
@@ -1726,6 +1743,7 @@ class EntityResolutionResult:
             raise ValueError("Unsuccessful entity result requires a safe failure code.")
 
 
+# Coordinator resolve entity bằng handler nghiệp vụ, không tự match string ngoài nguồn POS.
 class EntityResolutionCoordinator:
     """
     Resolve entity query từ NLU sang domain payload hoặc candidate ambiguity an toàn.

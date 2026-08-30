@@ -14,10 +14,12 @@ if TYPE_CHECKING:
     from app.domain.booking_context import BookingContext
 
 
+# Gom lỗi domain để tầng dialog/application phân biệt lỗi nghiệp vụ với lỗi hạ tầng.
 class DomainError(Exception):
     """Base exception for all domain-level errors."""
 
 
+# Đại diện cho dữ liệu booking vi phạm invariant trước khi gọi POS.
 class InvalidBookingDataError(DomainError):
     """Raised when booking data violates domain rules."""
 
@@ -66,6 +68,7 @@ class BookingNotFoundError(DomainError):
     """Raised when a requested booking cannot be found."""
 
 
+# Dùng khi booking hợp lệ về dữ liệu nhưng trùng lịch hoặc không còn đáp ứng availability.
 class BookingConflictError(DomainError):
     """Raised when a booking conflicts with an existing reservation."""
 
@@ -74,6 +77,7 @@ MIN_CUSTOMERS_PER_BOOKING = 1
 MAX_CUSTOMERS_PER_BOOKING = 3
 
 
+# Phân biệt course chính và add-on vì hai loại này có rule chọn và tính duration khác nhau.
 class CourseType(StrEnum):
     """Defines whether a main_course is a main course or an add-on."""
 
@@ -81,6 +85,7 @@ class CourseType(StrEnum):
     ADDON = "addon"
 
 
+# Chuẩn hóa cách khách chọn kỹ thuật viên để tránh truyền text tự do xuống POS.
 class TherapistPreferenceType(StrEnum):
     """Defines how a customer prefers a therapist to be selected."""
 
@@ -90,6 +95,7 @@ class TherapistPreferenceType(StrEnum):
     PERSONAL = "personal"
 
 
+# Lưu preference kỹ thuật viên ở dạng immutable để các bước validate không mutate ngầm.
 @dataclass(frozen=True, slots=True)
 class TherapistPreference:
     """Represents an optional therapist preference for a booking."""
@@ -98,6 +104,7 @@ class TherapistPreference:
     therapist_id: str | None = None
     therapist_name: str | None = None
 
+    # Preference cá nhân bắt buộc có ID hoặc tên để resolver/availability có cơ sở kiểm tra.
     def __post_init__(self) -> None:
         if (
             self.preference_type is TherapistPreferenceType.PERSONAL
@@ -107,6 +114,7 @@ class TherapistPreference:
             raise InvalidBookingDataError("A personal therapist preference requires an ID or name.")
 
 
+# Dùng cho lựa chọn phụ trợ trong booking mà không nhất thiết là một course POS.
 @dataclass(frozen=True, slots=True)
 class BookingOption:
     """Represents an optional booking selection."""
@@ -115,6 +123,7 @@ class BookingOption:
     name: str
 
 
+# Shop là nguồn ngữ cảnh chính để mọi bước sau truy vấn đúng catalog và availability.
 @dataclass(frozen=True, slots=True)
 class Shop:
     """Represents a shop available for booking."""
@@ -125,6 +134,7 @@ class Shop:
     phone: str | None = None
 
 
+# Therapist thuộc shop dùng cho matching deterministic trước khi hỏi availability chi tiết.
 @dataclass(frozen=True, slots=True)
 class ShopTherapist:
     """Represents one therapist owned by a shop for deterministic matching."""
@@ -135,6 +145,7 @@ class ShopTherapist:
     gender: str
 
 
+# Course lấy từ POS; domain chỉ kiểm invariant tối thiểu, còn sự phù hợp do handler lo.
 @dataclass(frozen=True, slots=True)
 class Course:
     """Represents a POS course offered by a shop."""
@@ -145,11 +156,13 @@ class Course:
     price: Decimal
     course_type: CourseType = CourseType.MAIN
 
+    # Duration course chỉ cần dương; tổng duration có add-on có thể không chia hết block 15 phút.
     def __post_init__(self) -> None:
         if self.duration_minutes <= 0:
             raise InvalidDurationError("Course duration must be positive.")
 
 
+# CourseSelection bảo đảm một booking luôn có đúng một main course và add-on không bị trùng.
 @dataclass(frozen=True, slots=True)
 class CourseSelection:
     """Represents exactly one main course and its optional add-ons."""
@@ -157,6 +170,7 @@ class CourseSelection:
     main_course: Course
     addons: tuple[Course, ...] = ()
 
+    # Chặn sai loại course ngay tại domain để mọi flow booking dùng chung một rule.
     def __post_init__(self) -> None:
         if self.main_course.course_type is not CourseType.MAIN:
             raise InvalidCourseSelectionError("The main course must have type MAIN.")
@@ -168,6 +182,7 @@ class CourseSelection:
             raise InvalidCourseSelectionError("Course selection must contain unique course IDs.")
 
 
+# Customer trong chatbot tối thiểu cần phone, name có thể bổ sung sau khi POS xác minh.
 @dataclass(frozen=True, slots=True)
 class Customer:
     """Represents the customer who makes a booking."""
@@ -176,6 +191,7 @@ class Customer:
     name: str | None = None
 
 
+# Booking domain model mô tả lịch đã xác nhận, khác với BookingContext còn đang thu thập.
 @dataclass(frozen=True, slots=True)
 class Booking:
     """Represents a confirmed booking and its domain data."""
@@ -194,6 +210,7 @@ class Booking:
     addons: tuple[Course, ...] = ()
     reservation_code: str | None = None
 
+    # Invariant booking phải giữ được dù object được tạo từ POS hay từ use case create booking.
     def __post_init__(self) -> None:
         if not MIN_CUSTOMERS_PER_BOOKING <= self.num_customer <= MAX_CUSTOMERS_PER_BOOKING:
             raise InvalidCustomerCountError("Number of customers must be between one and three.")
@@ -218,32 +235,38 @@ class Booking:
         return CourseSelection(main_course=self.main_course, addons=self.addons)
 
 
+# Tập trung business rule dùng chung để handler, context và request contract không validate lệch.
 class BookingRules:
     """Validate booking data before backend submission."""
 
     _PHONE_PATTERN = re.compile(r"^\+?[0-9]{9,15}$")
     _VIETNAM_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 
+    # Trả về dải số người hợp lệ để response và validator dùng cùng một source of truth.
     @classmethod
     def customer_count_options(cls) -> tuple[int, ...]:
         return tuple(range(MIN_CUSTOMERS_PER_BOOKING, MAX_CUSTOMERS_PER_BOOKING + 1))
 
+    # Giới hạn nhóm 1-3 người là rule nghiệp vụ của chatbot booking hiện tại.
     @staticmethod
     def validate_customer_count(num_customer: int) -> None:
         if not MIN_CUSTOMERS_PER_BOOKING <= num_customer <= MAX_CUSTOMERS_PER_BOOKING:
             raise InvalidCustomerCountError("Number of customers must be between one and three.")
 
+    # Chuẩn hóa khoảng trắng/gạch nối để người dùng nhập phone tự nhiên vẫn được kiểm tra đúng.
     @classmethod
     def validate_phone(cls, phone: str) -> None:
         normalized_phone = re.sub(r"[\s-]", "", phone)
         if cls._PHONE_PATTERN.fullmatch(normalized_phone) is None:
             raise InvalidBookingDataError("Invalid phone number.")
 
+    # Chỉ kiểm duration dương; availability/POS mới quyết định duration đó có phục vụ được không.
     @staticmethod
     def validate_course_duration(duration_minutes: int) -> None:
         if duration_minutes <= 0:
             raise InvalidDurationError("Course duration must be positive.")
 
+    # Chặn đặt lịch trong quá khứ theo timezone vận hành, không phụ thuộc timezone server.
     @classmethod
     def validate_booking_datetime(
         cls,
@@ -265,6 +288,8 @@ class BookingRules:
         if booking_datetime <= current_datetime:
             raise InvalidBookingDataError("Booking date and time must be in the future.")
 
+    # Kiểm tra draft context trước khi tạo booking thật
+    # để mọi required field đã qua eligibility flow.
     @classmethod
     def validate_create_context(cls, context: "BookingContext") -> None:
         shop = context.shop
@@ -309,10 +334,12 @@ class BookingRules:
 from datetime import time
 
 
+# Lỗi application biểu diễn thất bại use case sau khi dữ liệu domain cơ bản đã hợp lệ.
 class ApplicationError(Exception):
     """Base exception for application use-case failures."""
 
 
+# Báo slot bị đổi trạng thái ở final check và kèm slot gần nhất để dialog có thể recovery.
 class SlotConflictError(ApplicationError):
     """Raised when the selected slot fails the final availability check."""
 
@@ -342,6 +369,7 @@ from typing import Protocol
 from uuid import UUID
 
 
+# Contract truy vấn catalog course theo shop, giữ application không phụ thuộc trực tiếp POS schema.
 @dataclass(frozen=True, slots=True)
 class CourseSearchRequest:
     """Contains POS-supported filters for a shop course catalog."""
@@ -351,6 +379,7 @@ class CourseSearchRequest:
     is_active: bool = True
 
 
+# Criteria chọn shop có thể chứa nhiều entity đã extract để lọc shop theo khả năng phục vụ thật.
 @dataclass(frozen=True, slots=True)
 class ShopSearchCriteria:
     """Contains safely-evaluable constraints for the shop selection step."""
@@ -365,6 +394,7 @@ class ShopSearchCriteria:
     requested_therapist_gender: str | None = None
 
 
+# Request này chỉ dùng sau khi đã có một booking window cụ thể để lọc therapist đang rảnh.
 @dataclass(frozen=True, slots=True)
 class AvailableTherapistRequest:
     """Contains the selected booking window used to list available therapists."""
@@ -376,6 +406,7 @@ class AvailableTherapistRequest:
     gender: TherapistPreferenceType | None = None
 
 
+# POS cần shop và phone để trả membership/NG-list theo đúng nơi khách đang đặt lịch.
 @dataclass(frozen=True, slots=True)
 class CustomerVerificationRequest:
     """Contains the shop and normalized phone required by POS eligibility."""
@@ -396,6 +427,8 @@ def _validate_booking_shape(
     addon_ids: tuple[UUID, ...],
     therapist_preference: TherapistPreference | None,
 ) -> None:
+    # Shape validation là invariant chung cho availability, final check và create booking.
+    # Các rule ở đây phải độc lập framework để mọi caller đều bị chặn giống nhau.
     BookingRules.validate_customer_count(num_customer)
     if duration_minutes <= 0:
         raise InvalidDurationError("Booking duration must be positive.")
@@ -412,6 +445,7 @@ def _validate_booking_shape(
         )
 
 
+# AvailabilityRequest là payload kiểm slot hiển thị trước khi khách chọn giờ.
 @dataclass(frozen=True, slots=True)
 class AvailabilityRequest:
     """Contains all inputs that affect display availability."""
@@ -425,6 +459,8 @@ class AvailabilityRequest:
     therapist_preference: TherapistPreference | None = None
     requested_start_time: time | None = None
 
+    # Phone rỗng không được đi xuống POS vì sẽ tạo kết quả eligibility không đáng tin cậy.
+    # Reuse shape validation để display availability, final check và create booking không lệch rule.
     def __post_init__(self) -> None:
         _validate_booking_shape(
             num_customer=self.num_customer,
@@ -435,6 +471,7 @@ class AvailabilityRequest:
         )
 
 
+# Kết quả xác minh khách hàng là source of truth cho member và NG-list trong booking flow.
 @dataclass(frozen=True, slots=True)
 class CustomerVerificationResult:
     """Contains authoritative customer verification data returned by POS."""
@@ -448,6 +485,7 @@ class CustomerVerificationResult:
     customer_name: str | None = None
 
 
+# Mỗi participant trong booking nhóm có reservation riêng để UI/log có thể trace chính xác.
 @dataclass(frozen=True, slots=True)
 class ChildReservationReference:
     """Identifies one participant reservation created under a booking."""
@@ -456,6 +494,7 @@ class ChildReservationReference:
     participant_index: int | None = None
 
 
+# FinalAvailabilityRequest kiểm lại đúng slot khách đã chọn ngay trước khi tạo booking.
 @dataclass(frozen=True, slots=True)
 class FinalAvailabilityRequest:
     """Contains all inputs required to recheck a selected slot."""
@@ -469,6 +508,7 @@ class FinalAvailabilityRequest:
     addon_ids: tuple[UUID, ...] = ()
     therapist_preference: TherapistPreference | None = None
 
+    # Cùng một shape validation giúp final check không nhận payload khác display availability.
     def __post_init__(self) -> None:
         _validate_booking_shape(
             num_customer=self.num_customer,
@@ -479,6 +519,7 @@ class FinalAvailabilityRequest:
         )
 
 
+# Final check trả cả slot recovery để chatbot có thể đề xuất nếu slot vừa bị người khác đặt.
 @dataclass(frozen=True, slots=True)
 class FinalAvailabilityResult:
     """Reports final slot availability and optional recovery information."""
@@ -488,6 +529,7 @@ class FinalAvailabilityResult:
     reason: str | None = None
 
 
+# Phân biệt danh sách slot rỗng do hết slot hay do shop không phục vụ ngày đó.
 @dataclass(frozen=True, slots=True)
 class AvailabilityWindowResult:
     """Contains display slots plus the business semantic for empty availability."""
@@ -496,6 +538,7 @@ class AvailabilityWindowResult:
     status: str = "available"
 
 
+# Payload tạo booking thật phải immutable để idempotency và final availability không bị mutate.
 @dataclass(frozen=True, slots=True)
 class CreateBookingRequest:
     """Contains the immutable payload required to create a booking."""
@@ -513,6 +556,8 @@ class CreateBookingRequest:
     member_rank: str | None = None
     customer_name: str | None = None
 
+    # Create booking dùng chung validation với availability
+    # để không tạo booking ngoài rule đã hiển thị.
     def __post_init__(self) -> None:
         _validate_booking_shape(
             num_customer=self.num_customer,
@@ -523,6 +568,7 @@ class CreateBookingRequest:
         )
 
 
+# Kết quả tạo booking giữ cả mã booking cha và reservation con cho booking nhóm.
 @dataclass(frozen=True, slots=True)
 class CreateBookingResult:
     """Contains the official booking and reservation identifiers returned by POS."""
@@ -532,6 +578,7 @@ class CreateBookingResult:
     reservation_codes: tuple[str, ...] = ()
     child_reservations: tuple[ChildReservationReference, ...] = ()
 
+    # POS có thể trả nhiều reservation; domain đảm bảo không trùng ID/index/code trước khi render.
     def __post_init__(self) -> None:
         child_ids = [item.reservation_id for item in self.child_reservations]
         if len(child_ids) != len(set(child_ids)):
@@ -552,6 +599,7 @@ class CreateBookingResult:
             raise ValueError("Reservation codes must be unique.")
 
 
+# Port chính tới POS; application chỉ phụ thuộc contract này để dễ test và thay hạ tầng.
 class BookingGateway(Protocol):
     """Defines booking operations required by the application layer."""
 
@@ -612,6 +660,8 @@ class BookingGateway(Protocol):
         ...
 
 
+# Port optional cho danh sách therapist theo slot,
+# tách khỏi BookingGateway để giữ capability rõ ràng.
 class TherapistAvailabilityGateway(Protocol):
     """Optional POS capability for resolving therapists after time selection."""
 
@@ -623,6 +673,7 @@ class TherapistAvailabilityGateway(Protocol):
         ...
 
 
+# Port catalog therapist theo shop dùng cho exact shop matching trước khi có slot cụ thể.
 class TherapistCatalogGateway(Protocol):
     """Optional POS capability for deterministic shop filtering by therapist ownership."""
 
@@ -639,6 +690,7 @@ class TherapistCatalogGateway(Protocol):
 """Typed failures raised by the HTTP booking gateway."""
 
 
+# Nhóm lỗi hạ tầng POS được phân loại để transport/dialog map message UX phù hợp.
 class BookingGatewayInfrastructureError(Exception):
     """Base error for failures at the POS HTTP boundary."""
 
@@ -663,6 +715,7 @@ class POSContractNotConfiguredError(BookingGatewayInfrastructureError):
     """Raised when no verified POS contract exists for an operation."""
 
 
+# Base HTTP error giữ operation/status/code để log và recovery không phải parse message string.
 class POSHTTPError(BookingGatewayInfrastructureError):
     """Base error for a non-success POS HTTP response."""
 

@@ -16,6 +16,7 @@ from app.domain.booking_models import (
 from app.domain.outcomes import HandlerOutcome, HandlerResult
 
 
+# Use case xác minh khách hàng, member và NG-list trước khi cho phép tạo booking.
 class CheckCustomerHandler:
     """Coordinates customer verification without partial mutation on failures."""
 

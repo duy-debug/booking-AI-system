@@ -7,6 +7,8 @@ from app.domain.booking_models import TherapistPreference, TherapistPreferenceTy
 from app.domain.outcomes import HandlerOutcome, HandlerResult
 
 
+# Use case cập nhật ngày/giờ trong context;
+# validate slot thật do availability handler đảm nhiệm.
 class SelectScheduleHandler:
     """Applies only schedule choices already verified against context data."""
 

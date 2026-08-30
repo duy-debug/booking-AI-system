@@ -35,6 +35,7 @@ _SAFE_METADATA_KEYS = frozenset(
 _UNHANDLED_FAILURE_TEXT = "Đã có lỗi xảy ra. Vui lòng thử lại hoặc liên hệ cửa hàng."
 
 
+# Nhóm lỗi instruction giúp fail fast khi template flow khai báo sai hoặc renderer trả sai contract.
 class InstructionBuilderError(Exception):
     """Base exception for deterministic instruction rendering errors."""
 
@@ -55,6 +56,8 @@ class InstructionRenderingError(InstructionBuilderError):
     """Raised when a registered renderer cannot produce a safe response."""
 
 
+# Draft là output deterministic từ template trước khi ResponseGenerator
+# có thể diễn đạt lại bằng LLM.
 @dataclass(frozen=True, slots=True)
 class DialogResponseDraft:
     """Contains presentation data produced by one instruction renderer."""
@@ -62,12 +65,14 @@ class DialogResponseDraft:
     text: str
     metadata: Mapping[str, object] = field(default_factory=dict)
 
+    # Response draft không được rỗng vì transport luôn cần text để frontend render.
     def __post_init__(self) -> None:
         if not isinstance(self.text, str) or not self.text.strip():
             raise ValueError("Dialog response draft text must not be empty.")
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 
 
+# DialogResponse là contract public nội bộ giữa dialog layer và transport/SSE.
 @dataclass(frozen=True, slots=True)
 class DialogResponse:
     """Represents a rendered response independent of HTTP and streaming concerns."""
@@ -78,6 +83,7 @@ class DialogResponse:
     status: DialogTurnStatus
     metadata: Mapping[str, object] = field(default_factory=dict)
 
+    # Metadata chỉ được giữ các key an toàn để không lộ internal context ra frontend.
     def __post_init__(self) -> None:
         if not isinstance(self.text, str) or not self.text.strip():
             raise ValueError("Dialog response text must not be empty.")
@@ -90,6 +96,7 @@ InstructionRenderer: TypeAlias = Callable[
 ]
 
 
+# InstructionBuilder chỉ render text/metadata từ state đã xử lý, không gọi POS hay mutate context.
 class InstructionBuilder:
     """Render registered instruction identifiers without side effects or I/O."""
 
@@ -836,6 +843,7 @@ class InstructionBuilder:
         )
 
     @staticmethod
+    # Form xác nhận cuối là dữ liệu nghiệp vụ đã validate nên cần giữ nguyên từng dòng khi qua NLG.
     def _final_confirmation(
         context: BookingContext,
         result: DialogTurnResult,
@@ -883,6 +891,8 @@ class InstructionBuilder:
         )
 
     @staticmethod
+    # Booking complete hiển thị mã đặt lịch và summary đã commit từ POS,
+    # không được để LLM làm mất field.
     def _booking_complete(
         context: BookingContext,
         result: DialogTurnResult,
@@ -967,6 +977,7 @@ class InstructionBuilder:
         return DialogResponseDraft("Booking này đã được hủy trước đó rồi ạ.")
 
     @staticmethod
+    # Bước này chỉ xác nhận ý định hủy sau lookup, chưa thực hiện side effect cancel booking.
     def _cancel_existing_booking_confirmation(
         context: BookingContext,
         result: DialogTurnResult,
@@ -1005,6 +1016,7 @@ class InstructionBuilder:
         )
 
     @staticmethod
+    # Sau khi POS hủy thành công, response phải giữ thông tin booking đã hủy để khách đối chiếu.
     def _existing_booking_cancelled(
         context: BookingContext,
         result: DialogTurnResult,
@@ -1028,6 +1040,7 @@ class InstructionBuilder:
 
 
 
+# Lọc metadata từ template để chỉ field được frontend/NLG tin cậy mới đi qua response public.
 def _allowlisted_metadata(values: Mapping[str, object]) -> Mapping[str, object]:
     safe: dict[str, object] = {}
     for key, value in values.items():

@@ -6,6 +6,8 @@ from enum import StrEnum
 from types import MappingProxyType
 
 
+# HandlerOutcome là contract ổn định để StateMachine/InstructionBuilder
+# không phụ thuộc exception text.
 class HandlerOutcome(StrEnum):
     """Stable outcomes consumed by the dialog workflow."""
 
@@ -19,6 +21,7 @@ class HandlerOutcome(StrEnum):
     EXTERNAL_FAILURE = "external_failure"
 
 
+# HandlerResult trả dữ liệu nghiệp vụ đã chuẩn hóa nhưng chưa quyết định text hay state tiếp theo.
 @dataclass(frozen=True, slots=True)
 class HandlerResult:
     """Normalized handler output without response text or state transitions."""
@@ -28,6 +31,7 @@ class HandlerResult:
     context_updates: Mapping[str, object] = field(default_factory=dict)
     error_code: str | None = None
 
+    # Đóng băng data/context_updates để controller không mutate nhầm output handler.
     def __post_init__(self) -> None:
         object.__setattr__(self, "data", MappingProxyType(dict(self.data)))
         object.__setattr__(
