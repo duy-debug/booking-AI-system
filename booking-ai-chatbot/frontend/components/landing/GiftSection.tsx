@@ -3,6 +3,7 @@ import { WellnessImage } from "@/components/landing/WellnessImage";
 import { landingImages } from "@/components/landing/data";
 import { Container } from "@/components/ui/Container";
 
+// Section gói quà tặng, dùng nội dung marketing để dẫn người dùng mở chatbot tư vấn.
 export function GiftSection() {
   return (
     <section className="gift-section">

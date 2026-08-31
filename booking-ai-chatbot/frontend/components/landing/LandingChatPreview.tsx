@@ -5,6 +5,7 @@ interface LandingChatPreviewProps {
   variant?: "hero" | "showcase" | "compact";
 }
 
+// Mock preview trên landing page để minh họa cách Kori tư vấn mà không gọi API thật.
 export function LandingChatPreview({
   className = "",
   variant = "hero",

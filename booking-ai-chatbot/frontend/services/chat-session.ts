@@ -8,6 +8,7 @@ interface StoredChatSession {
 
 type SessionStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
+// Đọc conversation hiện tại từ sessionStorage và loại bỏ session hết hạn hoặc dữ liệu legacy hỏng.
 export function loadConversationId(
   storage: Pick<Storage, "getItem" | "removeItem">,
   now = Date.now(),
@@ -31,6 +32,7 @@ export function loadConversationId(
   return null;
 }
 
+// Lưu lại conversation để đóng/mở popup không làm mất mạch hội thoại trong cùng phiên.
 export function saveConversationSession(
   storage: Pick<Storage, "setItem">,
   conversationId: string,
@@ -39,6 +41,7 @@ export function saveConversationSession(
   storage.setItem(CHAT_SESSION_KEY, JSON.stringify({ conversationId, updatedAt: now }));
 }
 
+// Tái sử dụng conversation còn hạn hoặc tạo ID mới cho phiên chat mới.
 export function getOrCreateConversationId(storage: SessionStorage): string {
   const existing = loadConversationId(storage);
   if (existing) return existing;
@@ -47,6 +50,7 @@ export function getOrCreateConversationId(storage: SessionStorage): string {
   return conversationId;
 }
 
+// Xóa session hiện tại khi người dùng chủ động tạo cuộc trò chuyện mới.
 export function resetConversationId(storage: SessionStorage): string {
   storage.removeItem(CHAT_SESSION_KEY);
   return getOrCreateConversationId(storage);

@@ -20,6 +20,7 @@ const galleryItems = [
   },
 ];
 
+// Gallery tạo cảm giác không gian spa cao cấp bằng hình ảnh, không tham gia vào flow booking.
 export function WellnessGallery() {
   return (
     <section className="gallery-section" aria-label="Không gian wellness">

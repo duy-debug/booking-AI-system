@@ -3,6 +3,7 @@ import { ChatOpenButton } from "@/components/landing/ChatOpenButton";
 import { navItems } from "@/components/landing/data";
 import { Container } from "@/components/ui/Container";
 
+// Thanh điều hướng chính của landing page, giữ CTA đặt lịch luôn dễ truy cập.
 export function Navbar() {
   return (
     <header className="site-header">

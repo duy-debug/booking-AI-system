@@ -9,11 +9,13 @@ interface Props {
   streaming: boolean;
 }
 
+// Format timestamp theo tiếng Việt để metadata tin nhắn đồng bộ với UX chatbot.
 function timeLabel(timestamp: number) {
   if (!timestamp) return "Bây giờ";
   return new Intl.DateTimeFormat("vi-VN", { hour: "2-digit", minute: "2-digit" }).format(timestamp);
 }
 
+// Nhận diện dòng có cấu trúc để giữ layout list/form booking không bị gộp thành đoạn văn.
 function isStructuredLine(line: string) {
   return (
     line.startsWith("- ")
@@ -22,10 +24,12 @@ function isStructuredLine(line: string) {
   );
 }
 
+// Gom các dòng văn bản thường thành một đoạn sạch sau khi đã loại khoảng trắng thừa.
 function normalizeParagraphLines(lines: string[]) {
   return lines.map((line) => line.trim()).filter(Boolean).join(" ");
 }
 
+// Tách câu hội thoại thường thành hai đoạn để bubble dễ đọc hơn khi LLM trả lời dài.
 function splitPlainParagraphs(lines: string[]) {
   const text = normalizeParagraphLines(lines);
   const sentences = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((sentence) => sentence.trim()) ?? [];
@@ -36,12 +40,14 @@ function splitPlainParagraphs(lines: string[]) {
   ].filter(Boolean);
 }
 
+// Gán class theo loại dòng để CSS trình bày list, spacer và thông tin chi tiết khác nhau.
 function lineClassName(line: string) {
   if (!line.trim()) return "message-line spacer";
   if (line.startsWith("- ")) return "message-line detail";
   return "message-line";
 }
 
+// Render nội dung message, ưu tiên giữ cấu trúc form/list nhưng vẫn hỗ trợ code block khi có.
 function MessageBody({ text }: { text: string }) {
   if (!text.includes("```")) {
     const lines = text.split("\n");
@@ -89,6 +95,7 @@ function MessageBody({ text }: { text: string }) {
   });
 }
 
+// Render một tin nhắn trong conversation, gồm avatar bot, bubble, timestamp và trạng thái gửi.
 export function MessageItem({ message, latest, streaming }: Props) {
   const showStreamingCaret = message.role === "assistant" && streaming && latest;
 

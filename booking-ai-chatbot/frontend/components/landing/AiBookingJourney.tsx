@@ -2,6 +2,7 @@ import { LandingChatPreview } from "@/components/landing/LandingChatPreview";
 import { journeySteps } from "@/components/landing/data";
 import { Container } from "@/components/ui/Container";
 
+// Section mô tả luồng đặt lịch bằng Kori để người dùng hiểu chatbot sẽ hỏi theo từng bước.
 export function AiBookingJourney() {
   return (
     <section className="zen-section ai-booking-section" id="kori-booking">

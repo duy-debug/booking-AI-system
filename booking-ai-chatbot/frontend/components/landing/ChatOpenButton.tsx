@@ -11,6 +11,7 @@ interface ChatOpenButtonProps {
   variant?: "primary" | "secondary" | "ghost";
 }
 
+// CTA dùng chung để các section landing mở popup chat bằng cùng một custom event.
 export function ChatOpenButton({
   children,
   className,

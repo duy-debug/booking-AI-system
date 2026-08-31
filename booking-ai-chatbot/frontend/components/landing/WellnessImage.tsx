@@ -8,6 +8,7 @@ interface WellnessImageProps {
   sizes?: string;
 }
 
+// Wrapper ảnh dùng chung để Next/Image có layout fill ổn định trong các khung visual khác nhau.
 export function WellnessImage({
   src,
   alt,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const backendUrl = (process.env.CHATBOT_API_URL || "http://localhost:8001").replace(/\/$/, "");
 
+// Proxy SSE stream từ backend về browser, giữ header chống buffering để token hiển thị dần.
 export async function POST(request: NextRequest) {
   const correlationId = request.headers.get("x-correlation-id") || crypto.randomUUID();
   try {

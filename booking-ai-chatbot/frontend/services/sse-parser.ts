@@ -3,9 +3,11 @@ export interface ParsedSseEvent {
   data: unknown;
 }
 
+// Parser nhỏ cho SSE vì fetch stream trả chunk tùy ý, không đảm bảo trùng ranh giới event.
 export class SseParser {
   private buffer = "";
 
+  // Gom chunk stream rời rạc thành từng SSE block hoàn chỉnh trước khi parse JSON.
   feed(chunk: string): ParsedSseEvent[] {
     this.buffer += chunk.replace(/\r\n/g, "\n");
     const events: ParsedSseEvent[] = [];
@@ -19,11 +21,13 @@ export class SseParser {
     return events;
   }
 
+  // Dùng để phát hiện stream kết thúc giữa chừng khi buffer vẫn còn dữ liệu chưa đóng block.
   hasPendingData(): boolean {
     return this.buffer.trim().length > 0;
   }
 }
 
+// Parse một block SSE theo format event/data để frontend hiểu được delta và message cuối.
 function parseBlock(block: string): ParsedSseEvent {
   let event = "message";
   const data: string[] = [];

@@ -8,6 +8,7 @@ interface SectionHeadingProps {
   align?: "left" | "center";
 }
 
+// Heading dùng chung cho section để giữ eyebrow, title và mô tả theo cùng visual hierarchy.
 export function SectionHeading({
   eyebrow,
   title,

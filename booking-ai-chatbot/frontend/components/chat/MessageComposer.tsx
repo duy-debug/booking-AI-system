@@ -11,7 +11,9 @@ interface Props {
   onStop: () => void;
 }
 
+// Ô nhập tin nhắn: giữ nút gửi cố định, khi loading thì cùng nút này đóng vai trò dừng stream.
 export function MessageComposer({ value, loading, onChange, onSubmit, onStop }: Props) {
+  // Submit khi đang loading sẽ gọi abort để người dùng dừng câu trả lời hiện tại.
   function submit(event: FormEvent) {
     event.preventDefault();
     if (loading) {
@@ -21,6 +23,7 @@ export function MessageComposer({ value, loading, onChange, onSubmit, onStop }: 
     onSubmit();
   }
 
+  // Enter gửi tin nhắn, Shift+Enter vẫn xuống dòng để nhập nội dung dài.
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();

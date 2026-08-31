@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const backendUrl = (process.env.CHATBOT_API_URL || "http://localhost:8001").replace(/\/$/, "");
 
+// Proxy request chat JSON sang backend để frontend không hard-code endpoint backend ở client.
 export async function POST(request: NextRequest) {
   const correlationId = request.headers.get("x-correlation-id") || crypto.randomUUID();
   try {

@@ -12,7 +12,7 @@ Thời gian nhận khách cuối cùng trong ngày phụ thuộc vào giờ đó
 
 # Thay đổi giờ hoạt động
 
-Giờ hoạt động có thể được điều chỉnh tạm thời do ngày lễ, sự kiện nội bộ, thiếu nhân viên, bảo trì cơ sở vật chất, mất điện, thời tiết hoặc các tình huống bất khả kháng khác. Trong trường hợp có sự khác nhau giữa tài liệu hướng dẫn và dữ liệu hoạt động hiện tại của chi nhánh, chatbot phải ưu tiên thông tin mới nhất từ hệ thống quản lý cửa hàng hoặc hướng dẫn khách liên hệ trực tiếp để xác nhận.
+Giờ hoạt động có thể được điều chỉnh tạm thời do ngày lễ, sự kiện nội bộ, thiếu nhân viên, bảo trì cơ sở vật chất, mất điện, thời tiết hoặc các tình huống bất khả kháng khác. Trong trường hợp có sự khác nhau giữa tài liệu hướng dẫn và dữ liệu hoạt động hiện tại của chi nhánh, chatbot phải ưu tiên thông tin mới nhất từ hệ thống quản lý cửa hàng hoặc hướng dẫn khách liên hệ trực tiếp qua số 1900 8095 để xác nhận.
 
 # Đặt lịch trước
 
@@ -44,7 +44,7 @@ Nếu khung giờ khách mong muốn không còn trống, chatbot không đượ
 
 # Đặt lịch cho nhóm khách
 
-Trong phạm vi hệ thống mẫu, chatbot có thể hỗ trợ booking cho nhóm từ hai đến ba người nếu tất cả khách cùng sử dụng một chi nhánh, ngày và khung giờ phù hợp. Khả năng phục vụ đồng thời còn phụ thuộc số lượng kỹ thuật viên, số phòng và dịch vụ được lựa chọn. Với nhóm đông hơn phạm vi hệ thống hỗ trợ, chatbot nên hướng dẫn khách liên hệ trực tiếp cửa hàng để được sắp xếp.
+Trong phạm vi hệ thống mẫu, chatbot có thể hỗ trợ booking cho nhóm từ hai đến ba người nếu tất cả khách cùng sử dụng một chi nhánh, ngày và khung giờ phù hợp. Khả năng phục vụ đồng thời còn phụ thuộc số lượng kỹ thuật viên, số phòng và dịch vụ được lựa chọn. Với nhóm đông hơn phạm vi hệ thống hỗ trợ, chatbot nên hướng dẫn khách liên hệ trực tiếp cửa hàng qua số 1900 8095 để được sắp xếp.
 
 # Đặt lịch cho hai người
 
@@ -116,11 +116,11 @@ Khách được khuyến khích có mặt trước giờ hẹn khoảng 10 đế
 
 # Khách đến trễ
 
-Nếu khách đến muộn, cửa hàng có thể phải rút ngắn thời lượng dịch vụ để không ảnh hưởng đến lịch của khách tiếp theo. Trong trường hợp khách đến quá trễ và không còn đủ thời gian thực hiện dịch vụ một cách phù hợp, cửa hàng có thể yêu cầu đổi lịch hoặc từ chối tiếp nhận. Khách nên liên hệ cửa hàng sớm nếu biết mình sẽ đến muộn.
+Nếu khách đến muộn, cửa hàng có thể phải rút ngắn thời lượng dịch vụ để không ảnh hưởng đến lịch của khách tiếp theo. Trong trường hợp khách đến quá trễ và không còn đủ thời gian thực hiện dịch vụ một cách phù hợp, cửa hàng có thể yêu cầu đổi lịch hoặc từ chối tiếp nhận. Khách nên liên hệ cửa hàng sớm qua số 1900 8095 nếu biết mình sẽ đến muộn.
 
 # Thời gian cho phép đến trễ
 
-Thời gian cho phép khách đến trễ phụ thuộc chính sách của từng cửa hàng và tình trạng lịch trong ngày. Chatbot không nên tự đưa ra một mốc như 10 hoặc 15 phút nếu cửa hàng chưa chính thức xác nhận. Trong trường hợp chưa có quy định rõ ràng, chatbot nên thông báo rằng khách cần liên hệ chi nhánh để được hỗ trợ.
+Thời gian cho phép khách đến trễ phụ thuộc chính sách của từng cửa hàng và tình trạng lịch trong ngày. Chatbot không nên tự đưa ra một mốc như 10 hoặc 15 phút nếu cửa hàng chưa chính thức xác nhận. Trong trường hợp chưa có quy định rõ ràng, chatbot nên thông báo rằng khách cần liên hệ chi nhánh qua số 1900 8095 để được hỗ trợ.
 
 # Rút ngắn dịch vụ khi khách đến muộn
 
@@ -140,11 +140,11 @@ Việc hủy lịch quá gần thời điểm sử dụng dịch vụ có thể 
 
 # Đổi lịch
 
-Khách có thể muốn thay đổi ngày hoặc giờ của booking đã tạo. Tuy nhiên, trong phiên bản MVP hiện tại, chatbot chỉ hỗ trợ tạo booking mới và chưa trực tiếp thực hiện chức năng đổi lịch đã tồn tại. Trong trường hợp này, chatbot cần hướng dẫn khách liên hệ cửa hàng thay vì tự thông báo rằng booking đã được thay đổi.
+Khách có thể muốn thay đổi ngày hoặc giờ của booking đã tạo. Tuy nhiên, trong phiên bản MVP hiện tại, chatbot chỉ hỗ trợ tạo booking mới và chưa trực tiếp thực hiện chức năng đổi lịch đã tồn tại. Trong trường hợp này, chatbot cần hướng dẫn khách liên hệ cửa hàng qua số 1900 8095 thay vì tự thông báo rằng booking đã được thay đổi.
 
 # Hủy booking đã tạo
 
-Chức năng hủy một booking đã được tạo chưa thuộc phạm vi của phiên bản MVP nếu hệ thống chưa có API hủy booking. Chatbot không được nói những câu như “lịch của bạn đã được hủy thành công” khi chưa nhận được xác nhận từ hệ thống quản lý. Khách cần được hướng dẫn liên hệ trực tiếp cửa hàng để thực hiện việc hủy.
+Chức năng hủy một booking đã được tạo chưa thuộc phạm vi của phiên bản MVP nếu hệ thống chưa có API hủy booking. Chatbot không được nói những câu như “lịch của bạn đã được hủy thành công” khi chưa nhận được xác nhận từ hệ thống quản lý. Khách cần được hướng dẫn liên hệ trực tiếp cửa hàng qua số 1900 8095 để thực hiện việc hủy.
 
 # Thay đổi thông tin trước khi xác nhận booking
 
@@ -168,7 +168,7 @@ Khi hệ thống trả về một mã booking dành cho khách hàng, chatbot c�
 
 # Booking thất bại
 
-Nếu hệ thống quản lý từ chối yêu cầu tạo booking hoặc xảy ra lỗi trong quá trình tạo, chatbot phải nói rõ rằng lịch chưa được đặt thành công. Nếu lỗi liên quan đến dữ liệu như khung giờ vừa hết chỗ, hệ thống nên cho phép khách lựa chọn lại. Nếu là lỗi kỹ thuật, chatbot có thể hướng dẫn khách thử lại hoặc liên hệ cửa hàng nhưng không được giả định booking đã được tạo.
+Nếu hệ thống quản lý từ chối yêu cầu tạo booking hoặc xảy ra lỗi trong quá trình tạo, chatbot phải nói rõ rằng lịch chưa được đặt thành công. Nếu lỗi liên quan đến dữ liệu như khung giờ vừa hết chỗ, hệ thống nên cho phép khách lựa chọn lại. Nếu là lỗi kỹ thuật, chatbot có thể hướng dẫn khách thử lại hoặc liên hệ cửa hàng qua số 1900 8095 nhưng không được giả định booking đã được tạo.
 
 # Tránh tạo booking trùng
 
@@ -180,7 +180,7 @@ Phiên bản create-booking mẫu chỉ hỗ trợ tạo lịch và không trự
 
 # Phương thức thanh toán
 
-Cửa hàng có thể hỗ trợ tiền mặt, thẻ ngân hàng, chuyển khoản, mã QR hoặc ví điện tử tùy từng chi nhánh. Nếu knowledge hoặc POS chưa xác nhận phương thức nào được hỗ trợ, chatbot không nên tự khẳng định. Khách cần được hướng dẫn xác nhận với chi nhánh khi thông tin thanh toán chưa rõ ràng.
+Cửa hàng có thể hỗ trợ tiền mặt, thẻ ngân hàng, chuyển khoản, mã QR hoặc ví điện tử tùy từng chi nhánh. Nếu knowledge hoặc POS chưa xác nhận phương thức nào được hỗ trợ, chatbot không nên tự khẳng định. Khách cần được hướng dẫn xác nhận với chi nhánh qua số 1900 8095 khi thông tin thanh toán chưa rõ ràng.
 
 # Đặt cọc
 
@@ -188,7 +188,7 @@ Một số cơ sở massage có thể yêu cầu khách đặt cọc đối vớ
 
 # Hoàn tiền đặt cọc
 
-Điều kiện hoàn lại tiền đặt cọc có thể phụ thuộc vào thời điểm khách hủy lịch, phương thức thanh toán và chính sách của cửa hàng. Nếu chưa có quy định chính thức, chatbot không được cam kết rằng khách chắc chắn được hoàn tiền hoặc chắc chắn mất tiền cọc mà phải hướng dẫn khách liên hệ cửa hàng.
+Điều kiện hoàn lại tiền đặt cọc có thể phụ thuộc vào thời điểm khách hủy lịch, phương thức thanh toán và chính sách của cửa hàng. Nếu chưa có quy định chính thức, chatbot không được cam kết rằng khách chắc chắn được hoàn tiền hoặc chắc chắn mất tiền cọc mà phải hướng dẫn khách liên hệ cửa hàng qua số 1900 8095.
 
 # Chính sách hoàn tiền
 
@@ -196,7 +196,7 @@ Việc hoàn tiền đối với một dịch vụ, booking hoặc khoản thanh
 
 # Voucher và phiếu quà tặng
 
-Voucher hoặc phiếu quà tặng có thể có điều kiện riêng về thời gian sử dụng, dịch vụ, chi nhánh và giá trị. Chatbot chỉ được xác nhận voucher hợp lệ khi hệ thống có chức năng kiểm tra hoặc knowledge có dữ liệu chính thức. Nếu không thể xác minh, khách nên được hướng dẫn mang voucher đến cửa hàng hoặc liên hệ trước.
+Voucher hoặc phiếu quà tặng có thể có điều kiện riêng về thời gian sử dụng, dịch vụ, chi nhánh và giá trị. Chatbot chỉ được xác nhận voucher hợp lệ khi hệ thống có chức năng kiểm tra hoặc knowledge có dữ liệu chính thức. Nếu không thể xác minh, khách nên được hướng dẫn mang voucher đến cửa hàng hoặc liên hệ trước qua số 1900 8095.
 
 # Khách hàng thành viên
 
@@ -216,15 +216,15 @@ Trong luồng demo, việc xác minh số điện thoại có nghĩa là khách 
 
 # Thông tin sức khỏe trước dịch vụ
 
-Trước khi sử dụng dịch vụ, khách nên chủ động thông báo cho cửa hàng hoặc kỹ thuật viên về các vấn đề sức khỏe có thể ảnh hưởng đến quá trình massage như chấn thương, phẫu thuật gần đây, bệnh tim mạch, vấn đề huyết áp, tình trạng da, dị ứng hoặc các tình trạng đặc biệt khác. Chatbot chỉ có nhiệm vụ nhắc khách cung cấp thông tin cần thiết và không được tự đánh giá liệu khách có đủ điều kiện y tế để sử dụng dịch vụ hay không.
+Trước khi sử dụng dịch vụ, khách nên chủ động thông báo cho cửa hàng qua số 1900 8095 hoặc trao đổi trực tiếp với kỹ thuật viên về các vấn đề sức khỏe có thể ảnh hưởng đến quá trình massage như chấn thương, phẫu thuật gần đây, bệnh tim mạch, vấn đề huyết áp, tình trạng da, dị ứng hoặc các tình trạng đặc biệt khác. Chatbot chỉ có nhiệm vụ nhắc khách cung cấp thông tin cần thiết và không được tự đánh giá liệu khách có đủ điều kiện y tế để sử dụng dịch vụ hay không.
 
 # Khách đang mang thai
 
-Khách đang mang thai nên thông báo rõ tình trạng cho cửa hàng trước khi lựa chọn dịch vụ vì không phải loại massage hoặc kỹ thuật nào cũng phù hợp cho mọi giai đoạn thai kỳ. Chatbot không được tự xác nhận một dịch vụ là an toàn dựa trên số tuần mang thai hoặc triệu chứng mà khách mô tả. Trong trường hợp có nghi ngại về sức khỏe, khách nên trao đổi với chuyên gia y tế phù hợp và cửa hàng trước khi sử dụng dịch vụ.
+Khách đang mang thai nên thông báo rõ tình trạng cho cửa hàng qua số 1900 8095 trước khi lựa chọn dịch vụ vì không phải loại massage hoặc kỹ thuật nào cũng phù hợp cho mọi giai đoạn thai kỳ. Chatbot không được tự xác nhận một dịch vụ là an toàn dựa trên số tuần mang thai hoặc triệu chứng mà khách mô tả. Trong trường hợp có nghi ngại về sức khỏe, khách nên trao đổi với chuyên gia y tế phù hợp và cửa hàng trước khi sử dụng dịch vụ.
 
 # Khách vừa phẫu thuật
 
-Khách vừa thực hiện phẫu thuật, thủ thuật y tế hoặc đang trong quá trình hồi phục nên thông báo cho cửa hàng trước khi sử dụng dịch vụ massage. Tùy vị trí phẫu thuật và tình trạng hồi phục, cửa hàng có thể yêu cầu khách hoãn dịch vụ hoặc tránh tác động lên một số khu vực. Chatbot không được tự đưa ra thời gian bao nhiêu ngày sau phẫu thuật thì khách có thể massage.
+Khách vừa thực hiện phẫu thuật, thủ thuật y tế hoặc đang trong quá trình hồi phục nên thông báo cho cửa hàng qua số 1900 8095 trước khi sử dụng dịch vụ massage. Tùy vị trí phẫu thuật và tình trạng hồi phục, cửa hàng có thể yêu cầu khách hoãn dịch vụ hoặc tránh tác động lên một số khu vực. Chatbot không được tự đưa ra thời gian bao nhiêu ngày sau phẫu thuật thì khách có thể massage.
 
 # Khách có chấn thương
 
@@ -232,7 +232,7 @@ Khách đang có chấn thương cơ, xương, khớp, bong gân hoặc đau t�
 
 # Dị ứng
 
-Khách có tiền sử dị ứng với tinh dầu, mỹ phẩm, thảo dược, latex, hương liệu hoặc thành phần chăm sóc da cần thông báo cho cửa hàng trước dịch vụ. Khách nên cung cấp tên chất hoặc sản phẩm gây dị ứng nếu biết. Cửa hàng sẽ quyết định liệu có thể sử dụng sản phẩm thay thế hay cần thay đổi dịch vụ.
+Khách có tiền sử dị ứng với tinh dầu, mỹ phẩm, thảo dược, latex, hương liệu hoặc thành phần chăm sóc da cần thông báo cho cửa hàng qua số 1900 8095 trước dịch vụ. Khách nên cung cấp tên chất hoặc sản phẩm gây dị ứng nếu biết. Cửa hàng sẽ quyết định liệu có thể sử dụng sản phẩm thay thế hay cần thay đổi dịch vụ.
 
 # Nhạy cảm với mùi hương
 
@@ -244,7 +244,7 @@ Khách đang sốt, có triệu chứng bệnh truyền nhiễm hoặc đang tro
 
 # Vết thương hở và tình trạng da
 
-Khách có vết thương hở, nhiễm trùng da, vùng da đang chảy máu hoặc tình trạng da nghiêm trọng cần thông báo cho cửa hàng trước khi sử dụng dịch vụ. Kỹ thuật viên có thể tránh khu vực đó hoặc từ chối thực hiện dịch vụ nếu có nguy cơ làm tình trạng trở nên xấu hơn hoặc gây ảnh hưởng đến vệ sinh.
+Khách có vết thương hở, nhiễm trùng da, vùng da đang chảy máu hoặc tình trạng da nghiêm trọng cần thông báo cho cửa hàng qua số 1900 8095 trước khi sử dụng dịch vụ. Kỹ thuật viên có thể tránh khu vực đó hoặc từ chối thực hiện dịch vụ nếu có nguy cơ làm tình trạng trở nên xấu hơn hoặc gây ảnh hưởng đến vệ sinh.
 
 # Uống rượu bia trước dịch vụ
 
@@ -260,7 +260,7 @@ Khách nên mặc trang phục thoải mái và thuận tiện cho quá trình c
 
 # Tài sản cá nhân
 
-Khách nên hạn chế mang theo nhiều tiền mặt, trang sức hoặc tài sản có giá trị khi đến sử dụng dịch vụ. Khả năng cung cấp tủ khóa hoặc khu vực giữ đồ phụ thuộc từng chi nhánh. Nếu khách mang theo hành lý lớn hoặc vật có giá trị cao, khách nên liên hệ trước với cửa hàng để hỏi về khả năng lưu giữ.
+Khách nên hạn chế mang theo nhiều tiền mặt, trang sức hoặc tài sản có giá trị khi đến sử dụng dịch vụ. Khả năng cung cấp tủ khóa hoặc khu vực giữ đồ phụ thuộc từng chi nhánh. Nếu khách mang theo hành lý lớn hoặc vật có giá trị cao, khách nên liên hệ trước với cửa hàng qua số 1900 8095 để hỏi về khả năng lưu giữ.
 
 # Trao đổi trước khi bắt đầu dịch vụ
 
@@ -304,11 +304,11 @@ Khách chưa đủ 18 tuổi có thể cần sự đồng ý hoặc sự có m�
 
 # Trẻ em đi cùng khách
 
-Không phải mọi chi nhánh đều có khu vực phù hợp để trẻ em chờ hoặc có nhân viên hỗ trợ trông trẻ. Nếu khách dự định đưa trẻ nhỏ đi cùng, khách nên liên hệ cửa hàng trước để xác nhận. Chatbot không được mặc định rằng nhân viên cửa hàng có trách nhiệm giám sát trẻ trong khi khách đang sử dụng dịch vụ.
+Không phải mọi chi nhánh đều có khu vực phù hợp để trẻ em chờ hoặc có nhân viên hỗ trợ trông trẻ. Nếu khách dự định đưa trẻ nhỏ đi cùng, khách nên liên hệ cửa hàng trước qua số 1900 8095 để xác nhận. Chatbot không được mặc định rằng nhân viên cửa hàng có trách nhiệm giám sát trẻ trong khi khách đang sử dụng dịch vụ.
 
 # Khả năng tiếp cận cho người khuyết tật
 
-Khả năng sử dụng xe lăn, thang máy, phòng ở tầng trệt hoặc các hỗ trợ tiếp cận khác phụ thuộc cơ sở vật chất của từng chi nhánh. Khi chưa có dữ liệu chính thức, chatbot nên hướng dẫn khách liên hệ chi nhánh để xác nhận trước khi đến, đặc biệt nếu khách cần hỗ trợ cụ thể.
+Khả năng sử dụng xe lăn, thang máy, phòng ở tầng trệt hoặc các hỗ trợ tiếp cận khác phụ thuộc cơ sở vật chất của từng chi nhánh. Khi chưa có dữ liệu chính thức, chatbot nên hướng dẫn khách liên hệ chi nhánh qua số 1900 8095 để xác nhận trước khi đến, đặc biệt nếu khách cần hỗ trợ cụ thể.
 
 # Bãi đậu xe
 
@@ -324,11 +324,11 @@ Chi nhánh là một thông tin quan trọng vì danh sách dịch vụ, giá, k
 
 # Thông tin liên hệ cửa hàng
 
-Số điện thoại, địa chỉ email hoặc kênh liên hệ của cửa hàng phải được lấy từ dữ liệu được xác nhận. Chatbot không được tự tạo một số điện thoại hoặc email dựa trên tên thương hiệu. Nếu chưa có thông tin liên hệ chính xác, chatbot nên nói rõ rằng dữ liệu hiện tại chưa đủ thay vì cung cấp thông tin suy đoán.
+Số điện thoại liên hệ cố định của cửa hàng là 1900 8095. Địa chỉ email hoặc kênh liên hệ khác của cửa hàng phải được lấy từ dữ liệu được xác nhận. Chatbot không được tự tạo một số điện thoại hoặc email dựa trên tên thương hiệu. Nếu chưa có thông tin liên hệ chính xác ngoài hotline này, chatbot nên nói rõ rằng dữ liệu hiện tại chưa đủ thay vì cung cấp thông tin suy đoán.
 
 # Trường hợp cần liên hệ trực tiếp cửa hàng
 
-Khách nên liên hệ trực tiếp cửa hàng khi cần hủy hoặc thay đổi booking đã tạo, đặt lịch cho nhóm lớn, yêu cầu hỗ trợ đặc biệt, xác nhận khả năng tiếp cận, hỏi về bãi đậu xe, giải quyết vấn đề thanh toán, khiếu nại dịch vụ, tìm đồ thất lạc hoặc xác minh những chính sách mà chatbot chưa có dữ liệu chính thức.
+Khách nên liên hệ trực tiếp cửa hàng qua số 1900 8095 khi cần hủy hoặc thay đổi booking đã tạo, đặt lịch cho nhóm lớn, yêu cầu hỗ trợ đặc biệt, xác nhận khả năng tiếp cận, hỏi về bãi đậu xe, giải quyết vấn đề thanh toán, khiếu nại dịch vụ, tìm đồ thất lạc hoặc xác minh những chính sách mà chatbot chưa có dữ liệu chính thức.
 
 # Khiếu nại dịch vụ
 
@@ -340,7 +340,7 @@ Chatbot không có quyền tự hứa cung cấp dịch vụ miễn phí, vouche
 
 # Đồ thất lạc
 
-Nếu khách để quên điện thoại, ví, trang sức hoặc vật dụng khác tại cửa hàng, chatbot nên hướng dẫn khách liên hệ chi nhánh càng sớm càng tốt và cung cấp các thông tin như ngày sử dụng dịch vụ, thời gian, tên booking hoặc mã booking. Chatbot không được xác nhận rằng vật dụng đã được tìm thấy nếu chưa có thông tin từ cửa hàng.
+Nếu khách để quên điện thoại, ví, trang sức hoặc vật dụng khác tại cửa hàng, chatbot nên hướng dẫn khách liên hệ chi nhánh qua số 1900 8095 càng sớm càng tốt và cung cấp các thông tin như ngày sử dụng dịch vụ, thời gian, tên booking hoặc mã booking. Chatbot không được xác nhận rằng vật dụng đã được tìm thấy nếu chưa có thông tin từ cửa hàng.
 
 # Quyền từ chối phục vụ
 
@@ -384,7 +384,7 @@ Các câu hỏi về chính sách, chuẩn bị trước dịch vụ, thanh toá
 
 # Không tìm thấy thông tin trong cơ sở tri thức
 
-Nếu hệ thống không tìm thấy tài liệu đủ liên quan đến câu hỏi của khách, chatbot không nên tự sáng tạo một chính sách để lấp chỗ trống. Câu trả lời phù hợp là nói rằng hiện chưa có đủ thông tin chính thức và hướng dẫn khách liên hệ cửa hàng nếu vấn đề đó quan trọng.
+Nếu hệ thống không tìm thấy tài liệu đủ liên quan đến câu hỏi của khách, chatbot không nên tự sáng tạo một chính sách để lấp chỗ trống. Câu trả lời phù hợp là nói rằng hiện chưa có đủ thông tin chính thức và hướng dẫn khách liên hệ cửa hàng qua số 1900 8095 nếu vấn đề đó quan trọng.
 
 # Kết quả tìm kiếm có độ tin cậy thấp
 
@@ -524,7 +524,7 @@ Mỗi chính sách nên tập trung vào một chủ đề chính nhưng chứa 
 
 # Không trả lời chắc chắn khi thiếu dữ liệu
 
-Một nguyên tắc quan trọng của chatbot là không biến thông tin chưa được xác nhận thành một quy định chính thức. Khi không tìm thấy giá, thời hạn hủy, phương thức thanh toán, bãi đậu xe, chính sách thai kỳ hoặc một thông tin quan trọng khác, chatbot nên nói rằng dữ liệu hiện tại chưa đủ và hướng dẫn khách liên hệ cửa hàng.
+Một nguyên tắc quan trọng của chatbot là không biến thông tin chưa được xác nhận thành một quy định chính thức. Khi không tìm thấy giá, thời hạn hủy, phương thức thanh toán, bãi đậu xe, chính sách thai kỳ hoặc một thông tin quan trọng khác, chatbot nên nói rằng dữ liệu hiện tại chưa đủ và hướng dẫn khách liên hệ cửa hàng qua số 1900 8095.
 
 # Minh bạch với người dùng
 

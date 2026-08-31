@@ -2,6 +2,7 @@ import { WellnessImage } from "@/components/landing/WellnessImage";
 import { landingImages } from "@/components/landing/data";
 import { Container } from "@/components/ui/Container";
 
+// Section nhấn mạnh trải nghiệm spa và tạo cầu nối đến danh sách dịch vụ.
 export function ExperienceSection() {
   return (
     <section className="zen-section why-section" id="experience">

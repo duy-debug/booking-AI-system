@@ -2,6 +2,7 @@
 
 import { BotIcon } from "@/components/common/Icons";
 
+// Bubble ba chấm hiển thị trong lúc backend đang suy nghĩ nhưng chưa stream token đầu tiên.
 export function TypingIndicator() {
   return (
     <div className="message-row assistant typing-row" role="status" aria-live="polite">

@@ -12,6 +12,7 @@ import { ServicesSection } from "@/components/landing/ServicesSection";
 import { TherapistsSection } from "@/components/landing/TherapistsSection";
 import { TestimonialsSection } from "@/components/landing/TestimonialsSection";
 
+// Trang landing chính, ghép các section marketing và mount chatbot popup ở cuối cây UI.
 export default function Home() {
   return (
     <>

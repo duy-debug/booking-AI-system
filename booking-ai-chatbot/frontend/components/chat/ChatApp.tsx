@@ -11,6 +11,7 @@ interface ChatAppProps {
   onClose?: () => void;
 }
 
+// Component vỏ của chatbot, nối hook hội thoại với header, message list và input composer.
 export function ChatApp({ mode = "page", onClose }: ChatAppProps) {
   const {
     messages,
@@ -30,6 +31,7 @@ export function ChatApp({ mode = "page", onClose }: ChatAppProps) {
   const shouldAutoScrollRef = useRef(true);
 
   useEffect(() => {
+    // Đọc theme phía client sau mount để tránh mismatch giữa SSR và localStorage.
     const frame = window.requestAnimationFrame(() => {
       setDark(localStorage.getItem("booking-chat-theme") === "dark");
     });
@@ -37,11 +39,13 @@ export function ChatApp({ mode = "page", onClose }: ChatAppProps) {
   }, []);
 
   useEffect(() => {
+    // Đồng bộ theme lên document để CSS token dùng chung cho toàn popup chat.
     document.documentElement.dataset.theme = dark ? "dark" : "light";
     localStorage.setItem("booking-chat-theme", dark ? "dark" : "light");
   }, [dark]);
 
   useEffect(() => {
+    // Chỉ tự cuộn xuống cuối khi người dùng vẫn đang ở gần cuối conversation.
     if (!shouldAutoScrollRef.current) return;
     const frame = window.requestAnimationFrame(() => {
       const container = messageScrollRef.current;
@@ -51,11 +55,13 @@ export function ChatApp({ mode = "page", onClose }: ChatAppProps) {
   }, [messages, isSending, streamingStarted]);
 
   useEffect(() => {
+    // Trả focus về textarea sau khi chatbot xử lý xong để người dùng tiếp tục nhập nhanh.
     if (!isSending) {
       document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
     }
   }, [isSending]);
 
+  // Gửi nội dung hiện tại qua hook chat và xóa input sau khi submit hợp lệ.
   function submit() {
     const value = input.trim();
     if (!value || isSending) return;
@@ -63,6 +69,7 @@ export function ChatApp({ mode = "page", onClose }: ChatAppProps) {
     void sendMessage(value);
   }
 
+  // Tạo conversation mới từ UI nhưng vẫn giữ trạng thái popup hiện tại.
   function resetChat() {
     resetConversation();
     setInput("");

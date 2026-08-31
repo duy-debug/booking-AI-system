@@ -5,11 +5,13 @@ import { ChatApp } from "@/components/chat/ChatApp";
 import { BotIcon } from "@/components/common/Icons";
 import { OPEN_CHAT_EVENT } from "@/components/landing/ChatOpenButton";
 
+// Điều khiển popup chatbot nổi trên landing page mà không thay đổi logic hội thoại bên trong.
 export function ChatWidget() {
   const [open, setOpen] = useState(false);
   const [hasOpened, setHasOpened] = useState(false);
 
   useEffect(() => {
+    // Cho các CTA trên landing page mở cùng một popup chat thông qua custom event.
     const openWidget = () => {
       setHasOpened(true);
       setOpen(true);
@@ -18,6 +20,7 @@ export function ChatWidget() {
     return () => window.removeEventListener(OPEN_CHAT_EVENT, openWidget);
   }, []);
 
+  // Mở popup từ floating button và chỉ mount ChatApp sau lần mở đầu tiên để giữ chi phí render thấp.
   function openChat() {
     setHasOpened(true);
     setOpen(true);

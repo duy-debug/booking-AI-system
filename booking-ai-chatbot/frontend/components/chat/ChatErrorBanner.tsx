@@ -7,6 +7,7 @@ interface ChatErrorBannerProps {
   onRetry: () => void;
 }
 
+// Banner lỗi thân thiện cho người dùng, chỉ cho retry khi request trước đó an toàn để gửi lại.
 export function ChatErrorBanner({
   error,
   canRetry,

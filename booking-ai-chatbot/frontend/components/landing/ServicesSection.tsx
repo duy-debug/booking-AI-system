@@ -4,6 +4,7 @@ import { WellnessImage } from "@/components/landing/WellnessImage";
 import { services } from "@/components/landing/data";
 import { Container } from "@/components/ui/Container";
 
+// Section dịch vụ hiển thị các gói nổi bật và dẫn từng gói về chatbot để tư vấn/đặt lịch.
 export function ServicesSection() {
   return (
     <section className="zen-section service-showcase" id="services">

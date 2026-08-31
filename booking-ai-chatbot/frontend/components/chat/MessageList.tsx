@@ -17,6 +17,7 @@ interface MessageListProps {
   onScrollNearBottomChange: (nearBottom: boolean) => void;
 }
 
+// Hiển thị luồng tin nhắn, thinking indicator và lỗi gửi trong cùng vùng scroll của chat.
 export function MessageList({
   messages,
   loading,
@@ -28,6 +29,7 @@ export function MessageList({
   onScrollNearBottomChange,
 }: MessageListProps) {
   const latestMessage = messages.at(-1);
+  // Chỉ hiển thị typing bubble khi chưa có assistant delta/message thật để tránh render trùng.
   const showTypingIndicator = loading && latestMessage?.role !== "assistant";
 
   return (

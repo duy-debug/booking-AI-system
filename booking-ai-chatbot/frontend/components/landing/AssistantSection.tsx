@@ -10,6 +10,7 @@ const capabilities = [
   "Nhắc lại trước khi xác nhận",
 ];
 
+// Section giới thiệu vai trò của Kori và dẫn người dùng mở chatbot để bắt đầu đặt lịch.
 export function AssistantSection() {
   return (
     <section className="assistant-section about-kori" id="assistant">

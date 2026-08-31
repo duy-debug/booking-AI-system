@@ -1,6 +1,7 @@
 import { testimonials } from "@/components/landing/data";
 import { Container } from "@/components/ui/Container";
 
+// Section review tạo bằng chứng xã hội nhẹ cho landing page trước khi người dùng mở chatbot.
 export function TestimonialsSection() {
   return (
     <section className="zen-section testimonials-section" id="reviews">

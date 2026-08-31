@@ -10,6 +10,7 @@ interface Props {
   showThemeToggle?: boolean;
 }
 
+// Header của chatbot hiển thị trạng thái xử lý và các thao tác cấp cuộc trò chuyện.
 export function ChatHeader({
   loading,
   streaming,

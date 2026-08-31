@@ -8,6 +8,7 @@ interface CommonProps {
   variant?: ButtonVariant;
 }
 
+// Button dùng chung để giữ variant/class nhất quán giữa landing page và CTA mở chatbot.
 export function Button({
   children,
   className = "",
@@ -23,6 +24,7 @@ export function Button({
   );
 }
 
+// Phiên bản link có style giống Button, dùng cho CTA điều hướng trong landing page.
 export function ButtonLink({
   children,
   className = "",

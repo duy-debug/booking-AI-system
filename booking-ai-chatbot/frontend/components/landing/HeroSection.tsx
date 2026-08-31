@@ -4,6 +4,7 @@ import { WellnessImage } from "@/components/landing/WellnessImage";
 import { landingImages } from "@/components/landing/data";
 import { Container } from "@/components/ui/Container";
 
+// Hero section tạo ấn tượng đầu tiên và đưa người dùng vào hành động đặt dịch vụ.
 export function HeroSection() {
   return (
     <section className="zen-hero" id="top">

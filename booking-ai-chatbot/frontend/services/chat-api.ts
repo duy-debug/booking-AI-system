@@ -12,7 +12,9 @@ import type {
   SafeMetadataValue,
 } from "@/types/chat";
 
+// Lỗi riêng của chat API giúp UI xử lý theo mã lỗi nghiệp vụ thay vì message tự do.
 export class ChatApiError extends Error {
+  // Chuẩn hóa lỗi API để UI chỉ cần đọc problem thay vì đoán từ exception thô.
   constructor(public readonly problem: ChatProblem) {
     super(problem.detail);
   }
@@ -38,19 +40,23 @@ const DIALOG_STATUSES = new Set<DialogStatus>([
 ]);
 const REQUEST_TIMEOUT_MS = 30_000;
 
+// Kiểm tra payload có phải object plain để tránh frontend tin nhầm response sai contract.
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// Lấy field string bắt buộc từ response backend; thiếu hoặc sai kiểu thì coi là response không hợp lệ.
 function stringField(value: Record<string, unknown>, field: string): string {
   if (typeof value[field] !== "string") throw invalidResponse();
   return value[field];
 }
 
+// Tạo lỗi thống nhất khi backend trả body không đúng schema mà frontend mong đợi.
 function invalidResponse(): ChatApiError {
   return new ChatApiError({ code: "invalid_response", detail: "Phản hồi chatbot không hợp lệ." });
 }
 
+// Phân biệt request bị người dùng dừng với lỗi mạng để UI không hiển thị retry sai ngữ cảnh.
 function cancelledRequest(): ChatApiError {
   return new ChatApiError({
     code: "cancelled",
@@ -58,6 +64,7 @@ function cancelledRequest(): ChatApiError {
   });
 }
 
+// Validate response chatbot trước khi đưa vào conversation để không render state/status lạ.
 function parseResponse(value: unknown): ChatResponse {
   if (!isRecord(value)) throw invalidResponse();
   const metadata = value.metadata;
@@ -87,6 +94,7 @@ function parseResponse(value: unknown): ChatResponse {
   };
 }
 
+// Map HTTP status từ proxy/backend thành thông báo thân thiện cho người dùng cuối.
 function parseProblem(status: number): ChatProblem {
   if (status === 422) {
     return {
@@ -102,6 +110,7 @@ function parseProblem(status: number): ChatProblem {
   };
 }
 
+// Chuẩn hóa request gửi đi: trim message và chặn tin nhắn rỗng ngay tại boundary frontend.
 function requestBody(input: ChatRequest): ChatRequest {
   const message = input.message.trim();
   if (!message) {
@@ -110,6 +119,7 @@ function requestBody(input: ChatRequest): ChatRequest {
   return { conversation_id: input.conversation_id, message };
 }
 
+// Gửi request có timeout và hỗ trợ abort để UI có thể dừng câu trả lời đang stream.
 async function fetchWithTimeout(
   url: string,
   input: ChatRequest,
@@ -118,6 +128,7 @@ async function fetchWithTimeout(
   const body = requestBody(input);
   const controller = new AbortController();
   const timeout = globalThis.setTimeout(() => controller.abort("timeout"), REQUEST_TIMEOUT_MS);
+  // Chuyển abort từ UI sang controller nội bộ để dùng chung với timeout của request.
   const cancel = () => controller.abort("cancelled");
   signal?.addEventListener("abort", cancel, { once: true });
   try {
@@ -146,6 +157,7 @@ async function fetchWithTimeout(
   }
 }
 
+// Gửi chat dạng non-stream, dùng như fallback hoặc test contract JSON truyền thống.
 export async function sendChat(input: ChatRequest & { signal?: AbortSignal }): Promise<ChatResponse> {
   const response = await fetchWithTimeout("/api/chat", input, input.signal);
   if (!response.ok) throw new ChatApiError(parseProblem(response.status));
@@ -158,6 +170,7 @@ export async function sendChat(input: ChatRequest & { signal?: AbortSignal }): P
   return parseResponse(body);
 }
 
+// Điều phối từng event SSE thành callback UI: started, delta, message, completed hoặc error.
 function dispatchEvent(
   parsed: ParsedSseEvent,
   callbacks: ChatStreamCallbacks,
@@ -194,6 +207,7 @@ function dispatchEvent(
   }
 }
 
+// Gửi chat dạng SSE để UI render token dần và vẫn nhận message cuối cùng đã validate đầy đủ.
 export async function streamChat(
   input: ChatRequest & { signal?: AbortSignal },
   callbacks: ChatStreamCallbacks = {},
@@ -206,6 +220,7 @@ export async function streamChat(
   const decoder = new TextDecoder();
   const parser = new SseParser();
   const state: { response?: ChatResponse; completed: boolean } = { completed: false };
+  // Hủy reader khi người dùng bấm dừng để stream đóng nhanh ở phía browser.
   const cancelReader = () => {
     void reader.cancel();
   };

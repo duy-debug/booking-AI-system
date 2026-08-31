@@ -2,6 +2,7 @@ import { ChatOpenButton } from "@/components/landing/ChatOpenButton";
 import { navItems } from "@/components/landing/data";
 import { Container } from "@/components/ui/Container";
 
+// Footer gom điều hướng cuối trang và CTA phụ để người dùng quay lại luồng đặt lịch.
 export function Footer() {
   return (
     <footer className="site-footer">

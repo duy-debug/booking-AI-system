@@ -11,6 +11,7 @@ import type { ChatMessage } from "@/types/chat";
 
 const WELCOME_TEXT = "Xin chào! Mình là Kori, trợ lý wellness của Komorebi. Mình có thể giúp anh/chị đặt lịch và giải đáp thông tin dịch vụ. Hôm nay anh/chị cần mình hỗ trợ gì?";
 
+// Tạo message chào mừng chỉ ở phía UI, không ghi vào history backend.
 function welcomeMessage(): ChatMessage {
   return {
     id: crypto.randomUUID(),
@@ -20,6 +21,7 @@ function welcomeMessage(): ChatMessage {
   };
 }
 
+// Quản lý toàn bộ vòng đời chat ở frontend: session, streaming, retry, abort và reset.
 export function useBookingChat() {
   const [conversationId, setConversationId] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -31,6 +33,7 @@ export function useBookingChat() {
   const inFlightRef = useRef(false);
 
   useEffect(() => {
+    // Khởi tạo sau frame đầu tiên để tránh lệch hydration và giữ conversation cũ nếu còn hạn.
     const frame = window.requestAnimationFrame(() => {
       const id = getOrCreateConversationId(sessionStorage);
       setConversationId(id);
@@ -43,6 +46,7 @@ export function useBookingChat() {
   }, []);
 
   const sendMessage = useCallback(async (rawText: string) => {
+    // Chặn gửi trùng khi request trước chưa hoàn tất, vì backend booking không nên nhận duplicate turn.
     const text = rawText.trim();
     if (!text || text.length > 2000 || !conversationId || inFlightRef.current) return;
     inFlightRef.current = true;
@@ -70,6 +74,7 @@ export function useBookingChat() {
         { conversation_id: conversationId, message: text, signal: controller.signal },
         {
           onStarted: () => {
+            // Khi backend nhận request, đánh dấu message user là đã gửi và hiển thị trạng thái thinking.
             setStreamingStarted(true);
             setMessages((current) => current.map((message) => (
               message.role === "user" && message.status === "sending"
@@ -78,6 +83,7 @@ export function useBookingChat() {
             )));
           },
           onDelta: (event) => {
+            // Delta đầu tiên tạo bubble assistant thật; các delta sau nối text để stream giống ChatGPT.
             if (!event.text) return;
             setStreamingStarted(false);
             setMessages((current) => {
@@ -101,6 +107,7 @@ export function useBookingChat() {
             });
           },
           onMessage: (result) => {
+            // Message cuối là response đã validate, dùng để thay thế text stream tạm bằng bản canonical.
             setStreamingStarted(false);
             setMessages((current) => {
               const messagesWithSentUser = current.map((message) => (
@@ -132,12 +139,14 @@ export function useBookingChat() {
     } catch (cause) {
       const problem = cause instanceof ChatApiError ? cause.problem : null;
       if (problem?.code === "cancelled") {
+        // Người dùng dừng stream thì không coi tin nhắn đã gửi là lỗi cần retry.
         setMessages((current) => current.map((message) => (
           message.role === "user" && message.status === "sending"
             ? { ...message, status: "sent" as const }
             : message
         )));
       } else {
+        // Chỉ bật retry cho lỗi có thể gửi lại an toàn; stream gián đoạn không tự retry để tránh sai trạng thái booking.
         setMessages((current) => current
           .map((message) => (
             message.role === "user" && message.status === "sending"
@@ -157,13 +166,16 @@ export function useBookingChat() {
     }
   }, [conversationId]);
 
+  // Gửi lại nội dung gần nhất khi lỗi thuộc nhóm an toàn để retry.
   const retryLastMessage = useCallback(() => {
     if (!retryText || inFlightRef.current) return;
     void sendMessage(retryText);
   }, [retryText, sendMessage]);
 
+  // Abort request hiện tại nhưng giữ conversation để người dùng có thể tiếp tục chat.
   const cancelCurrentRequest = useCallback(() => abortRef.current?.abort(), []);
 
+  // Reset toàn bộ session chat ở frontend và tạo conversation mới cho flow mới.
   const resetConversation = useCallback(() => {
     abortRef.current?.abort();
     inFlightRef.current = false;

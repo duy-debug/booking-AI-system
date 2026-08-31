@@ -3,6 +3,7 @@ import { WellnessImage } from "@/components/landing/WellnessImage";
 import { ChatOpenButton } from "@/components/landing/ChatOpenButton";
 import { Container } from "@/components/ui/Container";
 
+// Section giới thiệu therapist mẫu để tăng độ tin cậy, CTA vẫn đưa về chatbot thay vì đặt trực tiếp.
 export function TherapistsSection() {
   return (
     <section className="therapists-section">
