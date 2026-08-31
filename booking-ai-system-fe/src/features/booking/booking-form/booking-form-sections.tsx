@@ -298,29 +298,19 @@ export function BookingReservationEditor({
               <span className="mb-2 block text-[11px] text-red-600">{errors.reservations[index]?.mainCourseId?.message}</span>
             )}
 
-            <span className={fieldLabelClass}>Course thêm · áp dụng toàn nhóm</span>
-            <div className="flex flex-wrap gap-1.5">
-              {addonCourses.map((course) => {
-                const selected = reservation.addonCourseIds.includes(course.id);
-                return (
-                  <button
-                    key={course.id}
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => {
-                      const next = selected
-                        ? reservation.addonCourseIds.filter((id) => id !== course.id)
-                        : [...reservation.addonCourseIds, course.id];
-                      applyAddonCoursesToGroup(next);
-                    }}
-                    className={`${chipClass} ${selected ? "border-blue-700 bg-blue-600 text-white" : "border-zinc-300 bg-white text-zinc-700"}`}
-                  >
-                    {course.name}
-                  </button>
-                );
-              })}
-              {addonCourses.length === 0 && <span className="text-[11px] text-zinc-400">Không có course thêm</span>}
-            </div>
+            <label className={fieldLabelClass}>Course thêm · áp dụng toàn nhóm</label>
+            <select
+              className={`${inputClass} w-full`}
+              value={reservation.addonCourseIds[0] ?? ""}
+              onChange={(event) => applyAddonCoursesToGroup(event.target.value ? [event.target.value] : [])}
+            >
+              <option value="">Không chọn course thêm</option>
+              {addonCourses.map((course) => (
+                <option key={course.id} value={course.id}>
+                  {course.name} · {course.durationMinutes} phút
+                </option>
+              ))}
+            </select>
           </section>
         ))}
       </div>

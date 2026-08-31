@@ -12,13 +12,6 @@ interface BookingLayerProps {
   onSelect: (booking: BookingViewModel) => void;
 }
 
-export const COMPACT_BOOKING_WIDTH = 48;
-
-// Chỉ rút gọn booking thực sự quá hẹp; block từ 48px trở lên vẫn hiển thị đủ ba dòng thông tin.
-export function shouldUseCompactBookingLayout(width: number): boolean {
-  return width < COMPACT_BOOKING_WIDTH;
-}
-
 // Render một booking active riêng lẻ, xử lý click và tối ưu re-render bằng memo.
 const BookingBlock = memo(function BookingBlock({
   booking,
@@ -35,7 +28,6 @@ const BookingBlock = memo(function BookingBlock({
 }) {
   // Chuyển booking hiện tại về callback selection ổn định khi người dùng mở chi tiết.
   const handleClick = useCallback(() => onSelect(booking), [booking, onSelect]);
-  const narrow = shouldUseCompactBookingLayout(w);
 
   return (
     <button
@@ -46,25 +38,17 @@ const BookingBlock = memo(function BookingBlock({
       className={`pointer-events-auto absolute overflow-hidden rounded border-l-2 ${style.border} ${style.bg} hover:ring-2 hover:ring-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-shadow cursor-pointer`}
       style={{ left: x, width: Math.max(w, MIN_BOOKING_WIDTH), top: 2, bottom: 2 }}
     >
-      {narrow ? (
-        <div className="flex h-full items-center justify-center px-0.5">
-          <span className={`truncate text-[9px] font-bold ${style.text}`}>
-            {booking.customerName ?? booking.customerPhone ?? "?"}
-          </span>
+      <div className="px-1.5 py-0.5 h-full flex flex-col justify-center gap-0">
+        <div className={`text-xs font-semibold leading-tight truncate ${style.text}`}>
+          {booking.customerName ?? booking.customerPhone}
         </div>
-      ) : (
-        <div className="px-1.5 py-0.5 h-full flex flex-col justify-center gap-0">
-          <div className={`text-xs font-semibold leading-tight truncate ${style.text}`}>
-            {booking.customerName ?? booking.customerPhone}
-          </div>
-          <div className="text-[10px] leading-tight text-zinc-600 truncate">
-            {booking.courseNames.join(", ") || "—"}
-          </div>
-          <div className="text-[10px] leading-tight text-zinc-500">
-            {absoluteMinutesToHHMM(booking.startMinutes)}–{absoluteMinutesToHHMM(booking.endMinutes)}
-          </div>
+        <div className="text-[10px] leading-tight text-zinc-600 truncate">
+          {booking.courseNames.join(", ") || "—"}
         </div>
-      )}
+        <div className="text-[10px] leading-tight text-zinc-500">
+          {absoluteMinutesToHHMM(booking.startMinutes)}–{absoluteMinutesToHHMM(booking.endMinutes)}
+        </div>
+      </div>
       <span className="sr-only">{style.label}</span>
     </button>
   );
