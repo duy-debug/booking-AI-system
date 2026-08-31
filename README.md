@@ -55,7 +55,7 @@ flowchart LR
     Customer[Customer]
 
     subgraph Admin_System[POS Admin System]
-        AdminFE[Dashbroad]
+        AdminFE[dashboard]
         POS[FastAPI Booking API]
         DB[(Supabase PostgreSQL)]
     end
