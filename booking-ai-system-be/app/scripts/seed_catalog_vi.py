@@ -101,6 +101,74 @@ COURSE_TEMPLATES = {
     ],
 }
 
+# Bổ sung catalog cho 5 shop đang dùng trong seed local để chatbot/admin có nhiều
+# lựa chọn main course và add-on hơn khi test duration, combo dịch vụ và slot.
+ADDITIONAL_COURSE_TEMPLATES = {
+    "tokyo-sakura": [
+        ("zen-quick-reset-45", "Massage thư giãn Zen nhanh", 45, "390000", "main"),
+        ("tea-aroma-balance-60", "Massage hương trà cân bằng", 60, "575000", "main"),
+        ("deep-zen-release-75", "Massage giải phóng cơ sâu Zen", 75, "735000", "main"),
+        ("stone-sleep-ritual-90", "Liệu trình đá nóng hỗ trợ ngủ sâu", 90, "865000", "main"),
+        ("premium-zen-retreat-120", "Trải nghiệm Zen retreat toàn thân", 120, "1190000", "main"),
+        ("mini-scalp-refresh-15", "Thư giãn da đầu nhanh", 15, "120000", "addon"),
+        ("warm-eye-relief-20", "Ủ mắt thảo mộc thư giãn", 20, "145000", "addon"),
+        ("matcha-hand-care-20", "Dưỡng tay matcha", 20, "150000", "addon"),
+        ("neck-hot-compress-30", "Chườm nóng cổ vai", 30, "195000", "addon"),
+        ("foot-aroma-finish-45", "Ngâm chân tinh dầu kéo dài", 45, "260000", "addon"),
+    ],
+    "osaka-nagomi": [
+        ("nagomi-quick-relax-45", "Massage Nagomi thư giãn nhanh", 45, "395000", "main"),
+        ("shoulder-back-reset-60", "Massage cổ vai lưng phục hồi", 60, "565000", "main"),
+        ("muscle-care-nagomi-75", "Massage chăm sóc cơ Nagomi", 75, "725000", "main"),
+        ("aroma-deep-calm-90", "Massage tinh dầu thư giãn sâu", 90, "850000", "main"),
+        ("full-body-retreat-120", "Liệu trình phục hồi toàn thân", 120, "1180000", "main"),
+        ("quick-hand-relief-15", "Bấm huyệt tay nhanh", 15, "115000", "addon"),
+        ("yuzu-eye-mask-20", "Ủ mắt yuzu thư giãn", 20, "145000", "addon"),
+        ("warm-foot-compress-20", "Chườm ấm bàn chân", 20, "155000", "addon"),
+        ("neck-therapy-plus-30", "Trị liệu cổ vai chuyên sâu", 30, "240000", "addon"),
+        ("steam-herb-plus-45", "Xông hơi thảo mộc kéo dài", 45, "290000", "addon"),
+    ],
+    "kyoto-tsukikage": [
+        ("kyoto-calm-45", "Massage Kyoto thư giãn nhanh", 45, "405000", "main"),
+        ("meridian-soft-flow-60", "Massage kinh lạc thư giãn", 60, "585000", "main"),
+        ("bamboo-balance-75", "Massage tre cân bằng cơ thể", 75, "755000", "main"),
+        ("moon-aroma-deep-90", "Nghi thức tinh dầu Ánh Trăng", 90, "875000", "main"),
+        ("tsukikage-signature-120", "Liệu trình Tsukikage signature", 120, "1220000", "main"),
+        ("herbal-eye-mini-15", "Ủ mắt thảo mộc nhanh", 15, "120000", "addon"),
+        ("rice-foot-mini-20", "Ngâm chân cám gạo ngắn", 20, "155000", "addon"),
+        ("face-gua-sha-mini-20", "Gua sha mặt nhẹ", 20, "165000", "addon"),
+        ("shoulder-stone-plus-30", "Đá nóng cổ vai chuyên sâu", 30, "215000", "addon"),
+        ("head-ritual-plus-45", "Nghi thức thư giãn da đầu kéo dài", 45, "315000", "addon"),
+    ],
+    "yokohama-minato": [
+        ("harbor-quick-reset-45", "Massage phục hồi nhanh Harbor", 45, "390000", "main"),
+        ("marine-relax-60", "Massage thư giãn gió biển", 60, "555000", "main"),
+        ("leg-back-recovery-75", "Massage phục hồi lưng chân", 75, "730000", "main"),
+        ("stone-wave-premium-90", "Massage đá nóng sóng biển", 90, "875000", "main"),
+        ("minato-wellness-120", "Liệu trình Minato wellness", 120, "1210000", "main"),
+        ("calf-mini-release-15", "Thả lỏng bắp chân nhanh", 15, "110000", "addon"),
+        ("salt-foot-mini-20", "Ngâm chân muối khoáng ngắn", 20, "150000", "addon"),
+        ("cool-face-mini-20", "Làm dịu da mặt nhanh", 20, "160000", "addon"),
+        ("back-aroma-compress-30", "Chườm lưng tinh dầu", 30, "210000", "addon"),
+        ("hydration-body-care-45", "Dưỡng ẩm cơ thể chuyên sâu", 45, "320000", "addon"),
+    ],
+    "sapporo-yuki": [
+        ("snow-quick-warm-45", "Massage làm ấm nhanh", 45, "400000", "main"),
+        ("warm-joint-care-60", "Massage chăm sóc khớp cơ ấm", 60, "570000", "main"),
+        ("winter-muscle-reset-75", "Massage phục hồi cơ ngày lạnh", 75, "740000", "main"),
+        ("cocoa-warm-ritual-90", "Liệu trình cacao giữ ấm", 90, "880000", "main"),
+        ("sapporo-snow-retreat-120", "Trải nghiệm Snow retreat toàn thân", 120, "1230000", "main"),
+        ("ginger-foot-mini-15", "Ngâm chân gừng nhanh", 15, "120000", "addon"),
+        ("warm-scalp-mini-20", "Ủ đầu tinh dầu ngắn", 20, "165000", "addon"),
+        ("neck-warm-mini-20", "Ủ ấm cổ vai nhanh", 20, "150000", "addon"),
+        ("foot-reflex-plus-30", "Bấm huyệt chân chuyên sâu", 30, "220000", "addon"),
+        ("herbal-sauna-plus-45", "Xông thảo dược giữ ấm kéo dài", 45, "300000", "addon"),
+    ],
+}
+
+for shop_code, course_items in ADDITIONAL_COURSE_TEMPLATES.items():
+    COURSE_TEMPLATES[shop_code].extend(course_items)
+
 SURNAMES = ["Nguyễn", "Trần", "Lê", "Phạm", "Hoàng", "Huỳnh", "Phan", "Vũ", "Võ", "Đặng", "Bùi", "Đỗ", "Hồ", "Ngô", "Dương", "Lý", "Đinh", "Mai", "Trịnh", "Đoàn", "Lâm", "Tạ", "Cao", "Chu", "Quách", "La", "Tôn", "Thái", "Hà", "Kiều"]
 FEMALE_NAMES = ["Ngọc Anh", "Minh Anh", "Thùy Linh", "Khánh Linh", "Phương Thảo", "Thu Trang", "Hồng Nhung", "Bảo Ngọc", "Thanh Huyền", "Kim Oanh", "Hải Yến", "Mai Chi", "Diệu Linh", "Quỳnh Anh", "Tú Anh", "Ánh Dương", "Nhã Phương", "Uyên Nhi", "Thảo Vy", "Hoài An", "Trúc Linh", "Mỹ Duyên", "Thiên Hương", "Thanh Mai"]
 MALE_NAMES = ["Minh Quân", "Đức Anh", "Quang Huy", "Hoàng Nam", "Tuấn Anh", "Hữu Phúc", "Gia Bảo", "Thanh Tùng", "Đình Khôi", "Nhật Minh", "Xuân Trường", "Tiến Dũng", "Anh Tuấn", "Mạnh Hùng", "Trọng Nghĩa", "Bảo Long", "Thành Đạt", "Quốc Bảo", "Khắc Duy", "Hải Đăng", "Thiện Nhân", "Trung Kiên", "Minh Khang", "Đăng Khoa"]
