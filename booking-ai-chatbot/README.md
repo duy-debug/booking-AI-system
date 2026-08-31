@@ -165,6 +165,79 @@ flowchart TD
 4. Conversation Context được tải đầu lượt và lưu lại cuối lượt để giữ mạch hội thoại nhiều turn.
 5. Response Builder và Gemini NLG tạo câu trả lời cuối cùng trước khi stream về popup.
 
+### Luồng Xử Lý Đặt Lịch Thông Thường
+
+Đây là luồng happy path khi khách hàng đặt lịch mới và các thông tin đều hợp lệ. Người dùng có thể nhập từng bước hoặc nhập một câu dài, chatbot vẫn gom thông tin vào `BookingContext` rồi chỉ hỏi những phần còn thiếu.
+
+```mermaid
+flowchart TB
+    subgraph ROW1["Giai đoạn 1"]
+    direction LR
+    subgraph A["1. Thu thập nhu cầu"]
+    direction TB
+        START["Khách muốn đặt lịch"]
+        SHOP["Chọn cửa hàng"]
+        DATE["Chọn ngày"]
+        PEOPLE["Chọn số người"]
+    end
+
+    subgraph B["2. Chọn dịch vụ"]
+    direction TB
+        DURATION["Chọn thời lượng"]
+        MAIN["Chọn liệu trình chính"]
+        ADDON["Chọn add-on hoặc bỏ qua"]
+    end
+    end
+
+    subgraph ROW2["Giai đoạn 2"]
+    direction TB
+    subgraph C["3. Kiểm tra lịch trống"]
+    direction TB
+        SLOT["Kiểm tra slot trống"]
+        TIME["Chọn giờ bắt đầu"]
+        THERAPIST{"Booking 1 người?"}
+        THERAPIST_SELECT["Chọn kỹ thuật viên<br>giới tính hoặc không yêu cầu"]
+        SKIP_THERAPIST["Booking nhóm<br>không chọn kỹ thuật viên cụ thể"]
+    end
+    end
+
+    subgraph ROW3["Giai đoạn 3"]
+    direction LR
+    subgraph D["4. Thông tin khách hàng"]
+    direction TB
+        PHONE["Nhập số điện thoại"]
+        CUSTOMER["Kiểm tra khách hàng<br>và danh sách hạn chế"]
+        NAME{"Đã có tên khách hàng?"}
+        ASK_NAME["Nhập tên khách hàng"]
+    end
+
+    subgraph E["5. Xác nhận và tạo booking"]
+    direction TB
+        CONFIRM["Hiển thị form xác nhận"]
+        CREATE["Tạo booking chính thức"]
+        DONE["Thông báo đặt lịch thành công"]
+    end
+    end
+
+    START --> SHOP --> DATE --> PEOPLE
+    PEOPLE --> DURATION --> MAIN --> ADDON
+    ADDON --> SLOT --> TIME --> THERAPIST
+    THERAPIST -- Có --> THERAPIST_SELECT --> PHONE
+    THERAPIST -- Không --> SKIP_THERAPIST --> PHONE
+    PHONE --> CUSTOMER --> NAME
+    NAME -- Có --> CONFIRM
+    NAME -- Chưa có --> ASK_NAME --> CONFIRM
+    CONFIRM --> CREATE --> DONE
+```
+
+Các điểm xử lý chính:
+
+1. Chatbot luôn validate theo thứ tự nghiệp vụ: cửa hàng, ngày, số người, thời lượng, liệu trình, add-on, slot, giờ, kỹ thuật viên, khách hàng.
+2. Khi một bước không hợp lệ, flow dừng tại bước đó và gợi ý dữ liệu hợp lệ từ Booking Backend API nếu có.
+3. Slot chỉ được load khi đã đủ thông tin dịch vụ cần thiết.
+4. Booking nhóm không cho chọn kỹ thuật viên cụ thể, hệ thống sẽ xử lý phân công phù hợp.
+5. Trước khi tạo booking thật, hệ thống hiển thị form xác nhận để khách kiểm tra lại toàn bộ thông tin.
+
 ### Luồng Đặt Booking
 
 ```mermaid
