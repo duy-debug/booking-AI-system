@@ -104,29 +104,55 @@ Phần này mô tả các flow hội thoại chính theo `booking_flow.json`: ch
 
 ```mermaid
 flowchart TD
-    START[User message] --> NLU[Gemini NLU]
-    NLU --> INTENT{Intent}
+    subgraph CLIENT["Client Layer"]
+        USER[Người dùng]
+        POPUP[Chatbot Popup]
+    end
 
-    INTENT -->|start_booking| BOOKING[Luồng đặt booking]
-    INTENT -->|cancel_existing_booking| CANCEL[Luồng hủy booking]
-    INTENT -->|ask_question| RAGFLOW[Luồng FAQ và RAG]
-    INTENT -->|greeting hoặc thanks| IDLE[Trả lời hội thoại nhẹ và giữ idle]
-    INTENT -->|unknown| CLARIFY[Hỏi lại nhu cầu]
+    subgraph CHATBOT["Chatbot Backend"]
+        API[Chat API]
+        CONTEXT[Conversation Context]
+        NLU[Gemini NLU]
+        ROUTER[Intent Routing]
+        FLOW[State Machine]
+        ACTION[Business Action]
+        RESPONSE[Response Builder]
+        NLG[Gemini NLG]
+    end
 
-    BOOKING --> SAVE[Save conversation context]
-    CANCEL --> SAVE
-    RAGFLOW --> SAVE
-    IDLE --> SAVE
-    CLARIFY --> SAVE
-    SAVE --> RESPONSE[SSE hoặc JSON response]
+    subgraph EXTERNAL["External Systems"]
+        POS[POS API]
+        QDRANT[Qdrant Knowledge Base]
+    end
+
+    USER -->|Nhập tin nhắn| POPUP
+    POPUP -->|Gửi request| API
+    API -->|Tải ngữ cảnh hội thoại| CONTEXT
+    API -->|Gửi text và context| NLU
+    NLU -->|Trả về nhu cầu và thông tin đã nhận diện| ROUTER
+    ROUTER -->|Kiểm tra bước hội thoại phù hợp| FLOW
+    FLOW -->|Điều phối thao tác cần chạy| ACTION
+
+    ACTION -->|Đặt lịch, hủy lịch, kiểm tra slot, kiểm tra khách hàng| POS
+    ACTION -->|Tra cứu FAQ và tri thức nội bộ| QDRANT
+    POS -->|Dữ liệu nghiệp vụ| ACTION
+    QDRANT -->|Context liên quan| ACTION
+
+    ACTION -->|Kết quả xử lý| RESPONSE
+    RESPONSE -->|Tạo câu trả lời tự nhiên khi cần| NLG
+    NLG -->|Nội dung trả lời cuối cùng| RESPONSE
+    RESPONSE -->|Lưu lại trạng thái mới| CONTEXT
+    RESPONSE -->|Stream hoặc trả JSON| POPUP
+    POPUP -->|Hiển thị câu trả lời| USER
 ```
 
 Điểm quan trọng:
 
-1. `LLMNLU` chỉ extract intent và entity từ tin nhắn.
-2. `StateMachine` quyết định intent đó có hợp lệ với state hiện tại không.
-3. `ActionRegistry` chạy các action nghiệp vụ như tìm cửa hàng, kiểm tra slot, kiểm tra khách hàng và tạo booking.
-4. `InstructionBuilder` và `ResponseGenerator` tạo câu trả lời cuối cùng cho popup.
+1. Client chỉ gửi tin nhắn và hiển thị kết quả, không quyết định nghiệp vụ.
+2. Gemini NLU hiểu nhu cầu người dùng, còn State Machine quyết định bước hội thoại hợp lệ.
+3. Business Action là nơi gọi POS hoặc Qdrant tùy theo nhu cầu đặt lịch, hủy lịch hoặc hỏi thông tin.
+4. Conversation Context được tải đầu lượt và lưu lại cuối lượt để giữ mạch hội thoại nhiều turn.
+5. Response Builder và Gemini NLG tạo câu trả lời cuối cùng trước khi stream về popup.
 
 ### Luồng Đặt Booking
 
