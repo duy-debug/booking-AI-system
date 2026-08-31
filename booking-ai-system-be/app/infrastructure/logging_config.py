@@ -13,7 +13,9 @@ _RESERVED = frozenset(logging.LogRecord("", 0, "", 0, "", (), None).__dict__) | 
 }
 
 
+# Formatter JSON dùng cho môi trường cần log có cấu trúc, kèm trace id để nối request qua nhiều layer.
 class JsonFormatter(logging.Formatter):
+    # Đưa LogRecord về JSON an toàn, đồng thời che dữ liệu nhạy cảm trước khi ghi log.
     def format(self, record: logging.LogRecord) -> str:
         from app.infrastructure.trace_context import current_trace_context
 
@@ -35,7 +37,9 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
+# Formatter console phục vụ local/dev, vẫn gắn trace/session/turn để debug cùng một request dễ hơn.
 class ConsoleFormatter(logging.Formatter):
+    # Format log dạng người đọc được và sanitize message để tránh lộ dữ liệu nhạy cảm.
     def format(self, record: logging.LogRecord) -> str:
         from app.infrastructure.trace_context import current_trace_context
 
@@ -51,6 +55,7 @@ class ConsoleFormatter(logging.Formatter):
         )
 
 
+# Cấu hình logging tập trung cho POS backend để mọi module dùng cùng format và level.
 def configure_logging(*, level: str = "INFO", log_format: str = "console") -> None:
     normalized_level = level.strip().upper()
     if normalized_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
@@ -65,6 +70,7 @@ def configure_logging(*, level: str = "INFO", log_format: str = "console") -> No
         else ConsoleFormatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
     )
     root = logging.getLogger()
+    # Xóa handler cũ để gọi configure nhiều lần trong test/startup không bị duplicate log.
     for existing in tuple(root.handlers):
         root.removeHandler(existing)
         existing.close()
@@ -81,6 +87,7 @@ def configure_logging(*, level: str = "INFO", log_format: str = "console") -> No
     access_logger.propagate = False
 
 
+# Helper ghi log nghiệp vụ có cấu trúc, tự gắn trace context và sanitize các field động.
 def log_event(
     level: int,
     component: str,

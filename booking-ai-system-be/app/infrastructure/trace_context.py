@@ -15,6 +15,7 @@ from app.infrastructure.logging_config import log_event
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
+# TraceContext giữ định danh xuyên suốt request để POS log khớp được với chatbot hoặc POS UI.
 @dataclass(frozen=True, slots=True)
 class TraceContext:
     trace_id: str = "-"
@@ -29,24 +30,30 @@ _current: ContextVar[TraceContext | None] = ContextVar(
 )
 
 
+# Lấy trace context hiện tại; nếu request chưa bind thì trả context rỗng an toàn cho logging.
 def current_trace_context() -> TraceContext:
     return _current.get() or TraceContext()
 
 
+# Bind trace context vào ContextVar để các async task trong cùng request dùng chung metadata.
 def bind_trace_context(context: TraceContext) -> Token[TraceContext | None]:
     return _current.set(context)
 
 
+# Khôi phục context cũ sau request để trace không bị rò sang request kế tiếp.
 def reset_trace_context(token: Token[TraceContext | None]) -> None:
     _current.reset(token)
 
 
+# Middleware gắn trace id/request id vào toàn bộ vòng đời HTTP request của POS backend.
 class TraceMiddleware:
     """Keep upstream trace identity for the full POS HTTP lifecycle."""
 
+    # Lưu ASGI app kế tiếp trong chain middleware.
     def __init__(self, app: Any) -> None:
         self.app = app
 
+    # Bao quanh request HTTP để bind trace, thêm response header và log kết quả cuối cùng.
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
@@ -72,6 +79,7 @@ class TraceMiddleware:
             path=str(scope.get("path", "")),
         )
 
+        # Intercept response start để trả trace id cho caller, giúp đối chiếu log hai hệ thống.
         async def send_with_trace(message: dict[str, Any]) -> None:
             nonlocal status_code
             if message.get("type") == "http.response.start":
@@ -123,8 +131,10 @@ class TraceMiddleware:
             )
             raise
         finally:
+            # Luôn reset context để request sau không kế thừa nhầm trace/session/turn hiện tại.
             reset_trace_context(token)
 
+    # Ghi log request thành công hoặc lỗi nghiệp vụ với status, endpoint, params và duration.
     def _log_completed_request(
         self,
         *,
@@ -178,11 +188,13 @@ class TraceMiddleware:
         )
 
 
+# Chỉ chấp nhận trace/request/session id có ký tự an toàn, còn lại thay bằng default.
 def _valid(value: str | None, default: str) -> str:
     normalized = value.strip() if value else ""
     return normalized if _SAFE_ID.fullmatch(normalized) else default
 
 
+# Parse turn id từ header chatbot; POS UI không có turn id nên sẽ được phân loại riêng.
 def _turn(value: str | None) -> int | None:
     if value is None or not value.isdigit():
         return None
@@ -190,6 +202,7 @@ def _turn(value: str | None) -> int | None:
     return parsed if parsed > 0 else None
 
 
+# Map endpoint kỹ thuật thành tên operation nghiệp vụ để log dễ đọc hơn.
 def _operation(scope: dict[str, Any]) -> str:
     path = str(scope.get("path", ""))
     method = str(scope.get("method", ""))
@@ -208,6 +221,7 @@ def _operation(scope: dict[str, Any]) -> str:
     return "http_request"
 
 
+# Ưu tiên path template của FastAPI để log không bị nhiễu bởi UUID/id cụ thể.
 def _normalized_path(scope: dict[str, Any]) -> str:
     route = scope.get("route")
     path_format = getattr(route, "path_format", None)
@@ -216,6 +230,7 @@ def _normalized_path(scope: dict[str, Any]) -> str:
     return str(scope.get("path", ""))
 
 
+# Lấy tên endpoint handler để developer trace từ log về đúng router function.
 def _endpoint_name(scope: dict[str, Any]) -> str:
     endpoint = scope.get("endpoint")
     module = getattr(endpoint, "__module__", "")
@@ -227,6 +242,7 @@ def _endpoint_name(scope: dict[str, Any]) -> str:
     return "unknown_endpoint()"
 
 
+# Ghi lại query params quan trọng giúp debug request POS mà không cần log toàn bộ body.
 def _important_params(scope: dict[str, Any]) -> dict[str, str]:
     query_string = scope.get("query_string", b"")
     if not isinstance(query_string, bytes) or not query_string:
@@ -234,6 +250,7 @@ def _important_params(scope: dict[str, Any]) -> dict[str, str]:
     return dict(parse_qsl(query_string.decode("latin-1"), keep_blank_values=False))
 
 
+# Chuẩn hóa metadata lỗi do router/service gắn vào scope để log phân biệt validation và business error.
 def _error_metadata(scope: dict[str, Any]) -> tuple[str | None, str]:
     error = scope.get("pos_error")
     if not isinstance(error, dict):
@@ -245,6 +262,7 @@ def _error_metadata(scope: dict[str, Any]) -> tuple[str | None, str]:
     return safe_code, "business_failed"
 
 
+# Chuyển HTTP status code thành nhãn dễ đọc trong log console.
 def _status_label(status_code: int) -> str:
     try:
         return HTTPStatus(status_code).phrase.upper()
@@ -252,5 +270,6 @@ def _status_label(status_code: int) -> str:
         return "UNKNOWN"
 
 
+# Phân biệt request đến từ chatbot hay POS UI dựa trên turn id được truyền qua header.
 def _request_source(context: TraceContext) -> str:
     return "chatbot" if context.turn_id is not None else "pos_ui"
