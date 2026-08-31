@@ -13,11 +13,13 @@ import httpx
 from qdrant_client import QdrantClient
 
 from app.application.action_registry import ActionRegistry
+from app.application.handlers.available_therapists_handler import AvailableTherapistsHandler
 from app.application.handlers.check_availability_handler import (
     CheckAvailabilityHandler,
 )
 from app.application.handlers.check_customer_handler import CheckCustomerHandler
 from app.application.handlers.create_booking_handler import CreateBookingHandler
+from app.application.handlers.entity_resolution_handler import EntityResolutionCoordinator
 from app.application.handlers.search_course_handler import SearchCourseHandler
 from app.application.handlers.search_shop_handler import SearchShopHandler
 from app.application.handlers.select_booking_info_handler import SelectBookingInfoHandler
@@ -28,7 +30,6 @@ from app.dialog.instruction_builder import InstructionBuilder
 from app.dialog.nlu import (
     LLMNLU,
     SUPPORTED_NLU_INTENTS,
-    EntityResolutionCoordinator,
     StateIntentPolicy,
     build_state_intent_policy,
 )
@@ -182,6 +183,7 @@ class ApplicationContainer:
     instruction_builder: InstructionBuilder
     response_generator: ResponseGenerator
     check_customer_handler: CheckCustomerHandler
+    available_therapists_handler: AvailableTherapistsHandler
     select_booking_info_handler: SelectBookingInfoHandler
     select_schedule_handler: SelectScheduleHandler
     state_intent_policy: StateIntentPolicy
@@ -258,6 +260,9 @@ async def create_application_container(
         search_course_handler = SearchCourseHandler(booking_gateway)
         check_availability_handler = CheckAvailabilityHandler(booking_gateway)
         check_customer_handler = CheckCustomerHandler(booking_gateway)
+        available_therapists_handler = AvailableTherapistsHandler(
+            cast(TherapistAvailabilityGateway, booking_gateway)
+        )
         select_booking_info_handler = SelectBookingInfoHandler()
         select_schedule_handler = SelectScheduleHandler()
         create_booking_handler = CreateBookingHandler(booking_gateway)
@@ -279,6 +284,7 @@ async def create_application_container(
             search_course_handler,
             check_availability_handler,
             check_customer_handler,
+            available_therapists_handler,
             select_booking_info_handler,
             select_schedule_handler,
             create_booking_handler,
@@ -373,6 +379,7 @@ async def create_application_container(
             instruction_builder=instruction_builder,
             response_generator=response_generator,
             check_customer_handler=check_customer_handler,
+            available_therapists_handler=available_therapists_handler,
             select_booking_info_handler=select_booking_info_handler,
             select_schedule_handler=select_schedule_handler,
             state_intent_policy=state_intent_policy,

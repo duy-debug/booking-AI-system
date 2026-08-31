@@ -3,15 +3,19 @@
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import date, time
+from datetime import date, time, timedelta
 from types import MappingProxyType
 from typing import TypeAlias
 
 from app.dialog.dialog_controller import DialogTurnResult, DialogTurnStatus
-from app.domain.booking_context import BookingContext
+from app.domain.booking_context import BookingContext, CourseSelectionMode
 from app.domain.booking_models import (
     MAX_CUSTOMERS_PER_BOOKING,
     MIN_CUSTOMERS_PER_BOOKING,
+    BookingRules,
+    Course,
+    CourseType,
+    Shop,
     TherapistPreferenceType,
 )
 from app.domain.booking_state import BookingState
@@ -1140,3 +1144,325 @@ def _booking_reference_lines(context: BookingContext) -> tuple[str, ...]:
     if booking_id is not None:
         lines.append(f"Mã booking: {booking_id}")
     return tuple(lines)
+
+
+# Các helper bên dưới chỉ dựng text/metadata có cấu trúc cho dialog controller.
+# Controller vẫn quyết định khi nào gọi POS hoặc đổi state, còn file này giữ trách nhiệm trình bày.
+def build_handled_response(
+    context: BookingContext,
+    text: str,
+    metadata: Mapping[str, object] | None = None,
+) -> DialogResponse:
+    return DialogResponse(
+        text=text,
+        instruction_template=None,
+        state=context.state,
+        status=DialogTurnStatus.FAILURE_HANDLED,
+        metadata=dict(metadata or {}),
+    )
+
+
+def build_catalog_response(
+    context: BookingContext,
+    text: str,
+    item_count: int,
+) -> DialogResponse:
+    return DialogResponse(
+        text=text,
+        instruction_template=None,
+        state=context.state,
+        status=DialogTurnStatus.SUCCESS,
+        metadata={
+            "item_count": item_count,
+            "preserve_structured_text": True,
+        },
+    )
+
+
+def format_numbered_options(text: str, options: tuple[str, ...]) -> str:
+    if not options:
+        return text
+    lines = "\n".join(
+        f"{index}. {option}"
+        for index, option in enumerate(options, 1)
+    )
+    return f"{text}\n{lines}"
+
+
+def format_shop_catalog_response(
+    context: BookingContext,
+    shops: list[Shop],
+    *,
+    filtered: bool,
+) -> DialogResponse:
+    if not shops:
+        message = (
+            "Không tìm thấy cửa hàng trong khu vực này. Vui lòng thử tên khu vực khác."
+            if filtered
+            else "POS hiện không trả về cửa hàng nào."
+        )
+        return build_handled_response(context, message)
+
+    names = tuple(str(shop.name) for shop in shops)
+    lines = "\n".join(f"{index}. {name}" for index, name in enumerate(names, 1))
+    text = f"Komorebi hiện có các cửa hàng:\n{lines}\nAnh/chị muốn chọn cửa hàng nào ạ?"
+    return build_catalog_response(context, text, len(names))
+
+
+def duration_options_from_courses(courses: list[Course]) -> tuple[str, ...]:
+    durations = sorted(
+        {
+            course.duration_minutes
+            for course in courses
+            if course.course_type is CourseType.MAIN and course.duration_minutes > 0
+        }
+    )
+    return tuple(f"{duration} phút" for duration in durations)
+
+
+def format_duration_step_response(
+    context: BookingContext,
+    durations: tuple[str, ...],
+) -> DialogResponse:
+    text = (
+        "Cửa hàng hiện hỗ trợ các thời lượng:\n"
+        + "\n".join(f"{index}. {duration}" for index, duration in enumerate(durations, 1))
+        + "\nAnh/chị muốn chọn thời lượng nào ạ?"
+    )
+    return build_catalog_response(context, text, len(durations))
+
+
+def format_duration_mismatch_response(
+    context: BookingContext,
+    selected_duration: int,
+    durations: tuple[str, ...],
+) -> DialogResponse:
+    shop_name = context.shop.name if context.shop is not None else "cửa hàng đã chọn"
+    text = (
+        f"Thời lượng {selected_duration} phút hiện chưa có liệu trình chính phù hợp "
+        f"tại {shop_name}.\n"
+        "Cửa hàng hiện hỗ trợ các thời lượng:\n"
+        + "\n".join(f"{index}. {duration}" for index, duration in enumerate(durations, 1))
+        + "\nAnh/chị vui lòng chọn lại một thời lượng trong danh sách trên."
+    )
+    return build_catalog_response(context, text, len(durations))
+
+
+def format_service_catalog_response(
+    context: BookingContext,
+    courses: list[Course],
+    *,
+    course_type: CourseType,
+) -> DialogResponse:
+    if course_type is CourseType.MAIN:
+        if not courses:
+            return build_handled_response(
+                context,
+                "POS không có liệu trình chính phù hợp với thời lượng đã chọn.",
+            )
+        visible = courses[:8]
+        text = (
+            "Các liệu trình chính phù hợp:\n"
+            + numbered_course_names(visible)
+            + "\nAnh/chị hãy chọn một liệu trình chính."
+        )
+        return build_catalog_response(context, text, len(courses))
+
+    if context.main_course is None:
+        raise ValueError("An add-on suggestion requires a selected main course.")
+
+    visible = courses[:7]
+    if visible:
+        text = (
+            f"Liệu trình chính đã chọn: {context.main_course.name}.\n"
+            "Các add-on có thể chọn thêm:\n"
+            + numbered_course_names(visible)
+            + "\nAnh/chị hãy chọn một add-on hoặc bỏ qua bước này."
+        )
+    else:
+        text = (
+            f"Liệu trình chính đã chọn: {context.main_course.name}. "
+            "Cửa hàng hiện không có add-on khả dụng; anh/chị có thể tiếp tục chọn giờ."
+        )
+    return build_catalog_response(context, text, len(courses))
+
+
+def format_service_step_response(
+    context: BookingContext,
+    courses: list[Course],
+    *,
+    course_type: CourseType,
+) -> DialogResponse:
+    return format_service_catalog_response(
+        context,
+        courses,
+        course_type=course_type,
+    )
+
+
+def format_course_not_found_response(
+    context: BookingContext,
+    courses: list[Course],
+    *,
+    course_type: CourseType,
+) -> DialogResponse:
+    requested_name = (
+        context.requested_addon_name
+        if course_type is CourseType.ADDON
+        else context.requested_main_course_name
+    )
+    noun = "add-on" if course_type is CourseType.ADDON else "liệu trình chính"
+    shop_name = context.shop.name if context.shop is not None else "cửa hàng đã chọn"
+    duration_text = (
+        f" với thời lượng {context.duration_minutes} phút"
+        if course_type is CourseType.MAIN and context.duration_minutes is not None
+        else ""
+    )
+    requested_text = f" '{requested_name}'" if requested_name else ""
+    visible = courses[:8]
+    text = (
+        f"{noun.capitalize()}{requested_text} hiện không có hoặc chưa phù hợp "
+        f"tại {shop_name}{duration_text}.\n"
+        f"Anh/chị có thể chọn một {noun} đang hỗ trợ bên dưới:\n"
+        + numbered_course_names(visible)
+    )
+    return build_catalog_response(context, text, len(courses))
+
+
+def numbered_course_names(courses: list[Course]) -> str:
+    return "\n".join(f"{index}. {service.name}" for index, service in enumerate(courses[:8], 1))
+
+
+def people_recovery_suggestion_options() -> tuple[str, ...]:
+    return tuple(f"{count} người" for count in BookingRules.customer_count_options())
+
+
+def people_recovery_text(context: BookingContext) -> str:
+    location = f" tại {context.shop.name}" if context.shop is not None else ""
+    booking_date = (
+        f" ngày {context.booking_date.isoformat()}"
+        if context.booking_date is not None
+        else ""
+    )
+    return (
+        f"Số người anh/chị chọn chưa hợp lệ{location}{booking_date}. "
+        "Theo quy định, hệ thống hiện chỉ hỗ trợ đặt booking "
+        f"từ {MIN_CUSTOMERS_PER_BOOKING} đến {MAX_CUSTOMERS_PER_BOOKING} người "
+        "cho một lịch hẹn. Anh/chị thông cảm và chọn lại số người phù hợp giúp em nhé."
+    )
+
+
+def duration_recovery_text(context: BookingContext) -> str:
+    location = f" tại {context.shop.name}" if context.shop is not None else ""
+    booking_date = (
+        f" ngày {context.booking_date.isoformat()}"
+        if context.booking_date is not None
+        else ""
+    )
+    people = (
+        f" với {context.num_customer} người"
+        if context.num_customer is not None
+        else ""
+    )
+    return (
+        f"Thời lượng anh/chị chọn chưa hợp lệ{location}{booking_date}{people}. "
+        "Anh/chị vui lòng chọn lại một thời lượng đang được cửa hàng hỗ trợ."
+    )
+
+
+def addon_recovery_text(context: BookingContext) -> str:
+    main_course = (
+        f" cho liệu trình chính {context.main_course.name}"
+        if context.main_course is not None
+        else ""
+    )
+    return (
+        f"Dạ, Kori chưa xác định được add-on anh/chị muốn chọn{main_course}. "
+        "Anh/chị có thể nhập đúng tên add-on trong danh sách bên dưới, "
+        "hoặc nói \"bỏ qua add-on\" / \"không chọn add-on\" để tiếp tục đặt lịch nhé."
+    )
+
+
+def inline_suggestion_label(context: BookingContext) -> str:
+    if context.state is BookingState.SELECTING_DATE:
+        return "Các ngày gợi ý"
+    if context.state is BookingState.SELECTING_PEOPLE:
+        return "Các số người hợp lệ"
+    if context.state is BookingState.SELECTING_DURATION:
+        return "Các thời lượng hợp lệ của cửa hàng"
+    if context.state is BookingState.SELECTING_SERVICE:
+        if context.main_course is not None:
+            return "Các lựa chọn add-on hợp lệ"
+        return "Các liệu trình có thể chọn"
+    if context.state is BookingState.SELECTING_TIME:
+        return "Gợi ý khung giờ"
+    if context.state is BookingState.SELECTING_THERAPIST:
+        return "Các lựa chọn kỹ thuật viên"
+    return "Gợi ý hợp lệ"
+
+
+def with_inline_recovery_suggestions(
+    text: str,
+    context: BookingContext,
+    suggestion_options: tuple[str, ...],
+) -> str:
+    if not suggestion_options or context.state is BookingState.SELECTING_SHOP:
+        return text
+
+    label = inline_suggestion_label(context)
+    lines = "\n".join(
+        f"{index}. {suggestion}"
+        for index, suggestion in enumerate(suggestion_options, 1)
+    )
+    suggestion_block = f"{label}:\n{lines}"
+    if suggestion_block in text:
+        return text
+    return f"{text}\n\n{suggestion_block}"
+
+
+def state_recovery_suggestion_options(context: BookingContext) -> tuple[str, ...]:
+    if context.state is BookingState.SELECTING_SHOP:
+        names = tuple(shop.name for shop in context.suggested_shops)
+        return names or ("Xem danh sách cửa hàng",)
+    if context.state is BookingState.SELECTING_DATE:
+        return date_recovery_suggestion_options(context)
+    if context.state is BookingState.SELECTING_PEOPLE:
+        return people_recovery_suggestion_options()
+    if context.state is BookingState.SELECTING_SERVICE:
+        if (
+            context.course_selection_mode is CourseSelectionMode.ADDON
+            or context.main_course is not None
+        ):
+            return ("Không chọn add-on", "Xem danh sách add-on")
+        return ("Xem danh sách liệu trình",)
+    if context.state is BookingState.SELECTING_TIME:
+        return ()
+    if context.state is BookingState.IDLE:
+        return ()
+    if context.state is BookingState.AWAITING_CANCEL_CONFIRMATION:
+        return ("Xác nhận hủy", "Không hủy")
+    if context.state is BookingState.SELECTING_THERAPIST:
+        return ("Không yêu cầu", "Nam", "Nữ")
+    if context.state is BookingState.VERIFYING_PHONE:
+        return ("Xác nhận", "Nhập lại")
+    if context.state is BookingState.AWAITING_CONFIRMATION:
+        return ("Xác nhận", "Chỉnh sửa", "Hủy")
+    if context.state is BookingState.BOOKING_FAILED:
+        return ("Thử lại", "Chọn giờ khác", "Hủy")
+    return ()
+
+
+def date_recovery_suggestion_options(context: BookingContext) -> tuple[str, ...]:
+    failed_date = context.last_unavailable_date
+    if failed_date is None:
+        return ("Hôm nay", "Ngày mai")
+    anchor = max(date.today(), failed_date)
+    suggestions: list[str] = []
+    offset = 1
+    while len(suggestions) < 2 and offset <= 14:
+        candidate = anchor + timedelta(days=offset)
+        if candidate != failed_date:
+            suggestions.append(candidate.strftime("%d/%m/%Y"))
+        offset += 1
+    suggestions.append("Chọn ngày khác")
+    return tuple(suggestions)
