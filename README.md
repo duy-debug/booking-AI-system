@@ -9,7 +9,6 @@ quy trình booking an toàn và trợ lý AI dành cho khách hàng.**
 [![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Next.js](https://img.shields.io/badge/Next.js-Frontend-000000?logo=next.js&logoColor=white)](https://nextjs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Supabase-4169E1?logo=postgresql&logoColor=white)](https://supabase.com/)
-[![Qdrant](https://img.shields.io/badge/Qdrant-Vector_DB-DC244C)](https://qdrant.tech/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 
 [Kiến trúc](docs/architecture.md) ·
@@ -29,71 +28,61 @@ Hệ thống bao gồm:
 
 - **FastAPI Booking Backend** — nơi chứa toàn bộ business rules và dữ liệu nghiệp vụ cốt lõi, được tổ chức theo kiến trúc phân lớp (api → services → repositories → db);
 - **Next.js Frontend** — giao diện dành cho khách hàng và quản trị viên;
-- **AI Chatbot Service** độc lập dùng Gemini cho LLM NLU/NLG, Qdrant cho FAQ/RAG và gọi Booking Backend API để xử lý booking;
+- **AI Chatbot Service** — trợ lý hội thoại độc lập, sử dụng Gemini để hiểu và tạo phản hồi tự nhiên, kết hợp Qdrant cho RAG và tra cứu tri thức, cùng Booking Backend API cho các nghiệp vụ đặt lịch;
 - **Supabase PostgreSQL** — nơi lưu trữ dữ liệu giao dịch và booking.
 
 Chatbot không truy cập trực tiếp vào các bảng booking. Những dữ liệu theo thời gian thực như shop, course, slot khả dụng và trạng thái booking đều được lấy thông qua Booking Backend API.
-
-> **RAG đã được tách khỏi backend.** Tìm kiếm ngữ nghĩa (Qdrant + Gemini) giờ nằm trong
-> service Chatbot độc lập. Backend chỉ còn tầng dữ liệu giao dịch (PostgreSQL).
-
-> **Trạng thái dự án:** Backend đã hoàn chỉnh (API booking + kiến trúc phân lớp, RAG/POS đã xóa).
-> Chatbot đã hoàn thiện pipeline LLM NLU + state machine + POS/Qdrant routing. Web Admin đã triển khai dashboard,
-> lịch booking và các màn hình quản lý; giao diện booking dành cho khách hàng vẫn đang phát triển.
 
 ---
 
 ## Chức năng chính
 
-### Quản lý booking
-
-- Quản lý shop, course, therapist và therapist shift
-- Quản lý customer restriction và NG list
-- Tính toán available slot theo thời gian thực
-- Kiểm tra booking eligibility
-- Tạo, tra cứu, đổi lịch và hủy booking
-- Chống tạo booking trùng bằng Idempotency-Key
-- Bảo vệ Admin API bằng JWT
-- Chuẩn hóa error response theo RFC 9457
-- Quản lý database schema bằng SQLAlchemy 2.0 và Alembic
-
-### AI Assistant
-
-- LLM NLU đọc raw user text và trả structured output có validate
-- Intent prioritization theo state hiện tại và booking context
-- Điều phối multi-turn booking bằng state machine và booking context
-- Tra cứu FAQ/policy qua Qdrant chỉ khi người dùng hỏi knowledge question
-- Tra cứu shop, course, slot, therapist và tạo booking qua Booking Backend API
-- Yêu cầu xác nhận trước khi tạo booking
-- Chạy độc lập và không truy cập trực tiếp database booking
-
-### Web Application
-
-- Quy trình booking dành cho khách hàng
-- Tra cứu và hủy booking
-- Admin dashboard
-- Quản lý shop, course, therapist và therapist shift
-
-> Web Admin đã có dashboard, timeline booking và các màn hình quản lý cốt lõi.
-> Quy trình booking dành cho khách hàng vẫn đang trong quá trình phát triển.
+- Quản lý cửa hàng, dịch vụ, kỹ thuật viên, ca làm việc và lịch booking.
+- Kiểm tra lịch trống theo thời gian thực dựa trên chi nhánh, ngày, giờ, số người, thời lượng và dịch vụ.
+- Hỗ trợ tạo, tra cứu, cập nhật và hủy booking với bước xác nhận rõ ràng.
+- Kiểm tra thông tin khách hàng, hạng thành viên và danh sách hạn chế đặt lịch.
+- Cung cấp dashboard quản trị để theo dõi lịch hẹn và dữ liệu vận hành.
+- Tích hợp chatbot AI dạng popup để khách hàng đặt lịch bằng hội thoại tự nhiên và hỏi thông tin dịch vụ.
 
 ---
 
 ## Kiến trúc hệ thống
 
 ```mermaid
-flowchart TB
-    User((User))
+flowchart LR
+    Admin[Admin]
+    Customer[Customer]
 
-    User --> FE[Next.js Frontend]
-    User --> CB[AI Chatbot]
+    subgraph Admin_System[POS Admin System]
+        AdminFE[Next.js Admin Web]
+        POS[FastAPI Booking API]
+        DB[(Supabase PostgreSQL)]
+    end
 
-    FE --> BE[FastAPI Booking Backend]
-    CB --> BE
-    CB --> Qdrant[(Qdrant Vector Database)]
-    CB --> Gemini[Gemini LLM]
+    subgraph Customer_Web[Customer Web]
+        Landing[Landing Page]
+        ChatPopup[Chatbot Popup UI]
+    end
 
-    BE --> DB[(Supabase PostgreSQL)]
+    subgraph AI_Service[AI Chatbot Service]
+        ChatAPI[FastAPI Chatbot API]
+        Dialog[Dialog Engine]
+        Gemini[Gemini LLM]
+        Qdrant[(Qdrant Vector DB)]
+    end
+
+    Admin --> AdminFE
+    AdminFE --> POS
+    POS --> DB
+
+    Customer --> Landing
+    Landing --> ChatPopup
+    ChatPopup --> ChatAPI
+
+    ChatAPI --> Dialog
+    Dialog --> Gemini
+    Dialog --> Qdrant
+    Dialog --> POS
 ```
 
 ### Nguyên tắc thiết kế
@@ -114,38 +103,6 @@ flowchart TB
    Frontend, backend và chatbot mỗi service có runtime và container image riêng.
 
 Xem thêm tại [Tài liệu kiến trúc](docs/architecture.md).
-
----
-
-## Công nghệ sử dụng
-
-| Area | Technologies |
-|---|---|
-| Frontend | Next.js, React, TypeScript, Tailwind CSS |
-| Booking API | FastAPI, Pydantic, SQLAlchemy 2.0 |
-| Database | Supabase PostgreSQL |
-| Migrations | Alembic |
-| Authentication | Supabase Auth JWT (ES256, verify qua JWKS) |
-| AI service | Gemini API-compatible gateway, sentence-transformers |
-| Vector database | Qdrant |
-| Testing | Pytest |
-| Deployment | Docker, Docker Compose |
-
----
-
-## Cấu trúc repository
-
-```text
-booking-ai-system/
-├── booking-ai-system-fe/       # Next.js web application
-├── booking-ai-system-be/       # FastAPI Booking Backend
-├── booking-ai-chatbot/         # AI assistant and Qdrant RAG service
-├── docs/                       # Architecture, API and database documentation
-├── docker-compose.yml          # Local multi-service orchestration
-└── README.md
-```
-
-Mỗi application service có dependency, environment variables, tests và Dockerfile riêng.
 
 ---
 
@@ -214,6 +171,7 @@ Mỗi service nên chạy ở một terminal riêng. Với mỗi block bên dư�
 cd .\booking-ai-system-be
 .\.venv\Scripts\Activate.ps1
 pip install -e .
+alembic upgrade head
 python -m uvicorn app.main:app --reload --port 8000
 ```
 
@@ -269,184 +227,6 @@ Mở trình duyệt tại:
 ```text
 http://localhost:3002
 ```
-
----
-
-## Cấu hình môi trường
-
-Không commit credential thật hoặc file `.env` lên repository.
-
-### Booking Backend
-
-Create `booking-ai-system-be/.env` from `.env.example`.
-
-Các biến quan trọng (đồng bộ với `booking-ai-system-be/.env.example`):
-
-```env
-# Database (Supabase PostgreSQL)
-SUPABASE_URL=
-SUPABASE_SERVICE_KEY=
-SUPABASE_ANON_KEY=
-DATABASE_URL=
-
-# Auth — Supabase Auth JWT verification (asymmetric / JWKS)
-SUPABASE_JWKS_URL=https://<project>.supabase.co/auth/v1/keys
-JWT_ALGORITHM=ES256
-ADMIN_EMAILS=["admin@example.com"]   # Whitelist email được vào /api/admin/*
-
-# CORS
-CORS_ORIGINS=["http://localhost:3000"]
-
-# Test (Supabase test user — chỉ khi chạy pytest)
-SUPABASE_TEST_EMAIL=test-admin@example.com
-SUPABASE_TEST_PASSWORD=test-password
-```
-
-### AI Chatbot
-
-Create `booking-ai-chatbot/backend/.env` from `.env.example`.
-
-```env
-GEMINI_API_KEY=
-GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
-GEMINI_MODEL=gemini-2.5-flash
-GEMINI_FALLBACK_MODEL=
-DIALOG_INTENT_TOOL_ENABLED=true
-
-EMBED_MODEL_NAME=all-MiniLM-L6-v2
-
-QDRANT_HOST=localhost
-QDRANT_PORT=6333
-QDRANT_COLLECTION=kb_chunks
-
-BOOKING_API_URL=http://localhost:8000
-KNOWLEDGE_QDRANT_ENABLED=true
-```
-
-Khi chạy bằng Docker Compose:
-
-```env
-QDRANT_HOST=qdrant
-BOOKING_API_URL=http://backend:8000
-```
-
----
-
-## Database Migration
-
-Chạy các lệnh Alembic trong thư mục `booking-ai-system-be/`.
-
-Tạo migration mới:
-
-```bash
-alembic revision --autogenerate -m "describe schema change"
-```
-
-Apply migration:
-
-```bash
-alembic upgrade head
-```
-
-Kiểm tra revision hiện tại:
-
-```bash
-alembic current
-```
-
-Kiểm tra models và database schema có đồng bộ hay không:
-
-```bash
-alembic check
-```
-
-> Không chỉnh sửa Alembic migration đã được apply lên shared database.
-
----
-
-## Kiểm thử
-
-### Backend
-
-```bash
-cd booking-ai-system-be
-pytest
-```
-
-### Chatbot
-
-```bash
-cd booking-ai-chatbot/backend
-pytest
-```
-
-Chạy test với output chi tiết:
-
-```bash
-pytest -v
-```
-
-Chạy một test module cụ thể:
-
-```bash
-pytest tests/test_booking_flow.py -v
-```
-
-Không nên ghi cố định tổng số test trong README. Sau khi cấu hình GitHub Actions, nên dùng CI badge để phản ánh trạng thái test của nhánh chính.
-
----
-
-## Tài liệu API
-
-FastAPI tự động tạo OpenAPI documentation.
-
-| API | Swagger UI | OpenAPI schema |
-|---|---|---|
-| Booking Backend | `http://localhost:8000/docs` | `http://localhost:8000/openapi.json` |
-| AI Chatbot | `http://localhost:8001/docs` | `http://localhost:8001/openapi.json` |
-
-Tài liệu dự án:
-
-- [Kiến trúc](docs/architecture.md)
-- [Thiết kế API](docs/api-design.md)
-- [Thiết kế cơ sở dữ liệu](docs/database-design.md)
-- [Use Cases and Process Flows](docs/define_uc_ut_processflow.md)
-
----
-
-## Mô hình bảo mật
-
-- Secrets và API keys chỉ được load từ environment variables
-- Chatbot không truy cập trực tiếp Supabase PostgreSQL
-- Chatbot không thể gọi administration endpoints
-- Booking mutation yêu cầu người dùng xác nhận rõ ràng
-- Tạo booking sử dụng idempotency key để chống trùng lặp
-- Knowledge-base administration endpoints yêu cầu internal key riêng
-- Số điện thoại và booking data của khách hàng không được lưu trong Qdrant
-- Production deployment bắt buộc terminate traffic qua HTTPS
-- Qdrant không nên expose trực tiếp ra public internet
-
-Vui lòng báo cáo lỗ hổng bảo mật qua kênh riêng, không tạo public issue chứa thông tin nhạy cảm.
-
----
-
-## Lộ trình phát triển
-
-- [x] Database schema và SQLAlchemy models
-- [x] Alembic migration workflow
-- [x] Administration CRUD APIs
-- [x] Public booking APIs
-- [x] JWT authentication
-- [x] RFC 9457 error handling
-- [x] Kiến trúc standalone chatbot
-- [x] RAG pipeline với Qdrant
-- [x] Intent routing và confirmation-gated booking tools
-- [ ] Giao diện đặt lịch cho khách hàng
-- [x] Admin dashboard và các màn hình quản lý cốt lõi
-- [ ] CI pipeline với GitHub Actions
-- [ ] Coverage reporting
-- [ ] Structured logging và monitoring
-- [ ] Production reverse proxy và HTTPS configuration
 
 ---
 
