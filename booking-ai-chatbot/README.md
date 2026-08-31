@@ -171,63 +171,39 @@ flowchart TD
 
 ```mermaid
 flowchart TB
-    subgraph ROW1["Giai đoạn 1"]
-    direction LR
-    subgraph A["1. Thu thập nhu cầu"]
-    direction TB
-        START["Khách muốn đặt lịch"]
-        SHOP["Chọn cửa hàng"]
-        DATE["Chọn ngày"]
-        PEOPLE["Chọn số người"]
-    end
+    A["Khách gửi yêu cầu đặt lịch"]
+    B["Gemini nhận diện intent<br>và trích xuất thông tin"]
+    C["Thu thập thông tin bắt buộc<br>cửa hàng, ngày, số người,<br>thời lượng, liệu trình chính"]
+    D["Chọn add-on<br>hoặc bỏ qua"]
+    E["Kiểm tra slot khả dụng<br>qua Booking Backend API"]
+    F{"Có slot phù hợp?"}
+    G["Yêu cầu đổi ngày, giờ,<br>cửa hàng hoặc tiêu chí dịch vụ"]
+    H["Chọn giờ bắt đầu"]
+    I{"Booking 1 người?"}
+    J["Chọn kỹ thuật viên,<br>giới tính hoặc không yêu cầu"]
+    K["Booking nhóm<br>hệ thống tự phân công"]
+    L["Nhập số điện thoại"]
+    M["Kiểm tra khách hàng<br>và danh sách hạn chế"]
+    N{"Đã có tên khách hàng?"}
+    O["Nhập tên khách hàng"]
+    P["Hiển thị form xác nhận"]
+    Q["Khách xác nhận"]
+    R["Kiểm tra availability lần cuối"]
+    S{"Slot vẫn hợp lệ?"}
+    T["Tạo booking chính thức"]
+    U["Thông báo thành công<br>và trả mã booking"]
 
-    subgraph B["2. Chọn dịch vụ"]
-    direction TB
-        DURATION["Chọn thời lượng"]
-        MAIN["Chọn liệu trình chính"]
-        ADDON["Chọn add-on hoặc bỏ qua"]
-    end
-    end
-
-    subgraph ROW2["Giai đoạn 2"]
-    direction TB
-    subgraph C["3. Kiểm tra lịch trống"]
-    direction TB
-        SLOT["Kiểm tra slot trống"]
-        TIME["Chọn giờ bắt đầu"]
-        THERAPIST{"Booking 1 người?"}
-        THERAPIST_SELECT["Chọn kỹ thuật viên<br>giới tính hoặc không yêu cầu"]
-        SKIP_THERAPIST["Booking nhóm<br>không chọn kỹ thuật viên cụ thể"]
-    end
-    end
-
-    subgraph ROW3["Giai đoạn 3"]
-    direction LR
-    subgraph D["4. Thông tin khách hàng"]
-    direction TB
-        PHONE["Nhập số điện thoại"]
-        CUSTOMER["Kiểm tra khách hàng<br>và danh sách hạn chế"]
-        NAME{"Đã có tên khách hàng?"}
-        ASK_NAME["Nhập tên khách hàng"]
-    end
-
-    subgraph E["5. Xác nhận và tạo booking"]
-    direction TB
-        CONFIRM["Hiển thị form xác nhận"]
-        CREATE["Tạo booking chính thức"]
-        DONE["Thông báo đặt lịch thành công"]
-    end
-    end
-
-    START --> SHOP --> DATE --> PEOPLE
-    PEOPLE --> DURATION --> MAIN --> ADDON
-    ADDON --> SLOT --> TIME --> THERAPIST
-    THERAPIST -- Có --> THERAPIST_SELECT --> PHONE
-    THERAPIST -- Không --> SKIP_THERAPIST --> PHONE
-    PHONE --> CUSTOMER --> NAME
-    NAME -- Có --> CONFIRM
-    NAME -- Chưa có --> ASK_NAME --> CONFIRM
-    CONFIRM --> CREATE --> DONE
+    A --> B --> C --> D --> E --> F
+    F -- Không --> G
+    F -- Có --> H --> I
+    I -- Có --> J --> L
+    I -- Không --> K --> L
+    L --> M --> N
+    N -- Có --> P
+    N -- Chưa có --> O --> P
+    P --> Q --> R --> S
+    S -- Không --> G
+    S -- Có --> T --> U
 ```
 
 Các điểm xử lý chính:
