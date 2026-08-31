@@ -133,88 +133,87 @@ flowchart TD
 ```mermaid
 sequenceDiagram
     autonumber
-    actor User as Người dùng
+    actor User as User
     participant Popup as Chatbot Popup
-    participant DC as DialogController
-    participant NLU as Gemini NLU
-    participant SM as StateMachine
-    participant AR as ActionRegistry
-    participant POS as POS API
+    participant Bot as Dialog Controller
+    participant AI as Gemini NLU
+    participant Flow as State Machine
+    participant Service as Business Service
+    participant POS as POS System
 
-    User->>Popup: Muốn đặt booking
-    Popup->>DC: Gửi message
-    DC->>NLU: Parse intent và entity
-    NLU-->>DC: start_booking và thông tin đã extract
-    DC->>SM: Resolve transition từ idle
-    SM-->>DC: Sang selecting_shop
-    DC->>AR: search_shop
-    AR->>POS: Lấy danh sách cửa hàng
-    POS-->>AR: Shops
-    AR-->>DC: Gợi ý cửa hàng
-    DC-->>Popup: Hỏi chọn cửa hàng
+    User->>Popup: Muốn đặt lịch
+    Popup->>Bot: Gửi tin nhắn
+    Bot->>AI: Hiểu nhu cầu và thông tin người dùng đã nhập
+    AI-->>Bot: Trả về nhu cầu đặt lịch cùng dữ liệu đã nhận diện
+    Bot->>Flow: Kiểm tra bước phù hợp trong hội thoại
+    Flow-->>Bot: Chuyển sang bước chọn cửa hàng
+    Bot->>Service: Yêu cầu danh sách cửa hàng
+    Service->>POS: Lấy danh sách cửa hàng đang hoạt động
+    POS-->>Service: Trả về danh sách cửa hàng
+    Service-->>Bot: Chuẩn bị danh sách gợi ý
+    Bot-->>Popup: Hỏi anh/chị muốn chọn cửa hàng nào
 
-    User->>Popup: Chọn cửa hàng, ngày, số người, thời lượng, liệu trình
-    Popup->>DC: Gửi từng lượt hoặc một câu dài
-    DC->>NLU: Parse entity theo state hiện tại
-    DC->>SM: Validate transition theo booking_flow
-    DC->>AR: Chạy action tương ứng
-    AR->>POS: Validate shop, course, duration khi cần
-    POS-->>AR: Dữ liệu hợp lệ hoặc lỗi nghiệp vụ
+    User->>Popup: Chọn cửa hàng, ngày, số người, thời lượng và liệu trình
+    Popup->>Bot: Gửi từng lượt hoặc một câu dài
+    Bot->>AI: Hiểu các thông tin đặt lịch trong câu trả lời
+    Bot->>Flow: Kiểm tra thông tin có đúng bước hiện tại không
+    Bot->>Service: Xác thực dữ liệu nghiệp vụ
+    Service->>POS: Kiểm tra cửa hàng, thời lượng và liệu trình khi cần
+    POS-->>Service: Trả về dữ liệu hợp lệ hoặc lý do chưa hợp lệ
 
     User->>Popup: Chọn add-on hoặc bỏ qua
-    Popup->>DC: Gửi lựa chọn
-    DC->>AR: handle_course_selection hoặc skip_addon
-    AR->>POS: Check available slots theo combo booking
-    POS-->>AR: Danh sách slot hoặc lỗi không có slot
+    Popup->>Bot: Gửi lựa chọn add-on
+    Bot->>Service: Ghi nhận add-on hoặc bỏ qua add-on
+    Service->>POS: Kiểm tra slot trống theo toàn bộ thông tin đặt lịch
+    POS-->>Service: Trả về danh sách slot hoặc lý do không có slot
 
     alt Không có slot phù hợp
-        AR-->>DC: no_working_shift hoặc no_slots_available
-        DC-->>Popup: Đề nghị đổi ngày, giờ, dịch vụ hoặc cửa hàng
+        Service-->>Bot: Ngày hoặc tiêu chí hiện tại chưa có slot phù hợp
+        Bot-->>Popup: Đề nghị đổi ngày, giờ, dịch vụ hoặc cửa hàng
     else Có slot phù hợp
-        DC-->>Popup: Hỏi giờ bắt đầu
-        User->>Popup: Chọn giờ
-        Popup->>DC: select_time
-        DC->>AR: handle_time_selection
-        AR->>POS: Validate slot đã chọn
-        POS-->>AR: Slot hợp lệ
+        Bot-->>Popup: Hỏi giờ bắt đầu
+        User->>Popup: Chọn giờ bắt đầu
+        Popup->>Bot: Gửi giờ đã chọn
+        Bot->>Service: Kiểm tra lại slot đã chọn
+        Service->>POS: Xác thực slot theo giờ bắt đầu
+        POS-->>Service: Slot hợp lệ
     end
 
     alt Booking một người
-        DC-->>Popup: Hỏi kỹ thuật viên hoặc không yêu cầu
+        Bot-->>Popup: Hỏi kỹ thuật viên hoặc không yêu cầu
         User->>Popup: Chọn kỹ thuật viên, giới tính hoặc không yêu cầu
-        Popup->>DC: select_therapist hoặc deny
-        DC->>AR: handle_therapist_selection hoặc skip_therapist
-        AR->>POS: Validate therapist availability nếu có yêu cầu
-        POS-->>AR: Therapist hợp lệ
+        Popup->>Bot: Gửi lựa chọn kỹ thuật viên
+        Bot->>Service: Ghi nhận hoặc kiểm tra yêu cầu kỹ thuật viên
+        Service->>POS: Kiểm tra lịch làm việc kỹ thuật viên nếu có yêu cầu
+        POS-->>Service: Kỹ thuật viên hợp lệ
     else Booking hai đến ba người
-        DC->>AR: skip_therapist_for_group
+        Bot->>Service: Bỏ qua chọn kỹ thuật viên theo quy định booking nhóm
     end
 
-    DC-->>Popup: Hỏi số điện thoại
+    Bot-->>Popup: Hỏi số điện thoại
     User->>Popup: Nhập số điện thoại
-    Popup->>DC: provide_phone
-    DC->>AR: handle_phone_collection và validate_phone
-    AR->>POS: Kiểm tra customer và restriction
-    POS-->>AR: Customer hợp lệ hoặc cần nhập tên
+    Popup->>Bot: Gửi số điện thoại
+    Bot->>Service: Kiểm tra thông tin khách hàng
+    Service->>POS: Tra khách hàng và danh sách hạn chế
+    POS-->>Service: Khách hàng hợp lệ hoặc cần bổ sung tên
 
     alt Chưa có tên khách hàng
-        DC-->>Popup: Hỏi tên khách hàng
+        Bot-->>Popup: Hỏi tên khách hàng
         User->>Popup: Nhập tên
-        Popup->>DC: provide_name
-        DC->>AR: handle_customer_name
+        Popup->>Bot: Gửi tên khách hàng
+        Bot->>Service: Lưu tên vào thông tin đặt lịch
     end
 
-    DC-->>Popup: Hiển thị form xác nhận
+    Bot-->>Popup: Hiển thị form xác nhận
     User->>Popup: Xác nhận
-    Popup->>DC: confirm
-    DC->>SM: Sang booking_executing
-    DC->>AR: create_booking
-    AR->>POS: Final availability check
-    POS-->>AR: Slot còn hợp lệ
-    AR->>POS: Create booking với idempotency key
-    POS-->>AR: Booking created
-    DC-->>Popup: Thông báo đặt lịch thành công
-    DC->>SM: Reset task context về idle
+    Popup->>Bot: Gửi xác nhận cuối cùng
+    Bot->>Service: Tạo booking chính thức
+    Service->>POS: Kiểm tra availability lần cuối
+    POS-->>Service: Slot vẫn còn hợp lệ
+    Service->>POS: Tạo booking với mã chống gửi trùng
+    POS-->>Service: Booking được tạo thành công
+    Bot-->>Popup: Thông báo đặt lịch thành công
+    Bot->>Flow: Đưa cuộc trò chuyện về trạng thái sẵn sàng nhận yêu cầu mới
 ```
 
 Business rule chính:
@@ -229,60 +228,59 @@ Business rule chính:
 ```mermaid
 sequenceDiagram
     autonumber
-    actor User as Người dùng
+    actor User as User
     participant Popup as Chatbot Popup
-    participant DC as DialogController
-    participant NLU as Gemini NLU
-    participant SM as StateMachine
-    participant AR as ActionRegistry
-    participant POS as POS API
+    participant Bot as Dialog Controller
+    participant AI as Gemini NLU
+    participant Flow as State Machine
+    participant Service as Business Service
+    participant POS as POS System
 
     User->>Popup: Muốn hủy booking
-    Popup->>DC: Gửi message
-    DC->>NLU: Parse intent và entity
-    NLU-->>DC: cancel_existing_booking
-    DC->>SM: Resolve transition
-    SM-->>DC: Sang awaiting_cancel_confirmation hoặc collecting_cancel_booking_identity
+    Popup->>Bot: Gửi tin nhắn
+    Bot->>AI: Hiểu nhu cầu và thông tin người dùng đã nhập
+    AI-->>Bot: Trả về nhu cầu hủy booking
+    Bot->>Flow: Kiểm tra bước hủy phù hợp
 
     alt Thiếu mã booking hoặc số điện thoại
-        DC-->>Popup: Yêu cầu nhập mã booking và số điện thoại
+        Bot-->>Popup: Yêu cầu nhập mã booking và số điện thoại
         User->>Popup: Nhập mã booking và số điện thoại
-        Popup->>DC: Gửi thông tin định danh booking
-        DC->>NLU: Extract mã booking và số điện thoại
+        Popup->>Bot: Gửi thông tin định danh booking
+        Bot->>AI: Nhận diện mã booking và số điện thoại
     end
 
-    DC->>AR: lookup_existing_booking_for_cancel
-    AR->>POS: Tìm booking theo mã booking và số điện thoại
-    POS-->>AR: Booking hoặc lỗi nghiệp vụ
+    Bot->>Service: Tìm booking cần hủy
+    Service->>POS: Tra booking theo mã booking và số điện thoại
+    POS-->>Service: Trả về booking hoặc lý do không thể hủy
 
     alt Không tìm thấy booking
-        AR-->>DC: cancel_booking_not_found
-        DC-->>Popup: Báo chưa tìm thấy và yêu cầu kiểm tra lại
+        Service-->>Bot: Không tìm thấy booking phù hợp
+        Bot-->>Popup: Báo chưa tìm thấy và yêu cầu kiểm tra lại
     else Booking đã hủy trước đó
-        AR-->>DC: cancel_booking_already_cancelled
-        DC-->>Popup: Thông báo booking đã được hủy trước đó
-        DC->>SM: Quay về idle
+        Service-->>Bot: Booking đã được hủy trước đó
+        Bot-->>Popup: Thông báo booking đã được hủy trước đó
+        Bot->>Flow: Quay về trạng thái sẵn sàng nhận yêu cầu mới
     else Tìm thấy booking hợp lệ
-        AR-->>DC: Booking detail
-        DC-->>Popup: Hiển thị thông tin booking và hỏi xác nhận hủy
+        Service-->>Bot: Trả về thông tin booking
+        Bot-->>Popup: Hiển thị thông tin booking và hỏi xác nhận hủy
         User->>Popup: Xác nhận hủy hoặc từ chối
-        Popup->>DC: confirm hoặc deny
+        Popup->>Bot: Gửi quyết định của người dùng
 
         alt User từ chối hủy
-            DC-->>Popup: Giữ booking, không gọi API hủy
-            DC->>SM: Quay về idle
+            Bot-->>Popup: Giữ booking và không gọi API hủy
+            Bot->>Flow: Quay về trạng thái sẵn sàng nhận yêu cầu mới
         else User xác nhận hủy
-            DC->>AR: cancel_existing_booking
-            AR->>POS: Gọi API hủy booking
-            POS-->>AR: Kết quả hủy
+            Bot->>Service: Thực hiện hủy booking
+            Service->>POS: Gọi API hủy booking
+            POS-->>Service: Kết quả hủy
 
             alt Hủy thất bại
-                AR-->>DC: cancel_booking_unavailable
-                DC-->>Popup: Báo chưa thể hủy và giữ bước xác nhận
+                Service-->>Bot: Chưa thể hủy booking
+                Bot-->>Popup: Báo chưa thể hủy và giữ bước xác nhận
             else Hủy thành công
-                AR-->>DC: Cancelled booking detail
-                DC-->>Popup: Thông báo hủy thành công kèm thông tin booking
-                DC->>SM: Reset task context về idle
+                Service-->>Bot: Trả về thông tin booking đã hủy
+                Bot-->>Popup: Thông báo hủy thành công kèm thông tin booking
+                Bot->>Flow: Đưa cuộc trò chuyện về trạng thái sẵn sàng nhận yêu cầu mới
             end
         end
     end
@@ -299,32 +297,6 @@ Business rule chính:
 ## RAG Hoạt Động Như Thế Nào
 
 RAG bổ sung một pipeline truy xuất tri thức trước khi Gemini sinh câu trả lời. Trong project hiện tại, `rag_v1` không chỉ dùng vector search mà còn kết hợp semantic search, BM25 keyword search, RRF fusion và reranker để chọn context tốt hơn.
-
-### Giai Đoạn Ingestion
-
-Chạy khi thêm hoặc cập nhật tài liệu knowledge.
-
-```mermaid
-flowchart TD
-    DOC["Knowledge files<br>Markdown · Text · PDF · DOCX"]
-    LOADER["DocumentLoader<br>extract text theo file type"]
-    CHUNKER["DocumentChunker<br>chunk size 1000 · overlap 200"]
-    EMBEDDER["EmbeddingModel<br>sentence-transformers/all-MiniLM-L6-v2"]
-    STORE["VectorStore<br>Qdrant collection knowledge"]
-
-    DOC --> LOADER
-    LOADER --> CHUNKER
-    CHUNKER --> EMBEDDER
-    EMBEDDER --> STORE
-```
-
-Các bước chính:
-
-1. `DocumentLoader` đọc tài liệu knowledge theo định dạng được hỗ trợ: Markdown, text, PDF và DOCX.
-2. `DocumentChunker` chia document thành các chunk nhỏ, có overlap để giữ ngữ cảnh giữa hai đoạn liền kề.
-3. `EmbeddingModel` dùng Sentence Transformers để biến từng chunk thành vector 384 chiều.
-4. `VectorStore` tạo hoặc cập nhật collection `knowledge` trong Qdrant.
-5. Mỗi point trong Qdrant lưu vector, text chunk, source, file path và chunk index.
 
 ### Giai Đoạn Query
 

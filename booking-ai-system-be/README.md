@@ -1,133 +1,163 @@
-# Booking AI System — Backend
+<h1 align="center">Booking AI System Backend</h1>
 
-FastAPI service chịu trách nhiệm quản lý dữ liệu và business rules của hệ thống đặt lịch massage.
+<p align="center">
+  FastAPI backend cho hệ thống quản lý đặt lịch massage, dữ liệu vận hành POS và Admin API.
+</p>
 
-## Chức năng
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/FastAPI-Backend-009688?logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/PostgreSQL-Database-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL" />
+  <img src="https://img.shields.io/badge/SQLAlchemy-ORM-D71F00" alt="SQLAlchemy" />
+  <img src="https://img.shields.io/badge/Alembic-Migrations-111827" alt="Alembic" />
+</p>
 
-- Quản lý shop, course, therapist và therapist shift
-- Quản lý customer restriction và NG list
-- Tính toán available slot và kiểm tra booking eligibility
-- Tạo, tra cứu, cập nhật và hủy booking
-- JWT authentication cho Admin API
-- Error response theo chuẩn RFC 9457 (Problem Details)
-- Database migration bằng Alembic
+<p align="center">
+  <a href="#tổng-quan">Tổng quan</a> ·
+  <a href="#chức-năng-chính">Chức năng chính</a> ·
+  <a href="#kiến-trúc">Kiến trúc</a> ·
+  <a href="#xác-thực-admin">Xác thực Admin</a> ·
+  <a href="#chạy-local">Chạy local</a>
+</p>
 
-## Kiến trúc (layered)
+---
 
+## Tổng Quan
+
+`booking-ai-system-be` là backend nghiệp vụ của hệ thống booking. Service này chịu trách nhiệm quản lý dữ liệu giao dịch, validate business rule và cung cấp API cho Admin Web, Customer Web và AI Chatbot popup.
+
+Backend không xử lý LLM hay RAG trực tiếp. Các luồng AI, RAG, Qdrant và hội thoại nằm ở service `booking-ai-chatbot`; backend chỉ đóng vai trò nguồn dữ liệu nghiệp vụ chính xác cho booking, catalog, customer và availability.
+
+## Chức Năng Chính
+
+Khả năng | Mô tả
+--- | ---
+Quản lý catalog | Quản lý cửa hàng, liệu trình, kỹ thuật viên và ca làm việc
+Tính slot khả dụng | Tính available slots theo cửa hàng, ngày, số người, thời lượng, liệu trình và kỹ thuật viên
+Booking transaction | Tạo, xem, cập nhật trạng thái và hủy booking
+Customer eligibility | Kiểm tra khách hàng, số điện thoại, restriction và NG list trước khi đặt lịch
+Admin API | Cung cấp API quản trị được bảo vệ bằng Supabase JWT
+Public API | Cung cấp API công khai cho chatbot và web khách hàng
+Migration | Quản lý schema bằng Alembic
+Error contract | Trả lỗi theo chuẩn Problem Details để client xử lý nhất quán
+
+## Kiến Trúc
+
+```mermaid
+flowchart TD
+    CLIENT[Admin Web · Customer Web · AI Chatbot] --> API[FastAPI Routers]
+    API --> SERVICE[Service Layer]
+    SERVICE --> REPO[Repository Layer]
+    REPO --> DB[(PostgreSQL)]
+
+    API --> AUTH[Auth Dependency]
+    AUTH --> SUPABASE[Supabase JWKS]
+
+    SERVICE --> RULES[Business Rules]
+    SERVICE --> TX[Transaction Boundary]
+    TX --> DB
 ```
-app/
-├── main.py            # FastAPI entrypoint — routers, CORS, exception handlers (RFC 9457)
-├── api/
-│   ├── admin/        # Các endpoint quản trị (bảo vệ bởi JWT)
-│   │   ├── shops.py
-│   │   ├── courses.py
-│   │   ├── therapists.py
-│   │   ├── therapist_shifts.py
-│   │   ├── customer_restrictions.py
-│   │   └── bookings.py        # Read-only admin booking views
-│   ├── public/       # Các endpoint công khai (không cần JWT, trừ auth)
-│   │   ├── shops.py
-│   │   ├── available_slots.py
-│   │   ├── booking_eligibility.py
-│   │   ├── bookings.py
-│   │   ├── therapist_schedule.py
-│   │   └── auth.py           # Đăng nhập admin → JWT
-│   └── deps.py            # get_db(), parse_uuid()
-├── services/          # Business logic — SỞ HỮU transaction (commit/rollback/refresh)
-├── repositories/      # Data-access mỏng — chỉ query/write, KHÔNG commit
-├── schemas/           # Pydantic request/response models
-├── db/               # SQLAlchemy models, session, base
-│   └── models/
-├── core/             # config, auth (JWT), exceptions, supabase client
-└── scripts/          # Seed dữ liệu mẫu
-```
 
-### Nguyên tắc phân lớp
+Nguyên tắc phân lớp:
 
-1. **Routers (api/)** — mỏng: chỉ parse request, gọi Service, trả response.
-   Không thao tác DB trực tiếp (không `session.add` / `commit` / `refresh`).
-2. **Services (services/)** — sở hữu transaction: `try → repo.save → session.commit()
-   → session.refresh() → except → session.rollback() → raise`.
-   Chứa toàn bộ business validation (mã duy nhất, overlap ca làm việc, NG list…).
-3. **Repositories (repositories/)** — chỉ truy vấn và `session.add`/`flush`;
-   không `commit`/`rollback`.
-4. **Admin vs Public** — endpoint `/api/admin/*` yêu cầu Supabase Auth JWT; `/api/*` công khai.
+1. `api` chỉ nhận request, validate schema, gọi service và trả response.
+2. `services` sở hữu business rule và transaction boundary.
+3. `repositories` chỉ thực hiện truy vấn hoặc ghi dữ liệu, không tự commit hoặc rollback.
+4. `schemas` định nghĩa request và response contract bằng Pydantic.
+5. `db.models` định nghĩa SQLAlchemy models và relationship.
+6. `core` chứa cấu hình, xác thực, exception mapping và integration dùng chung.
 
-### Xác thực (Supabase Auth — asymmetric / JWKS)
+## API Boundary
 
-- Backend **không tự viết login**. Frontend đăng nhập qua Supabase Auth, gửi access token
-  vào header `Authorization: Bearer <supabase_jwt>`.
-- Backend verify token bằng **public key từ JWKS** (`SUPABASE_JWKS_URL`), thuật toán `ES256`
-  (ECC P-256 — Supabase mặc định). Không dùng shared secret.
-- Quyền admin: email trong token phải nằm trong `ADMIN_EMAILS` (whitelist env),
-  nếu không trả `403 FORBIDDEN`.
-- Public endpoints (`/api/shops`, `/api/bookings`, slots, eligibility…) không cần token.
+Nhóm API | Mục đích
+--- | ---
+`api/public` | API công khai cho shop, slot, eligibility, booking và auth
+`api/admin` | API quản trị cho shop, course, therapist, shift, restriction, schedule và booking
+`api/deps.py` | Dependency dùng chung như database session, UUID parsing và auth guard
 
-#### Cách lấy `SUPABASE_JWKS_URL`
+Các thao tác quan trọng như tạo booking, hủy booking và kiểm tra eligibility đều đi qua service layer để đảm bảo business rule luôn được áp dụng, kể cả khi caller là web admin hay chatbot.
 
-JWKS URL có dạng cố định, chỉ thay `<project-ref>` bằng ref của project:
+## Xác Thực Admin
 
-```
+Admin API sử dụng Supabase Auth JWT:
+
+1. Frontend đăng nhập qua Supabase Auth.
+2. Frontend gửi access token trong header `Authorization: Bearer <token>`.
+3. Backend verify token bằng public key từ `SUPABASE_JWKS_URL`.
+4. Email trong token phải nằm trong whitelist `ADMIN_EMAILS`.
+5. Nếu token không hợp lệ hoặc email không được cấp quyền, backend trả lỗi xác thực hoặc phân quyền tương ứng.
+
+JWKS URL có dạng:
+
+```text
 https://<project-ref>.supabase.co/auth/v1/keys
 ```
 
-- `<project-ref>` nằm trong URL Supabase của bạn, ví dụ `https://hjwygekteyhdfjnjqvrdl.supabase.co`
-  → project-ref là `hjwygekteyhdfjnjqvrdl`.
-- Cách tìm project-ref: Supabase Dashboard → chọn project → **Project Settings → General**
-  (phần **Reference ID**), hoặc lấy từ đoạn đầu URL project.
-- Có thể mở thử trên trình duyệt để xác nhận: trả về một JSON chứa mảng `keys` (public key).
-- Truy cập Supabase JWT Keys (Settings → API/JWT Keys) để xem thuật toán đang dùng
-  (mặc định **ECC P-256 / ES256**). Nếu project dùng asymmetric, backend verify qua JWKS là đúng.
+## Database
 
-> **RAG đã được tách hoàn toàn khỏi backend.** Vector search (Qdrant + Groq) giờ nằm
-> trong service độc lập `booking-ai-chatbot/`. Backend không còn thư mục `app/rag/`
-> hay `app/modules/`, và bảng `kb_chunks` (cùng model `KnowledgeChunk`) đã được xoá
-> qua migration `a3f7c9d2e1b0_remove_kb_chunks_table`. Backend chỉ còn tầng dữ liệu
-> giao dịch (PostgreSQL).
+Backend sử dụng PostgreSQL làm database giao dịch chính. Schema được quản lý bằng Alembic để kiểm soát thay đổi theo version.
 
-## Công nghệ
+Các nhóm dữ liệu chính:
 
-- FastAPI
-- Pydantic
-- SQLAlchemy 2.0
-- Alembic
-- Supabase PostgreSQL
-- PyJWT + JWKS (verify Supabase Auth ES256 token)
-- Pytest
+1. Shop, course, therapist và therapist shift.
+2. Customer và customer restriction.
+3. Booking, reservation và reservation course.
+4. Schedule và dữ liệu phục vụ tính slot.
 
-## Cài đặt
+RAG không lưu trong PostgreSQL của backend này. Knowledge retrieval được tách sang chatbot service và Qdrant.
+
+## Chạy Local
+
+Cài dependency:
 
 ```powershell
+cd D:\Intern_Fsoft\booking-ai-system\booking-ai-system-be
 python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -e .
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e .
 Copy-Item .env.example .env
 ```
 
-## Chạy
+Chạy migration:
 
 ```powershell
-# Migration
 alembic upgrade head
+```
 
-# Dev server
+Chạy server:
+
+```powershell
 uvicorn app.main:app --reload --port 8000
 ```
 
-## Kiểm thử
+## Kiểm Thử
 
 ```powershell
-pytest            # toàn bộ test suite
-pytest -v        # chi tiết từng test
+pytest
 ```
 
-Bao gồm 174 test across 6 modules:
+Nên chạy test sau khi thay đổi business rule, repository, migration hoặc API contract.
 
-| Module | Nội dung |
-|---|---|
-| `test_services.py` | Logic service layer (booking, slot, eligibility, schedule, admin) |
-| `test_admin_services.py` | CRUD admin services + conflict/overlap |
-| `test_repositories.py` | Truy vấn repository |
-| `test_booking_flow.py` | Luồng tạo / huỷ / cập nhật booking |
-| `test_admin_flow.py` | Luồng API admin end-to-end |
-| `test_contract_public_fields.py` | Hợp đồng trường response public |
+## Cấu Hình Chính
+
+Biến môi trường | Mục đích
+--- | ---
+`DATABASE_URL` | Chuỗi kết nối PostgreSQL
+`SUPABASE_URL` | URL Supabase project
+`SUPABASE_SERVICE_KEY` | Service key dùng cho các thao tác backend cần quyền server
+`SUPABASE_ANON_KEY` | Anon key Supabase dùng cho integration cần cấu hình client
+`SUPABASE_JWKS_URL` | JWKS endpoint dùng để verify JWT
+`JWT_ALGORITHM` | Thuật toán verify JWT, mặc định `ES256`
+`ADMIN_EMAILS` | Danh sách email admin được phép truy cập Admin API
+`CORS_ORIGINS` | Danh sách origin frontend được phép gọi API
+`SHOP_TIMEZONE` | Múi giờ nghiệp vụ của cửa hàng
+`MINIMUM_BOOKING_ADVANCE_MINUTES` | Số phút tối thiểu phải đặt trước giờ bắt đầu
+`APP_ENV` | Môi trường chạy ứng dụng
+`LOG_LEVEL` | Mức log runtime
+
+## Ghi Chú Vận Hành
+
+1. Backend là nguồn dữ liệu nghiệp vụ authoritative cho booking.
+2. Chatbot có thể gọi backend để lấy shop, course, slot, therapist, customer và tạo hoặc hủy booking.
+3. Không đặt logic LLM, RAG hoặc vector search trong backend này.
+4. Khi thay đổi schema, luôn tạo migration thay vì sửa database thủ công.
