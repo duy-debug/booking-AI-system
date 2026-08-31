@@ -27,11 +27,11 @@ type SidebarItem = {
 
 const sidebarItems: SidebarItem[] = [
   { label: "Tổng quan", href: "/admin", icon: LayoutDashboard },
-  { label: "Shop", href: "/admin/shops", icon: Store },
+  { label: "Cửa hàng", href: "/admin/shops", icon: Store },
   { label: "Course", href: "/admin/courses", icon: BookOpen },
-  { label: "Therapist", href: "/admin/therapists", icon: UsersRound },
+  { label: "Kỹ thuật viên", href: "/admin/therapists", icon: UsersRound },
   { label: "Ca làm việc", href: "/admin/shifts", icon: CalendarRange },
-  { label: "Booking", href: "/admin/bookings", icon: CalendarCheck2 },
+  { label: "Đặt lịch", href: "/admin/bookings", icon: CalendarCheck2 },
   { label: "Cấm khách", href: "/admin/restrictions", icon: UserRoundX },
 ];
 

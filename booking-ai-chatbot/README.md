@@ -16,11 +16,12 @@
   <a href="#điểm-nổi-bật">Điểm nổi bật</a> ·
   <a href="#architecture">Architecture</a> ·
   <a href="#luồng-chatbot">Luồng chatbot</a> ·
+  <a href="#rag-architecture">RAG Architecture</a> ·
   <a href="#rag-hoạt-động-như-thế-nào">RAG hoạt động như thế nào</a> ·
   <a href="#cấu-hình-chính">Cấu hình chính</a>
 </p>
 
-Booking AI Chatbot là service chatbot dùng trong popup trên website Komorebi. Hệ thống kết hợp Gemini cho NLU và NLG, state machine cho luồng đặt lịch, POS API cho dữ liệu nghiệp vụ và Qdrant cho truy xuất tri thức nội bộ.
+Booking AI Chatbot là service chatbot dùng trong popup trên website Komorebi. Hệ thống kết hợp Gemini cho NLU và NLG, state machine cho luồng đặt lịch, Booking Backend API cho dữ liệu nghiệp vụ và Qdrant cho truy xuất tri thức nội bộ.
 
 ---
 
@@ -29,8 +30,8 @@ Booking AI Chatbot là service chatbot dùng trong popup trên website Komorebi.
 LLM có thể hiểu và diễn đạt tự nhiên, nhưng các dữ liệu như cửa hàng, liệu trình, slot trống, kỹ thuật viên, khách hàng và booking phải đến từ hệ thống nghiệp vụ thật. Vì vậy chatbot được thiết kế theo hướng:
 
 1. Gemini chỉ đọc raw text để nhận diện intent và extract entity.
-2. Backend deterministic xử lý state, validate dữ liệu và gọi POS cùng Qdrant.
-3. POS là nguồn dữ liệu chính xác cho booking.
+2. Backend deterministic xử lý state, validate dữ liệu và gọi Booking Backend API cùng Qdrant.
+3. Booking Backend API là nguồn dữ liệu chính xác cho booking.
 4. Qdrant là nguồn truy xuất knowledge cho các câu hỏi FAQ và RAG.
 5. Response cuối có thể được Gemini diễn đạt lại nhưng không được phá business flow.
 
@@ -41,7 +42,7 @@ Khả năng | Chi tiết
 Hội thoại có trạng thái | `BookingContext` lưu thông tin đã xác nhận qua nhiều lượt chat
 NLU bằng Gemini | Gemini function calling extract intent và entity, sau đó Pydantic validate contract
 Business flow rõ ràng | `StateMachine` và `booking_flow.json` điều phối từng bước đặt lịch
-POS authoritative | Shop, course, slot, therapist, customer và booking transaction đều kiểm tra qua POS
+Booking backend authoritative | Shop, course, slot, therapist, customer và booking transaction đều kiểm tra qua Booking Backend API
 RAG knowledge retrieval | FAQ và thông tin tư vấn được retrieve từ Qdrant trước khi Gemini trả lời
 SSE response | Hỗ trợ stream response về frontend popup qua Server-Sent Events
 
@@ -49,52 +50,62 @@ SSE response | Hỗ trợ stream response về frontend popup qua Server-Sent Ev
 
 ```mermaid
 flowchart TD
-    U[User] --> FE[Next.js Frontend]
-    FE --> API[FastAPI Chat API]
+    subgraph CLIENT["Client"]
+        WEBSITE["Customer Website"]
+        WIDGET["Chatbot Widget"]
+        NEXT_PROXY["Next.js API Proxy"]
+    end
 
-    API --> CTX[Conversation Context]
-    CTX --> NLU[LLM NLU]
+    subgraph SERVICE["Chatbot Service"]
+        TRANSPORT["Transport<br>HTTP API · SSE"]
 
-    NLU --> FC[Function Calling]
-    FC --> VAL[Schema Validation]
-    VAL --> IP[Intent Prioritizer]
+        subgraph CORE["Core"]
+            DIALOG["Dialog Orchestration<br>NLU · State Machine · Response Policy"]
+            APPLICATION["Application Use Cases<br>Actions · Handlers · Entity Resolution"]
+            DOMAIN["Domain Model<br>BookingContext · Booking Rules · Outcomes"]
+        end
 
-    IP --> ER{Need Entity Resolution?}
+        subgraph ADAPTERS["Infrastructure Adapters"]
+            LLM_ADAPTER["LLM Adapter<br>Gemini Client"]
+            BOOKING_ADAPTER["Booking Adapter<br>Booking API Client"]
+            KNOWLEDGE_ADAPTER["Knowledge Adapter<br>Qdrant Client"]
+            SESSION_ADAPTER["Session Adapter<br>Conversation Context Store"]
+        end
+    end
 
-    ER -- Yes --> RES[Entity Resolution]
-    ER -- No --> SM[State Machine]
-    RES --> SM
+    subgraph EXTERNAL["External Services"]
+        GEMINI["Google Gemini"]
+        BOOKING_API["Booking Backend API"]
+        QDRANT["Qdrant Vector Database"]
+    end
 
-    SM --> ACTION[Action Processing]
+    WEBSITE --> WIDGET
+    WIDGET --> NEXT_PROXY
+    NEXT_PROXY --> TRANSPORT
 
-    ACTION --> POS[POS Client]
-    POS --> POSBE[POS Backend]
+    TRANSPORT --> DIALOG
+    DIALOG --> APPLICATION
+    APPLICATION --> DOMAIN
 
-    ACTION --> KB[Knowledge và FAQ]
-    KB --> QD[Qdrant]
+    DIALOG -. uses .-> LLM_ADAPTER
+    DIALOG -. persists context .-> SESSION_ADAPTER
+    APPLICATION -. calls outbound ports .-> BOOKING_ADAPTER
+    APPLICATION -. calls outbound ports .-> KNOWLEDGE_ADAPTER
 
-    POSBE --> RESULT[Outcome + Data]
-    QD --> RESULT
-    ACTION --> RESULT
-
-    RESULT --> CTXUP[Update Booking Context]
-    CTXUP --> TRANS[State Transition]
-
-    TRANS --> INST[Instruction Builder]
-    INST --> NLG[LLM NLG]
-
-    NLG --> SAVE[Save Conversation Context]
-    SAVE --> RESP[SSE và JSON Response]
-    RESP --> FE
+    LLM_ADAPTER --> GEMINI
+    BOOKING_ADAPTER --> BOOKING_API
+    KNOWLEDGE_ADAPTER --> QDRANT
 ```
 
-Các nguyên tắc kiến trúc hiện tại:
+Nguyên tắc kiến trúc:
 
-1. Raw user text được đọc bởi class `LLMNLU`.
-2. Backend deterministic chỉ xử lý structured output sau NLU.
-3. `BookingContext` chỉ được commit sau khi business pipeline hoàn tất.
-4. POS là nguồn dữ liệu nghiệp vụ authoritative cho catalog, availability và booking transaction.
-5. Qdrant chỉ đi qua nhánh FAQ và RAG, không chạy cho mọi request.
+1. `Client` chỉ hiển thị chatbot widget, gửi message và nhận stream response.
+2. `Transport` giữ HTTP contract và SSE delivery, không chứa business flow.
+3. `Dialog Orchestration` điều phối hội thoại, NLU, state transition và response policy.
+4. `Application Use Cases` xử lý các hành động nghiệp vụ như tìm cửa hàng, resolve entity, kiểm tra slot, xác minh khách hàng, tạo booking và hủy booking.
+5. `Domain Model` giữ context, rules và outcome cốt lõi, không phụ thuộc framework hay external service.
+6. `Infrastructure Adapters` là lớp kết nối ra ngoài Gemini, Booking Backend API, Qdrant và context store.
+7. Booking Backend API là nguồn dữ liệu authoritative cho catalog, availability và booking transaction; Qdrant chỉ phục vụ FAQ và RAG.
 
 ## Luồng Chatbot
 
@@ -121,7 +132,7 @@ flowchart TD
     end
 
     subgraph EXTERNAL["External Systems"]
-        POS[POS API]
+        BOOKING_API[Booking System]
         QDRANT[Qdrant Knowledge Base]
     end
 
@@ -133,9 +144,9 @@ flowchart TD
     ROUTER -->|Kiểm tra bước hội thoại phù hợp| FLOW
     FLOW -->|Điều phối thao tác cần chạy| ACTION
 
-    ACTION -->|Đặt lịch, hủy lịch, kiểm tra slot, kiểm tra khách hàng| POS
+    ACTION -->|Đặt lịch, hủy lịch| BOOKING_API
     ACTION -->|Tra cứu FAQ và tri thức nội bộ| QDRANT
-    POS -->|Dữ liệu nghiệp vụ| ACTION
+    BOOKING_API -->|Dữ liệu nghiệp vụ| ACTION
     QDRANT -->|Context liên quan| ACTION
 
     ACTION -->|Kết quả xử lý| RESPONSE
@@ -150,7 +161,7 @@ flowchart TD
 
 1. Client chỉ gửi tin nhắn và hiển thị kết quả, không quyết định nghiệp vụ.
 2. Gemini NLU hiểu nhu cầu người dùng, còn State Machine quyết định bước hội thoại hợp lệ.
-3. Business Action là nơi gọi POS hoặc Qdrant tùy theo nhu cầu đặt lịch, hủy lịch hoặc hỏi thông tin.
+3. Business Action là nơi gọi Booking Backend API hoặc Qdrant tùy theo nhu cầu đặt lịch, hủy lịch hoặc hỏi thông tin.
 4. Conversation Context được tải đầu lượt và lưu lại cuối lượt để giữ mạch hội thoại nhiều turn.
 5. Response Builder và Gemini NLG tạo câu trả lời cuối cùng trước khi stream về popup.
 
@@ -165,7 +176,7 @@ sequenceDiagram
     participant AI as Gemini NLU
     participant Flow as State Machine
     participant Service as Business Service
-    participant POS as POS System
+    participant BookingAPI as Booking Backend API
 
     User->>Popup: Muốn đặt lịch
     Popup->>Bot: Gửi tin nhắn
@@ -174,8 +185,8 @@ sequenceDiagram
     Bot->>Flow: Kiểm tra bước phù hợp trong hội thoại
     Flow-->>Bot: Chuyển sang bước chọn cửa hàng
     Bot->>Service: Yêu cầu danh sách cửa hàng
-    Service->>POS: Lấy danh sách cửa hàng đang hoạt động
-    POS-->>Service: Trả về danh sách cửa hàng
+    Service->>BookingAPI: Lấy danh sách cửa hàng đang hoạt động
+    BookingAPI-->>Service: Trả về danh sách cửa hàng
     Service-->>Bot: Chuẩn bị danh sách gợi ý
     Bot-->>Popup: Hỏi anh/chị muốn chọn cửa hàng nào
 
@@ -184,14 +195,14 @@ sequenceDiagram
     Bot->>AI: Hiểu các thông tin đặt lịch trong câu trả lời
     Bot->>Flow: Kiểm tra thông tin có đúng bước hiện tại không
     Bot->>Service: Xác thực dữ liệu nghiệp vụ
-    Service->>POS: Kiểm tra cửa hàng, thời lượng và liệu trình khi cần
-    POS-->>Service: Trả về dữ liệu hợp lệ hoặc lý do chưa hợp lệ
+    Service->>BookingAPI: Kiểm tra cửa hàng, thời lượng và liệu trình khi cần
+    BookingAPI-->>Service: Trả về dữ liệu hợp lệ hoặc lý do chưa hợp lệ
 
     User->>Popup: Chọn add-on hoặc bỏ qua
     Popup->>Bot: Gửi lựa chọn add-on
     Bot->>Service: Ghi nhận add-on hoặc bỏ qua add-on
-    Service->>POS: Kiểm tra slot trống theo toàn bộ thông tin đặt lịch
-    POS-->>Service: Trả về danh sách slot hoặc lý do không có slot
+    Service->>BookingAPI: Kiểm tra slot trống theo toàn bộ thông tin đặt lịch
+    BookingAPI-->>Service: Trả về danh sách slot hoặc lý do không có slot
 
     alt Không có slot phù hợp
         Service-->>Bot: Ngày hoặc tiêu chí hiện tại chưa có slot phù hợp
@@ -201,8 +212,8 @@ sequenceDiagram
         User->>Popup: Chọn giờ bắt đầu
         Popup->>Bot: Gửi giờ đã chọn
         Bot->>Service: Kiểm tra lại slot đã chọn
-        Service->>POS: Xác thực slot theo giờ bắt đầu
-        POS-->>Service: Slot hợp lệ
+        Service->>BookingAPI: Xác thực slot theo giờ bắt đầu
+        BookingAPI-->>Service: Slot hợp lệ
     end
 
     alt Booking một người
@@ -210,8 +221,8 @@ sequenceDiagram
         User->>Popup: Chọn kỹ thuật viên, giới tính hoặc không yêu cầu
         Popup->>Bot: Gửi lựa chọn kỹ thuật viên
         Bot->>Service: Ghi nhận hoặc kiểm tra yêu cầu kỹ thuật viên
-        Service->>POS: Kiểm tra lịch làm việc kỹ thuật viên nếu có yêu cầu
-        POS-->>Service: Kỹ thuật viên hợp lệ
+        Service->>BookingAPI: Kiểm tra lịch làm việc kỹ thuật viên nếu có yêu cầu
+        BookingAPI-->>Service: Kỹ thuật viên hợp lệ
     else Booking hai đến ba người
         Bot->>Service: Bỏ qua chọn kỹ thuật viên theo quy định booking nhóm
     end
@@ -220,8 +231,8 @@ sequenceDiagram
     User->>Popup: Nhập số điện thoại
     Popup->>Bot: Gửi số điện thoại
     Bot->>Service: Kiểm tra thông tin khách hàng
-    Service->>POS: Tra khách hàng và danh sách hạn chế
-    POS-->>Service: Khách hàng hợp lệ hoặc cần bổ sung tên
+    Service->>BookingAPI: Tra khách hàng và danh sách hạn chế
+    BookingAPI-->>Service: Khách hàng hợp lệ hoặc cần bổ sung tên
 
     alt Chưa có tên khách hàng
         Bot-->>Popup: Hỏi tên khách hàng
@@ -234,10 +245,10 @@ sequenceDiagram
     User->>Popup: Xác nhận
     Popup->>Bot: Gửi xác nhận cuối cùng
     Bot->>Service: Tạo booking chính thức
-    Service->>POS: Kiểm tra availability lần cuối
-    POS-->>Service: Slot vẫn còn hợp lệ
-    Service->>POS: Tạo booking với mã chống gửi trùng
-    POS-->>Service: Booking được tạo thành công
+    Service->>BookingAPI: Kiểm tra availability lần cuối
+    BookingAPI-->>Service: Slot vẫn còn hợp lệ
+    Service->>BookingAPI: Tạo booking với mã chống gửi trùng
+    BookingAPI-->>Service: Booking được tạo thành công
     Bot-->>Popup: Thông báo đặt lịch thành công
     Bot->>Flow: Đưa cuộc trò chuyện về trạng thái sẵn sàng nhận yêu cầu mới
 ```
@@ -260,7 +271,7 @@ sequenceDiagram
     participant AI as Gemini NLU
     participant Flow as State Machine
     participant Service as Business Service
-    participant POS as POS System
+    participant BookingAPI as Booking Backend API
 
     User->>Popup: Muốn hủy booking
     Popup->>Bot: Gửi tin nhắn
@@ -276,8 +287,8 @@ sequenceDiagram
     end
 
     Bot->>Service: Tìm booking cần hủy
-    Service->>POS: Tra booking theo mã booking và số điện thoại
-    POS-->>Service: Trả về booking hoặc lý do không thể hủy
+    Service->>BookingAPI: Tra booking theo mã booking và số điện thoại
+    BookingAPI-->>Service: Trả về booking hoặc lý do không thể hủy
 
     alt Không tìm thấy booking
         Service-->>Bot: Không tìm thấy booking phù hợp
@@ -297,8 +308,8 @@ sequenceDiagram
             Bot->>Flow: Quay về trạng thái sẵn sàng nhận yêu cầu mới
         else User xác nhận hủy
             Bot->>Service: Thực hiện hủy booking
-            Service->>POS: Gọi API hủy booking
-            POS-->>Service: Kết quả hủy
+            Service->>BookingAPI: Gọi API hủy booking
+            BookingAPI-->>Service: Kết quả hủy
 
             alt Hủy thất bại
                 Service-->>Bot: Chưa thể hủy booking
@@ -317,12 +328,64 @@ Business rule chính:
 1. Chatbot không hủy booking ngay khi người dùng chỉ nói muốn hủy.
 2. Hệ thống bắt buộc kiểm tra bằng mã booking và số điện thoại đặt lịch.
 3. Khi tìm thấy booking, chatbot phải hiển thị thông tin để người dùng xác nhận trước.
-4. Chỉ khi người dùng xác nhận, hệ thống mới gọi POS API để hủy booking.
+4. Chỉ khi người dùng xác nhận, hệ thống mới gọi Booking Backend API để hủy booking.
 5. Sau khi hủy thành công hoặc từ chối hủy, session quay lại `idle` để nhận yêu cầu mới.
 
 ## RAG Hoạt Động Như Thế Nào
 
 RAG bổ sung một pipeline truy xuất tri thức trước khi Gemini sinh câu trả lời. Trong project hiện tại, `rag_v1` không chỉ dùng vector search mà còn kết hợp semantic search, BM25 keyword search, RRF fusion và reranker để chọn context tốt hơn.
+
+### RAG Architecture
+
+Sơ đồ này mô tả kiến trúc RAG ở mức cơ bản, bám theo các component chính trong `rag_v1`: loader, chunker, embedding, Qdrant, semantic search, keyword search, fusion, reranker và Gemini.
+
+```mermaid
+flowchart LR
+    DOCS["Knowledge Files<br>Markdown Text PDF DOCX"]
+    LOADER["DocumentLoader<br>load documents"]
+    CHUNKER["DocumentChunker<br>split text into chunks"]
+    EMBEDDER["EmbeddingModel<br>create vectors"]
+    QDRANT["Qdrant<br>vectors and chunk payloads"]
+
+    QUESTION["User Question"]
+    FAQ["FAQManager<br>route FAQ request"]
+    RAG["RAGService<br>orchestrate answer"]
+    RETRIEVER["Retriever<br>find candidate chunks"]
+    SEMANTIC["Semantic Search<br>vector similarity"]
+    KEYWORD["BM25 Keyword Search<br>keyword matching"]
+    FUSION["RRF Fusion<br>merge results"]
+    RERANKER["PhoRanker Reranker<br>rank best context"]
+    PROMPT["PromptBuilder<br>context and question"]
+    GEMINI["Gemini<br>grounded answer"]
+
+    DOCS --> LOADER
+    LOADER --> CHUNKER
+    CHUNKER --> EMBEDDER
+    EMBEDDER --> QDRANT
+
+    QUESTION --> FAQ
+    FAQ --> RAG
+    RAG --> RETRIEVER
+    RETRIEVER --> SEMANTIC
+    RETRIEVER --> KEYWORD
+    SEMANTIC --> QDRANT
+    KEYWORD --> QDRANT
+    QDRANT --> FUSION
+    FUSION --> RERANKER
+    RERANKER --> PROMPT
+    PROMPT --> GEMINI
+```
+
+Các component chính:
+
+1. `DocumentLoader` đọc file knowledge từ Markdown, text, PDF và DOCX.
+2. `DocumentChunker` chia nội dung thành các chunk nhỏ có overlap.
+3. `EmbeddingModel` tạo vector cho chunk khi index và cho câu hỏi khi truy vấn.
+4. `Qdrant` lưu vector cùng payload text/source/chunk index.
+5. `Retriever` kết hợp semantic search và BM25 keyword search để lấy candidate context.
+6. `RRF Fusion` gộp kết quả từ hai hướng search trước khi rerank.
+7. `PhoRanker Reranker` chọn context phù hợp nhất cho câu hỏi.
+8. `PromptBuilder` ghép context với câu hỏi trước khi gửi Gemini sinh câu trả lời.
 
 ### Giai Đoạn Query
 
@@ -371,7 +434,7 @@ Nguyên tắc vận hành:
 5. PhoRanker reranker chấm lại candidate bằng cặp `query + chunk text` để chọn context cuối cùng.
 6. Gemini chỉ nên trả lời dựa trên context đã retrieve và rerank.
 7. Nếu không tìm thấy dữ liệu phù hợp, chatbot cần nói rõ chưa có thông tin trong knowledge base.
-8. Các thao tác đặt lịch, hủy lịch, validate slot và kiểm tra khách hàng luôn đi qua POS API.
+8. Các thao tác đặt lịch, hủy lịch, validate slot và kiểm tra khách hàng luôn đi qua Booking Backend API.
 
 ### Pipeline RAG Nội Bộ
 
@@ -469,7 +532,7 @@ Chạy lại indexing khi:
 
 Biến | Mục đích
 --- | ---
-`BOOKING_API_URL` | Base URL của POS backend
+`BOOKING_API_URL` | Base URL của Booking Backend API
 `GEMINI_API_KEY` | API key dùng cho Gemini NLU và NLG
 `GEMINI_BASE_URL` | Endpoint OpenAI-compatible của Gemini
 `GEMINI_MODEL` | Model Gemini chính
