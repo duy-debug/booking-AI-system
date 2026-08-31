@@ -28,7 +28,7 @@ type SidebarItem = {
 const sidebarItems: SidebarItem[] = [
   { label: "Tổng quan", href: "/admin", icon: LayoutDashboard },
   { label: "Cửa hàng", href: "/admin/shops", icon: Store },
-  { label: "Course", href: "/admin/courses", icon: BookOpen },
+  { label: "Dịch vụ", href: "/admin/courses", icon: BookOpen },
   { label: "Kỹ thuật viên", href: "/admin/therapists", icon: UsersRound },
   { label: "Ca làm việc", href: "/admin/shifts", icon: CalendarRange },
   { label: "Đặt lịch", href: "/admin/bookings", icon: CalendarCheck2 },

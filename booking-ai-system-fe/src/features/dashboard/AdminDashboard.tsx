@@ -16,7 +16,7 @@ import { AdminDataState } from "@/shared/components/admin/AdminUi";
 const modules = [
   { href: "/admin/bookings", label: "Đặt lịch", description: "Theo dõi timeline và tạo lịch hẹn", icon: CalendarCheck2, tone: "bg-blue-50 text-blue-700" },
   { href: "/admin/shops", label: "Cửa hàng", description: "Quản lý chi nhánh và cấu hình nghỉ", icon: Store, tone: "bg-emerald-50 text-emerald-700" },
-  { href: "/admin/courses", label: "Course", description: "Quản lý dịch vụ chính và add-on", icon: BookOpen, tone: "bg-violet-50 text-violet-700" },
+  { href: "/admin/courses", label: "Dịch vụ", description: "Quản lý dịch vụ chính và add-on", icon: BookOpen, tone: "bg-violet-50 text-violet-700" },
   { href: "/admin/therapists", label: "Kỹ thuật viên", description: "Quản lý nhân viên theo shop", icon: UsersRound, tone: "bg-cyan-50 text-cyan-700" },
   { href: "/admin/shifts", label: "Ca làm việc", description: "Xếp lịch làm việc theo ngày", icon: CalendarRange, tone: "bg-amber-50 text-amber-700" },
   { href: "/admin/restrictions", label: "Hạn chế khách", description: "Quản lý số điện thoại bị hạn chế", icon: ShieldBan, tone: "bg-red-50 text-red-700" },
