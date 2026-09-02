@@ -7,20 +7,6 @@ services:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
 
-  redis:
-    image: redis:7-alpine
-    command: redis-server --appendonly yes
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    restart: unless-stopped
-
   backend:
     build: ./booking-ai-system-be
     ports:
@@ -38,10 +24,7 @@ services:
         condition: service_started
       qdrant:
         condition: service_started
-      redis:
-        condition: service_healthy
     environment:
-      REDIS_URL: redis://redis:6379/0
       QDRANT_HOST: qdrant
       BOOKING_API_URL: http://backend:8000
       LOG_FILE: /app/logs/chatbot.log
@@ -75,4 +58,3 @@ services:
 
 volumes:
   qdrant_data:
-  redis_data:
