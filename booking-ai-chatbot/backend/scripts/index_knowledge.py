@@ -53,7 +53,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--knowledge-dir",
-        default="knowledge",
+        default=str(BACKEND_ROOT / "knowledge"),
         help="Folder containing knowledge files. Default: knowledge",
     )
     parser.add_argument(
@@ -73,7 +73,7 @@ def _build_parser() -> argparse.ArgumentParser:
 # load file knowledge -> chunk -> embedding -> upsert vào Qdrant runtime collection.
 def main() -> None:
     # Load .env để script dùng cùng Qdrant host/port/collection với chatbot runtime.
-    load_dotenv()
+    load_dotenv(BACKEND_ROOT / ".env")
     args = _build_parser().parse_args()
 
     knowledge_dir = Path(args.knowledge_dir)
