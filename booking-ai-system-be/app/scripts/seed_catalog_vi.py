@@ -33,13 +33,8 @@ MAIN_PRICE_BY_DURATION = {
     90: 790000,
 }
 
-ADDON_PRICE_BY_DURATION = {
-    30: 180000,
-    45: 245000,
-    60: 310000,
-    75: 380000,
-    90: 450000,
-}
+ADDON_DURATION_MINUTES = 30
+ADDON_PRICE = 180000
 
 
 # Mỗi course trong database chỉ có một duration, nên seed tạo nhiều biến thể
@@ -59,6 +54,23 @@ def _expand_course_variants(
         )
         for code, name in items
         for duration in COURSE_DURATIONS
+    ]
+
+
+# Add-on la dich vu phu co dinh, khong tao nhieu bien the duration de chatbot
+# co the resolve theo ten ma khong bi ambiguous trong cung mot cua hang.
+def _build_fixed_addons(
+    items: list[tuple[str, str]],
+) -> list[tuple[str, str, int, str, str]]:
+    return [
+        (
+            code,
+            name,
+            ADDON_DURATION_MINUTES,
+            str(ADDON_PRICE),
+            "addon",
+        )
+        for code, name in items
     ]
 
 
@@ -148,7 +160,7 @@ COURSE_CATALOG = {
 COURSE_TEMPLATES = {
     shop_code: (
         _expand_course_variants(items["main"], "main", MAIN_PRICE_BY_DURATION)
-        + _expand_course_variants(items["addon"], "addon", ADDON_PRICE_BY_DURATION)
+        + _build_fixed_addons(items["addon"])
     )
     for shop_code, items in COURSE_CATALOG.items()
 }

@@ -12,6 +12,7 @@ from app.dialog.dialog_controller import DialogTurnResult, DialogTurnStatus
 from app.dialog.instruction_builder import (
     DialogResponseDraft,
     DuplicateInstructionTemplateError,
+    format_service_step_response,
     InstructionBuilder,
     InstructionRenderingError,
     InvalidInstructionTemplateNameError,
@@ -413,3 +414,51 @@ def test_metadata_is_immutable_and_filters_sensitive_or_invalid_values() -> None
     assert isinstance(response.metadata, MappingProxyType)
     with pytest.raises(TypeError):
         response.metadata["booking_created"] = False  # type: ignore[index]
+
+
+def test_addon_catalog_includes_duration_when_names_are_duplicated() -> None:
+    context = ready_context(state=BookingState.SELECTING_SERVICE)
+    context.addons = ()
+    first = Course(
+        UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+        "Ngâm chân gừng ấm",
+        15,
+        Decimal("90000"),
+        CourseType.ADDON,
+    )
+    second = Course(
+        UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        "Ngâm chân gừng ấm",
+        30,
+        Decimal("150000"),
+        CourseType.ADDON,
+    )
+
+    response = format_service_step_response(
+        context,
+        [first, second],
+        course_type=CourseType.ADDON,
+    )
+
+    assert "1. Ngâm chân gừng ấm (15 phút)" in response.text
+    assert "2. Ngâm chân gừng ấm (30 phút)" in response.text
+
+
+def test_main_course_catalog_keeps_name_only_because_duration_is_selected() -> None:
+    context = ready_context(state=BookingState.SELECTING_SERVICE)
+    main_course = Course(
+        UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+        "Massage phục hồi cơ sâu",
+        90,
+        Decimal("600000"),
+        CourseType.MAIN,
+    )
+
+    response = format_service_step_response(
+        context,
+        [main_course],
+        course_type=CourseType.MAIN,
+    )
+
+    assert "1. Massage phục hồi cơ sâu" in response.text
+    assert "Massage phục hồi cơ sâu (90 phút)" not in response.text

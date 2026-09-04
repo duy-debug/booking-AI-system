@@ -1276,7 +1276,7 @@ def format_service_catalog_response(
         text = (
             f"Liệu trình chính đã chọn: {context.main_course.name}.\n"
             "Các add-on có thể chọn thêm:\n"
-            + numbered_course_names(visible)
+            + numbered_course_names(visible, include_duration=True)
             + "\nAnh/chị hãy chọn một add-on hoặc bỏ qua bước này."
         )
     else:
@@ -1324,13 +1324,22 @@ def format_course_not_found_response(
         f"{noun.capitalize()}{requested_text} hiện không có hoặc chưa phù hợp "
         f"tại {shop_name}{duration_text}.\n"
         f"Anh/chị có thể chọn một {noun} đang hỗ trợ bên dưới:\n"
-        + numbered_course_names(visible)
+        + numbered_course_names(visible, include_duration=course_type is CourseType.ADDON)
     )
     return build_catalog_response(context, text, len(courses))
 
 
-def numbered_course_names(courses: list[Course]) -> str:
-    return "\n".join(f"{index}. {service.name}" for index, service in enumerate(courses[:8], 1))
+def numbered_course_names(
+    courses: list[Course],
+    *,
+    include_duration: bool = False,
+) -> str:
+    def label(service: Course) -> str:
+        if include_duration:
+            return f"{service.name} ({service.duration_minutes} phút)"
+        return service.name
+
+    return "\n".join(f"{index}. {label(service)}" for index, service in enumerate(courses[:8], 1))
 
 
 def people_recovery_suggestion_options() -> tuple[str, ...]:
