@@ -47,6 +47,78 @@ Chatbot không truy cập trực tiếp vào các bảng booking. Những dữ l
 
 ---
 
+## Hình ảnh minh họa
+
+### Giao diện quản trị booking
+
+<details>
+<summary>Xem thêm giao diện quản trị</summary>
+
+<p align="center">
+  <img src="docs/assets/images/admin/Screenshot%202026-08-31%20201809.png" alt="Giao diện quản trị lịch booking" width="920" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/images/admin/Screenshot%202026-08-31%20201930.png" alt="Chi tiết giao diện quản trị booking" width="920" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/images/admin/Screenshot%202026-08-31%20204046.png" alt="Màn hình quản trị booking" width="920" />
+</p>
+
+</details>
+
+### Luồng chatbot đặt lịch
+
+<details>
+<summary>Xem đầy đủ flow chatbot booking</summary>
+
+<p align="center">
+  <img src="docs/assets/images/chatbot/Screenshot%202026-09-02%20222303.png" alt="Chatbot bắt đầu luồng đặt lịch" width="260" />
+  <img src="docs/assets/images/chatbot/Screenshot%202026-09-02%20222336.png" alt="Chatbot chọn thông tin đặt lịch" width="260" />
+  <img src="docs/assets/images/chatbot/Screenshot%202026-09-02%20222352.png" alt="Chatbot xác nhận thông tin đặt lịch" width="260" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/images/chatbot/Screenshot%202026-09-02%20222418.png" alt="Chatbot booking step 4" width="260" />
+  <img src="docs/assets/images/chatbot/Screenshot%202026-09-02%20222447.png" alt="Chatbot booking step 5" width="260" />
+  <img src="docs/assets/images/chatbot/Screenshot%202026-09-02%20222511.png" alt="Chatbot booking step 6" width="260" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/images/chatbot/Screenshot%202026-09-02%20222531.png" alt="Chatbot booking step 7" width="260" />
+  <img src="docs/assets/images/chatbot/Screenshot%202026-09-02%20222602.png" alt="Chatbot booking step 8" width="260" />
+  <img src="docs/assets/images/chatbot/Screenshot%202026-09-02%20222628.png" alt="Chatbot booking step 9" width="260" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/images/chatbot/Screenshot%202026-09-02%20222707.png" alt="Chatbot booking step 10" width="260" />
+  <img src="docs/assets/images/chatbot/Screenshot%202026-09-02%20222731.png" alt="Chatbot booking step 11" width="260" />
+  <img src="docs/assets/images/chatbot/Screenshot%202026-09-02%20222803.png" alt="Chatbot booking step 12" width="260" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/images/chatbot/Screenshot%202026-09-02%20222951.png" alt="Chatbot booking complete" width="260" />
+</p>
+
+</details>
+
+### Truy xuất tri thức bằng RAG
+
+<details>
+<summary>Xem ví dụ chatbot trả lời bằng RAG</summary>
+
+<p align="center">
+  <img src="docs/assets/images/rag/Screenshot%202026-09-02%20224147.png" alt="Chatbot trả lời câu hỏi bằng RAG" width="280" />
+  <img src="docs/assets/images/rag/Screenshot%202026-09-02%20224225.png" alt="RAG truy xuất thông tin dịch vụ" width="280" />
+  <img src="docs/assets/images/rag/Screenshot%202026-09-02%20224315.png" alt="RAG trả lời theo knowledge base" width="280" />
+  <img src="docs/assets/images/rag/Screenshot%202026-09-02%20224441.png" alt="RAG trả lời theo knowledge base nhưng không có thông tin" width="280" />
+</p>
+
+</details>
+
+---
+
 ## Kiến trúc hệ thống
 
 ```mermaid
